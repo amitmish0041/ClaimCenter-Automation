@@ -1,0 +1,9 @@
+﻿node_modules/
+test-results/
+playwright-report/
+results/
+*.log
+.env
+.env.local
+.DS_Store
+Thumbds.db

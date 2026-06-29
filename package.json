@@ -1,0 +1,22 @@
+{
+  "name": "claimcenter-automation",
+  "version": "1.0.0",
+  "description": "Playwright automation for Donegal ClaimCenter Guidewire Cloud",
+  "scripts": {
+    "test:fnol"      : "npx playwright test --project=\"FNOL - All LOBs\"",
+    "test:financials" : "npx playwright test --project=\"Financials\"",
+    "test:approval"  : "npx playwright test --project=\"Approval Routing\"",
+    "test:lifecycle" : "npx playwright test --project=\"Claim Lifecycle\"",
+    "test:smoke"     : "npx playwright test --project=\"Smoke - All\"",
+    "test:all"       : "npx playwright test",
+    "test:report"    : "npx playwright show-report",
+    "excel"          : "node reporters/generateExcelReport.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.45.0",
+    "xlsx": "^0.18.5"
+  }
+}
