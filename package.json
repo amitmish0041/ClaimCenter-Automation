@@ -1,18 +1,21 @@
 {
   "name": "claimcenter-automation",
   "version": "1.0.0",
-  "description": "Playwright automation for Donegal ClaimCenter Guidewire Cloud",
+  "description": "Playwright automation for Donegal ClaimCenter - On-Prem and Cloud",
   "scripts": {
-    "test:fnol"      : "npx playwright test --project=\"FNOL - All LOBs\"",
-    "test:financials" : "npx playwright test --project=\"Financials\"",
-    "test:approval"  : "npx playwright test --project=\"Approval Routing\"",
-    "test:lifecycle" : "npx playwright test --project=\"Claim Lifecycle\"",
-    "test:smoke"     : "npx playwright test --project=\"Smoke - All\"",
-    "test:all"       : "npx playwright test",
-    "test:report"    : "npx playwright show-report",
-    "excel"          : "node reporters/generateExcelReport.js"
+    "test:fnol": "npx playwright test --project=\"FNOL - All LOBs\"",
+    "test:financials": "npx playwright test --project=\"Financials\"",
+    "test:approval": "npx playwright test --project=\"Approval Routing\"",
+    "test:lifecycle": "npx playwright test --project=\"Claim Lifecycle\"",
+    "test:all": "npx playwright test",
+    "test:report": "npx playwright show-report",
+    "excel": "node reporters/generateExcelReport.js",
+    "run:onprem": "cross-env CC_ENV=onprem CC_BASE_URL=http://test-claimcenter.donegalgroup.com/cc/ClaimCenter.do npx playwright test",
+    "run:cloud": "cross-env CC_ENV=cloud npx playwright test",
+    "run:compare": "npm run run:onprem && npm run run:cloud && node reporters/compareResults.js"
   },
   "dependencies": {
+    "cross-env": "^7.0.3",
     "dotenv": "^16.0.0"
   },
   "devDependencies": {
