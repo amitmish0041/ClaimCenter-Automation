@@ -1,6 +1,7 @@
 /**
  * helpers/claimCenterBase.js
  * Core login, navigation, field helpers and wait utilities for GW ClaimCenter Cloud.
+ * Login selectors confirmed for Guidewire ExtJS Cloud UI.
  */
 require('dotenv').config();
 const { expect } = require('@playwright/test');
@@ -9,18 +10,59 @@ const BASE_URL    = process.env.CC_BASE_URL || 'https://donegal-cc.guidewire.net
 const MAX_POLL_MS = 60_000;
 const POLL_INT    = 2_000;
 
+// ── Login ─────────────────────────────────────────────────────────────────────
+// Selectors confirmed from GW ExtJS Cloud login page inspection
+const CC_SELECTORS = {
+  username : '#Login\\:LoginScreen\\:LoginDV\\:username-inputEl',
+  password : '#Login\\:LoginScreen\\:LoginDV\\:password-inputEl',
+  submit   : '#Login\\:LoginScreen\\:LoginDV\\:submit-btnInnerEl',
+  // Fallbacks using name attribute (more stable across GW versions)
+  userByName: 'input[name="Login:LoginScreen:LoginDV:username"]',
+  passById  : 'input[name="Login:LoginScreen:LoginDV:password"]',
+};
+
 async function loginToClaimCenter(page) {
   const user = process.env.CC_USER;
   const pass = process.env.CC_PASS;
   if (!user || !pass) throw new Error('Set CC_USER and CC_PASS in .env');
+
   await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
-  await page.fill('#USERNAME', user);
-  await page.fill('#PASSWORD', pass);
-  await page.click('input[type="submit"]');
-  await page.waitForSelector('#TabBar', { timeout: 30_000 });
-  console.log('CC Login successful');
+
+  // Wait for login form
+  await page.waitForSelector(
+    'input[name="Login:LoginScreen:LoginDV:username"]',
+    { timeout: 30_000 }
+  );
+
+  // Fill username — use name attribute (most reliable in GW ExtJS)
+  await page.locator('input[name="Login:LoginScreen:LoginDV:username"]').fill(user);
+  console.log('Username entered');
+
+  // Fill password
+  await page.locator('input[name="Login:LoginScreen:LoginDV:password"]').fill(pass);
+  console.log('Password entered');
+
+  // Click Log In button — click the button container, not just the span
+  await page.locator('#Login\\:LoginScreen\\:LoginDV\\:submit-btnInnerEl').click();
+
+  // Fallback: if span click didn't fire, try clicking the parent button
+  await page.waitForTimeout(1000);
+  const stillOnLogin = page.url().toLowerCase().includes('login');
+  if (stillOnLogin) {
+    // Try clicking the button element wrapping the span
+    await page.locator('[id*="LoginDV"][id*="submit"]').first().click();
+    console.log('Login button clicked via fallback');
+  }
+
+  // Wait for CC desktop to load after login
+  await page.waitForFunction(() => {
+    return !document.querySelector('input[name="Login:LoginScreen:LoginDV:username"]');
+  }, { timeout: 30_000 });
+
+  console.log('CC Login successful — URL: ' + page.url());
 }
 
+// ── Navigation ────────────────────────────────────────────────────────────────
 async function waitForEnabled(page, selector, timeout = MAX_POLL_MS) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
@@ -103,7 +145,7 @@ async function elementExists(page, selector) {
 }
 
 module.exports = {
-  BASE_URL, MAX_POLL_MS, POLL_INT,
+  BASE_URL, MAX_POLL_MS, POLL_INT, CC_SELECTORS,
   loginToClaimCenter, waitForEnabled, selectDropdown,
   fillTextField, fillIntegerCommaField, fillDateField,
   dismissNotification, clickSave, pollForClaimNumber,
