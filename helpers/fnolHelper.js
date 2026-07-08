@@ -22,7 +22,7 @@ const LOB_CONFIG = {
   FarmFire:                 { topStates: ['PA','VA'], topCoverages: ['Farmowners Building','Liability'], lossCauses: { fire:'LC01' } },
 };
 
-// ── Helper: select first non-none option from a <select> ─────────────────────
+// ── Helper: select first non-none option from a native <select> ───────────────
 async function selectFirstOption(page, selector) {
   const el = page.locator(selector).first();
   if (!await el.isVisible({ timeout: 3000 }).catch(() => false)) return;
@@ -77,7 +77,6 @@ async function searchPolicy(page, policyNumber, lossDate) {
   } else {
     await clickNewClaimCloud(page);
 
-    // Loss Date is required for search
     let lossDateField = page.getByRole('textbox', { name: /Loss Date/i });
     let lossDateVisible = await lossDateField.waitFor({ state: 'visible', timeout: 10000 })
       .then(() => true).catch(() => false);
@@ -96,7 +95,7 @@ async function searchPolicy(page, policyNumber, lossDate) {
     await page.waitForLoadState('domcontentloaded').catch(() => {});
     console.log('Policy search submitted');
 
-    // Click Next after search — no row selection needed
+    // Click Next after search results — no row selection needed
     await page.getByRole('button', { name: 'Next' }).click();
     await page.waitForLoadState('domcontentloaded');
     console.log('Policy search Next clicked → Step 2');
@@ -107,38 +106,77 @@ async function searchPolicy(page, policyNumber, lossDate) {
 async function fillBasicInfo(page) {
   console.log('FNOL Step 2: Basic Info...');
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(1000);
 
-  // How Reported — first non-none
-  await selectFirstOption(page, '[id*="HowReported"], [id*="howReported"]');
+  // Wait for form to render
+  await page.waitForSelector('select', { timeout: 10000 }).catch(() => {});
 
-  // Reported By Name — first non-none
-  await selectFirstOption(page, '[id*="ReportedBy"][id*="Name"], [id*="reportedByName"]');
+  // Log all selects for debugging — helps identify actual IDs in GW cloud
+  const allSels = await page.locator('select').all();
+  console.log('Total selects found: ' + allSels.length);
+  for (let i = 0; i < allSels.length; i++) {
+    const id   = await allSels[i].getAttribute('id').catch(() => '?');
+    const val  = await allSels[i].inputValue().catch(() => '?');
+    const opts = await allSels[i].locator('option').count().catch(() => 0);
+    console.log('  select[' + i + '] id=' + id + ' val=' + val + ' options=' + opts);
+  }
 
-  // Relation to Insured — first non-none
-  await selectFirstOption(page, '[id*="RelationToInsured"]:not([id*="MainContact"]), [id*="Relationship"]:not([id*="MainContact"])');
+  // Iterate all selects and fill by ID keyword matching
+  const allSelects = page.locator('select');
+  const selCount = await allSelects.count().catch(() => 0);
 
-  // Mobile Phone
-  const phoneField = page.locator('[id*="Phone"], [id*="phone"]').first();
+  for (let i = 0; i < selCount; i++) {
+    const sel = allSelects.nth(i);
+    const id = await sel.getAttribute('id').catch(() => '');
+    const currentVal = await sel.inputValue().catch(() => '');
+
+    // Skip if already has a real value
+    if (currentVal && currentVal !== 'none' && currentVal !== '') continue;
+
+    const firstOpt = await sel.locator('option:not([value=""]):not([value="none"])').first()
+      .getAttribute('value').catch(() => null);
+    if (!firstOpt) continue;
+
+    const idL = id.toLowerCase();
+
+    if (idL.includes('howreported')) {
+      await sel.selectOption(firstOpt);
+      console.log('How Reported => ' + firstOpt);
+      await page.waitForTimeout(500);
+    } else if (idL.includes('name') && !idL.includes('maincontact') && !idL.includes('insured') && !idL.includes('first') && !idL.includes('last')) {
+      await sel.selectOption(firstOpt);
+      console.log('Reported By Name => ' + firstOpt);
+      await page.waitForTimeout(500);
+    } else if ((idL.includes('relation') || idL.includes('relationship')) && !idL.includes('maincontact')) {
+      await sel.selectOption(firstOpt);
+      console.log('Relation to Insured => ' + firstOpt);
+      await page.waitForTimeout(500);
+    } else if (idL.includes('maincontact') && idL.includes('name')) {
+      await sel.selectOption(firstOpt);
+      console.log('Main Contact Name => ' + firstOpt);
+      await page.waitForTimeout(500);
+    } else if (idL.includes('maincontact') && idL.includes('relation')) {
+      await sel.selectOption(firstOpt);
+      console.log('Main Contact Relation => ' + firstOpt);
+      await page.waitForTimeout(500);
+    }
+  }
+
+  // Phone
+  const phoneField = page.locator('input[id*="Phone"], input[id*="phone"]').first();
   if (await phoneField.isVisible({ timeout: 3000 }).catch(() => false)) {
     await phoneField.fill('7175551234');
     console.log('Phone: 7175551234');
   }
 
-  // Main Contact Name — first non-none
-  await selectFirstOption(page, '[id*="MainContact"][id*="Name"]');
-
-  // Main Contact Relation to Insured — first non-none
-  await selectFirstOption(page, '[id*="MainContact"][id*="Relation"]');
-
-  // Select first vehicle from right panel
+  // Select first vehicle checkbox from right panel
   const vehicleCheckboxes = page.locator('input[type="checkbox"]');
   const cbCount = await vehicleCheckboxes.count().catch(() => 0);
   if (cbCount > 0) {
     await vehicleCheckboxes.first().check({ force: true });
     console.log('First vehicle checkbox checked');
   } else {
-    const vinLabel = page.locator('text=/VIN#:/').first();
+    const vinLabel = page.locator('text=/VIN#/').first();
     if (await vinLabel.isVisible({ timeout: 2000 }).catch(() => false)) {
       await vinLabel.click({ force: true });
       console.log('First vehicle selected via VIN label');
@@ -170,9 +208,9 @@ async function fillLossDetailsCloud(page, {
     await coverageNoRadio.click({ force: true });
     console.log('Coverage in Question: No');
   } else {
-    const noRadios = page.locator('[id*="CoverageInQuestion"] [type="radio"]').last();
-    if (await noRadios.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await noRadios.click({ force: true });
+    const noRadio = page.locator('[id*="CoverageInQuestion"] [type="radio"]').last();
+    if (await noRadio.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await noRadio.click({ force: true });
       console.log('Coverage in Question: No (fallback)');
     }
   }
@@ -300,8 +338,8 @@ async function completeFNOL(page, { policyNumber, lossDetails, claimantInfo, exp
 
   // Step 3 — Loss Details
   await fillLossDetailsCloud(page, {
-    lossState    : (lossDetails && lossDetails.lossState)     || 'PA',
-    lossCauseCode: (lossDetails && lossDetails.lossCauseCode) || '',
+    lossState    : (lossDetails && lossDetails.lossState)      || 'PA',
+    lossCauseCode: (lossDetails && lossDetails.lossCauseCode)  || '',
     whatHappened : (lossDetails && lossDetails.lossDescription) || 'Automated FNOL test submission.',
   });
 
