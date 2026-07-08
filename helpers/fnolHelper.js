@@ -37,8 +37,6 @@ async function selectFirstOption(page, selector) {
 
 // ── clickNewClaimCloud ────────────────────────────────────────────────────────
 async function clickNewClaimCloud(page) {
-  // The dropdown only opens via the aria-hidden expand button (.gw-action--expand-button)
-  // NOT via the [role="menuitem"] inner div (that switches to an already-open claim tab).
   const expandBtn = page.locator('#TabBar-ClaimTab .gw-action--expand-button').first();
   await expandBtn.waitFor({ state: 'attached', timeout: 10000 });
   await expandBtn.click({ force: true });
@@ -58,15 +56,12 @@ async function clickNewClaimCloud(page) {
     }, { timeout: 5000 }).catch(() => {});
   }
 
-  // New Claim is the first uniquely-identified item in the submenu
   const newClaimInner = page.locator('#TabBar-ClaimTab-ClaimTab_FNOLWizard [role="menuitem"]').first();
   await newClaimInner.waitFor({ state: 'attached', timeout: 5000 });
   await newClaimInner.click({ force: true });
   console.log('New Claim clicked');
 
   await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
-
-  // Confirm we landed on Find Policy step (not an existing claim)
   await page.getByRole('textbox', { name: 'Policy #' }).waitFor({ state: 'visible', timeout: 15000 });
   console.log('Find Policy screen confirmed');
 }
@@ -100,34 +95,12 @@ async function searchPolicy(page, policyNumber, lossDate) {
     await page.getByRole('button', { name: 'Search', exact: true }).click();
     await page.waitForLoadState('domcontentloaded').catch(() => {});
     console.log('Policy search submitted');
+
+    // Click Next after search — no row selection needed
+    await page.getByRole('button', { name: 'Next' }).click();
+    await page.waitForLoadState('domcontentloaded');
+    console.log('Policy search Next clicked → Step 2');
   }
-}
-
-// ── selectPolicyResult ────────────────────────────────────────────────────────
-async function selectPolicyResult(page, rowIndex = 0) {
-  // Target the policy number button by GW ID pattern
-  const policyBtn = page.locator('[id*="PolicyResultLV-' + rowIndex + '-PolicyNumber_button"]').first();
-
-  if (await policyBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-    const policyNum = await policyBtn.innerText().catch(() => '');
-    await policyBtn.evaluate(el => el.click());
-    console.log('Policy selected (row ' + rowIndex + '): ' + policyNum);
-  } else {
-    // Fallback: any policy number button
-    const anyPolicyBtn = page.locator('[id*="PolicyResultLV"][id*="PolicyNumber_button"]').first();
-    if (await anyPolicyBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      const policyNum = await anyPolicyBtn.innerText().catch(() => '');
-      await anyPolicyBtn.evaluate(el => el.click());
-      console.log('Policy selected (fallback): ' + policyNum);
-    } else {
-      // Last resort: row click
-      const rows = page.locator('.gw-PolicySearchResultsLV tr.gw-row, [id*="PolicyResults"] tr');
-      await rows.nth(rowIndex).click();
-      console.log('Policy selected via row click');
-    }
-  }
-
-  await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
 }
 
 // ── fillBasicInfo (Step 2) ────────────────────────────────────────────────────
@@ -158,14 +131,13 @@ async function fillBasicInfo(page) {
   // Main Contact Relation to Insured — first non-none
   await selectFirstOption(page, '[id*="MainContact"][id*="Relation"]');
 
-  // Select first vehicle from right panel (checkboxes next to VIN# entries)
+  // Select first vehicle from right panel
   const vehicleCheckboxes = page.locator('input[type="checkbox"]');
   const cbCount = await vehicleCheckboxes.count().catch(() => 0);
   if (cbCount > 0) {
     await vehicleCheckboxes.first().check({ force: true });
     console.log('First vehicle checkbox checked');
   } else {
-    // Try clicking first VIN label
     const vinLabel = page.locator('text=/VIN#:/').first();
     if (await vinLabel.isVisible({ timeout: 2000 }).catch(() => false)) {
       await vinLabel.click({ force: true });
@@ -181,9 +153,9 @@ async function fillBasicInfo(page) {
 
 // ── fillLossDetailsCloud (Step 3) ─────────────────────────────────────────────
 async function fillLossDetailsCloud(page, {
-  lossState      = 'PA',
-  lossCauseCode  = '',
-  whatHappened   = 'Automated FNOL test submission.',
+  lossState    = 'PA',
+  lossCauseCode = '',
+  whatHappened = 'Automated FNOL test submission.',
 } = {}) {
   console.log('FNOL Step 3: Loss Details...');
   await page.waitForLoadState('domcontentloaded');
@@ -193,16 +165,12 @@ async function fillLossDetailsCloud(page, {
   await selectFirstOption(page, '[id*="AssignmentType"]');
 
   // Coverage in Question — No
-  const coverageNoLabel = page.locator('label').filter({ hasText: /^No$/ })
-    .locator('xpath=preceding::*[contains(@id,"CoverageInQuestion")][1]/following::label[1]').first();
-  // Simpler approach: find radio group for CoverageInQuestion and click No
   const coverageNoRadio = page.locator('[id*="CoverageInQuestion"]').getByLabel('No').first();
   if (await coverageNoRadio.isVisible({ timeout: 3000 }).catch(() => false)) {
     await coverageNoRadio.click({ force: true });
     console.log('Coverage in Question: No');
   } else {
-    // Fallback: find any No radio near CoverageInQuestion
-    const noRadios = page.locator('[id*="CoverageInQuestion"] [type="radio"][value="false"], [id*="CoverageInQuestion"] [type="radio"]').last();
+    const noRadios = page.locator('[id*="CoverageInQuestion"] [type="radio"]').last();
     if (await noRadios.isVisible({ timeout: 2000 }).catch(() => false)) {
       await noRadios.click({ force: true });
       console.log('Coverage in Question: No (fallback)');
@@ -251,7 +219,7 @@ async function fillLossDetailsCloud(page, {
   // Jurisdiction — first non-none
   await selectFirstOption(page, '[id*="Jurisdiction"]');
 
-  // Scroll down to Vehicles/People/Property section
+  // Scroll down to Vehicles section
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   await page.waitForTimeout(500);
 
@@ -262,7 +230,6 @@ async function fillLossDetailsCloud(page, {
     await page.waitForTimeout(1000);
     console.log('Add Vehicle clicked');
 
-    // Select vehicle from incident popup — first non-none
     const vehicleSelect = page.locator('[id*="VehicleIncident"][id*="Vehicle"]').first();
     if (await vehicleSelect.isVisible({ timeout: 3000 }).catch(() => false)) {
       const firstVal = await vehicleSelect.locator('option:not([value=""]):not([value="none"])').first()
@@ -273,7 +240,6 @@ async function fillLossDetailsCloud(page, {
       }
     }
 
-    // Save vehicle incident if button appears
     const saveVehicleBtn = page.locator('button:has-text("Update"), button:has-text("OK"), button:has-text("Save")').first();
     if (await saveVehicleBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await saveVehicleBtn.click();
@@ -282,9 +248,8 @@ async function fillLossDetailsCloud(page, {
     }
   }
 
-  // Categorization — Weather, Cat Code, Special Claim Permission (all first non-none)
+  // Categorization Weather — first non-none (optional)
   await selectFirstOption(page, '[id*="Weather"]:not([id*="WeatherRelated"]):not([id*="weather_related"])');
-  // Cat Code and Special Claim Permission — optional, skip if not visible
 
   // Next → Step 4 Parties Involved
   await page.getByRole('button', { name: 'Next' }).click();
@@ -327,17 +292,16 @@ async function finishFNOL(page) {
 
 // ── completeFNOL ──────────────────────────────────────────────────────────────
 async function completeFNOL(page, { policyNumber, lossDetails, claimantInfo, exposures = [], assertClaimNumber = true }) {
-  // Step 1 — Find Policy
+  // Step 1 — Find Policy + Search + Next (no row selection)
   await searchPolicy(page, policyNumber, lossDetails && lossDetails.lossDate);
-  await selectPolicyResult(page);
 
   // Step 2 — Basic Info
   await fillBasicInfo(page);
 
   // Step 3 — Loss Details
   await fillLossDetailsCloud(page, {
-    lossState    : (lossDetails && lossDetails.lossState)    || 'PA',
-    lossCauseCode: (lossDetails && lossDetails.lossCauseCode)|| '',
+    lossState    : (lossDetails && lossDetails.lossState)     || 'PA',
+    lossCauseCode: (lossDetails && lossDetails.lossCauseCode) || '',
     whatHappened : (lossDetails && lossDetails.lossDescription) || 'Automated FNOL test submission.',
   });
 
@@ -357,7 +321,6 @@ module.exports = {
   LOB_CONFIG,
   clickNewClaimCloud,
   searchPolicy,
-  selectPolicyResult,
   fillBasicInfo,
   fillLossDetailsCloud,
   fillLossDetails,
