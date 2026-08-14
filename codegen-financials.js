@@ -1,0 +1,47 @@
+import { test, expect } from '@playwright/test';
+
+test('test', async ({ page }) => {
+  await page.goto('https://cc-dev-dngldev.donegal.beta5-andromeda.guidewire.net/ClaimCenter.do');
+  await page.getByRole('textbox', { name: 'Username' }).click();
+  await page.getByRole('textbox', { name: 'Username' }).fill('su');
+  await page.getByRole('textbox', { name: 'Username' }).press('Tab');
+  await page.getByRole('textbox', { name: 'Password' }).press('CapsLock');
+  await page.getByRole('textbox', { name: 'Password' }).fill('D');
+  await page.getByRole('textbox', { name: 'Password' }).press('CapsLock');
+  await page.getByRole('textbox', { name: 'Password' }).fill('Donegal2019');
+  await page.getByRole('textbox', { name: 'Password' }).press('Enter');
+  await page.getByRole('menuitem', { name: 'Claims (1)' }).click();
+  await page.getByRole('button', { name: 'HO-GA-03-26-' }).click();
+  await page.getByLabel('Financials', { exact: true }).click();
+  await page.locator('#ClaimFinancialsSummary-ClaimFinancialsSummaryScreen-financialsPanel-FinancialsSummaryPanelSet-FinancialsSummaryLV-0-RemainingReserves_button').click();
+  await page.locator('#ClaimFinancialsTransactions-ClaimFinancialsTransactionsScreen-TransactionsLV-0-TType').getByRole('link', { name: 'Reserve' }).click();
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.getByRole('textbox', { name: '$' }).click();
+  await page.getByRole('textbox', { name: '$' }).fill('6000.00');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Clear' }).click();
+  await page.getByRole('button', { name: 'deferred Actions' }).click();
+  await page.getByLabel('New Payment (Formerly System').click();
+  await page.getByLabel('Name').selectOption('Company:109');
+  await page.getByRole('button', { name: 'Next' }).click();
+  await page.getByLabel('Reserve Line').selectOption('(1) 1st Party Time Element - sathya ruban; Claim Cost/Other');
+  await page.getByLabel('Transaction Type').selectOption('21');
+  await page.getByRole('textbox', { name: 'Total Amount of Check' }).click();
+  await page.getByRole('textbox', { name: 'Total Amount of Check' }).fill('500');
+  await page.locator('#gw-click-overlay').click();
+  await page.getByLabel('CategoryCategory').selectOption('601');
+  await page.getByRole('textbox', { name: '$' }).click();
+  await page.getByRole('textbox', { name: '$' }).fill('500');
+  await page.getByLabel('Box Number').click();
+  await page.getByLabel('Box Number').selectOption('06');
+  await page.getByLabel('Memo Phrase').selectOption('60');
+  await page.getByRole('textbox', { name: 'Total Amount of Check' }).click();
+  await page.getByRole('textbox', { name: 'Total Amount of Check' }).fill('500');
+  await page.getByRole('button', { name: 'Next' }).click();
+  await page.getByRole('radio', { name: 'No' }).click();
+  page.once('dialog', dialog => {
+    console.log(`Dialog message: ${dialog.message()}`);
+    dialog.dismiss().catch(() => {});
+  });
+  await page.getByRole('button', { name: 'Finish' }).click();
+});

@@ -3,18 +3,18 @@
  * All 34 active DMAR rules. DMAR0005 and DMAR0006 are disabled - not tested.
  */
 const { test, expect } = require('@playwright/test');
-const { loginToClaimCenter } = require('../../helpers/claimCenterBase');
+const { loginToClaimCenter, getNextPolicy, getTestLossDate } = require('../../helpers/claimCenterBase');
 const { completeFNOL } = require('../../helpers/fnolHelper');
 const { createPayment, createReserve, createRecoveryReserve, createBulkInvoice } = require('../../helpers/financialsHelper');
 const { assertInApprovalQueue, assertNotInApprovalQueue, approveFromQueue, denyFromQueue } = require('../../helpers/approvalRoutingHelper');
 
-const POLICY_AUTO = process.env.POLICY_PA_AUTO || 'PA-AR-001';
-const POLICY_WC   = process.env.POLICY_WC_PA   || 'WC-AR-001';
-const POLICY_CP   = process.env.POLICY_CP_PA   || 'CP-AR-001';
+const POLICY_AUTO = getNextPolicy('POLICY_PA_AUTO', 'PA-AR-001');
+const POLICY_WC   = getNextPolicy('POLICY_WC_PA',   'WC-AR-001');
+const POLICY_CP   = getNextPolicy('POLICY_CP_PA',   'CP-AR-001');
 
-const AUTO_FNOL = (desc) => ({ policyNumber: POLICY_AUTO, lossDetails: { lossDate: '01/15/2025', lossState: 'PA', lossCauseCode: 'LC15', lossDescription: desc }, exposures: [{ coverageLabel: 'Collision' }] });
-const WC_FNOL   = (desc) => ({ policyNumber: POLICY_WC,   lossDetails: { lossDate: '01/15/2025', lossState: 'PA', lossCauseCode: 'LC07', lossDescription: desc }, exposures: [{ coverageLabel: "Workers' Compensation And Employers' Liability" }] });
-const CP_FNOL   = (desc) => ({ policyNumber: POLICY_CP,   lossDetails: { lossDate: '01/15/2025', lossState: 'PA', lossCauseCode: 'LC01', lossDescription: desc }, exposures: [{ coverageLabel: 'Structure Building' }] });
+const AUTO_FNOL = (desc) => ({ policyNumber: POLICY_AUTO, lossDetails: { lossDate: getTestLossDate(), lossState: 'PA', lossCauseCode: 'LC15', lossDescription: desc }, exposures: [{ coverageLabel: 'Collision' }] });
+const WC_FNOL   = (desc) => ({ policyNumber: POLICY_WC,   lossDetails: { lossDate: getTestLossDate(), lossState: 'PA', lossCauseCode: 'LC07', lossDescription: desc }, exposures: [{ coverageLabel: "Workers' Compensation And Employers' Liability" }] });
+const CP_FNOL   = (desc) => ({ policyNumber: POLICY_CP,   lossDetails: { lossDate: getTestLossDate(), lossState: 'PA', lossCauseCode: 'LC01', lossDescription: desc }, exposures: [{ coverageLabel: 'Structure Building' }] });
 
 test('TC-AR-001 [DMAR0001]: Payment below threshold - not in queue', async ({ page }) => {
   await loginToClaimCenter(page);

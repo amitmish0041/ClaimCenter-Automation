@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "../../../Commercial Line Performance test"
+		},
+		{
+			"path": "../.."
+		}
+	],
+	"settings": {
+		"git.ignoreLimitWarning": true
+	}
+}

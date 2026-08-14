@@ -1,8 +1,27 @@
 /**
  * helpers/locators/cloudLocators.js
- * Selectors for Guidewire ClaimCenter CLOUD (modern React/Jutro UI)
- * URL pattern: .guidewire.com/cc/
- * DOM pattern: standard HTML elements, data-testid, aria roles
+ * Selectors for Guidewire ClaimCenter CLOUD.
+ *
+ * URL pattern (actual): https://cc-test-dngldev.donegal.beta5-andromeda.guidewire.net/ClaimCenter.do
+ *   NOT ".guidewire.com/cc/" as previously documented here.
+ *
+ * DOM pattern (observed live, FNOL wizard):
+ *   - Controls are <div role="button" aria-disabled="true|false"
+ *     data-gw-click="fireEvent id:^" class="gw-action--inner ...">
+ *     i.e. Guidewire gw-action markup - NOT plain React/Jutro elements, and not
+ *     the on-prem ExtJS widgets either.
+ *   - Element ids use DASHES ("FNOLWizard-Next") where on-prem uses COLONS
+ *     ("FNOLWizard:Next"), so on-prem id selectors do not transfer.
+ *   - Because buttons are divs with aria-disabled, Playwright's click() waits
+ *     for "enabled" and a disabled control silently burns the full action
+ *     timeout. Use clickCloudAction() in fnolHelper, which reports the disabled
+ *     state and the on-screen validation instead.
+ *
+ * WARNING: apart from the FNOL wizard entries confirmed above, the selectors in
+ * this file are UNVERIFIED guesses (note the speculative "a, b, c" fallback
+ * lists). They carry none of the "CONFIRMED via live codegen/screenshot"
+ * provenance the on-prem locators do. Verify against the live cloud UI before
+ * relying on any of them.
  */
 
 const CloudLocators = {
