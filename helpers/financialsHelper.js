@@ -2721,28 +2721,52 @@ async function createPaymentOnPrem(page, {
     // therefore out of getByText) while it is still present in the DOM - the
     // reason this failure kept reporting "(no banner text found)" on a screen
     // CC was actively objecting to.
+    //
+    // Confirmed via live run (CA-OH-85-26-0000405): this regex - restricted to
+    // "must be/must not be/required/missing" wording - matched NOTHING even
+    // though CC was genuinely blocking the wizard, meaning the real message
+    // here uses different phrasing entirely. Widened to the same broad set of
+    // validation verbs proven to catch "Validate Claim + Exposures" messages
+    // (which included "must be a 17 character..." - the "must be" case this
+    // already covered - but plenty of CC rules read "exceeds", "not allowed",
+    // "cannot", "invalid", etc. instead).
     if (!bannerText) {
       const hidden = await page.evaluate(() => {
         const t = document.body.textContent || '';
         return [...new Set([...t.matchAll(
-          /([^\n]{0,90}(?:must not be empty|must not be null|must have a street|Missing required field|must be)[^\n]{0,50})/gi)]
-          .map(m => m[1].replace(/\s+/g, ' ').trim()))].slice(0, 5);
+          /([^\n]{0,90}(?:must not be|must be|must have|missing required field|is required|cannot be|not allowed|not permitted|exceeds|invalid|insufficient|denied|Rule:)[^\n]{0,60})/gi)]
+          .map(m => m[1].replace(/\s+/g, ' ').trim()))].slice(0, 8);
       }).catch(() => []);
       if (hidden.length) bannerText = 'validation panel: ' + hidden.join(' || ');
     }
 
     if (!bannerText) {
-      // Neither banner text nor an invalid widget: verify we are even still on
-      // Step 2. "stillOnStep2" is inferred from the Next button not going
-      // hidden, which is an assumption, not an observation.
+      // Neither banner text nor an invalid widget nor the widened regex found
+      // anything: verify we are even still on Step 2 ("stillOnStep2" is
+      // inferred from the Next button not going hidden, an assumption, not an
+      // observation) and capture GROUND TRUTH instead of guessing a wider
+      // regex a third time. The previous version's 260-char body slice was
+      // entirely consumed by the top nav bar ("Desktop Search Team Address
+      // Book...") on the live run that produced this exact failure, so the
+      // actual page content below it was never even captured. 1500 chars and
+      // a screenshot leave nothing left to guess at.
       const where = await page.evaluate(() => ({
         step: ((document.body.innerText || '').match(/Step\s*\d+\s*of\s*\d+[^\n]*/i) || [])[0] || '(no step text)',
         buttons: [...new Set([...document.querySelectorAll('.x-btn')]
           .filter(b => b.offsetParent).map(b => (b.innerText || '').trim()).filter(Boolean))].slice(0, 14),
-        body: (document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 260),
+        invalidFields: [...document.querySelectorAll('.x-form-invalid-field')]
+          .filter(el => el.offsetParent)
+          .map(el => ({
+            name: (el.getAttribute('aria-label') || el.getAttribute('name') || el.id || '').slice(0, 40),
+            tip: (el.getAttribute('data-errorqtip') || '').slice(0, 100),
+          })).slice(0, 8),
+        body: (document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 1500),
       })).catch(() => ({}));
       console.log('Payment Step 2 diagnostic -> step="' + where.step + '" buttons=' +
-                  JSON.stringify(where.buttons) + ' body="' + (where.body || '').slice(0, 200) + '"');
+                  JSON.stringify(where.buttons) + ' invalidFields=' + JSON.stringify(where.invalidFields) +
+                  ' body="' + (where.body || '') + '"');
+      await page.screenshot({ path: 'results/payment-step2-blocked.png' }).catch(() => {});
+      console.log('Payment Step 2: screenshot -> results/payment-step2-blocked.png');
     }
 
     console.log('Payment blocked by validation on Step 2:', bannerText || '(no banner text found)');

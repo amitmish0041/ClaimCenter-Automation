@@ -3335,33 +3335,119 @@ async function fixMissingPartyAddress(page) {
   // column AND a blank Address/City cell. This targets the actual contact the
   // validation error names, instead of opening rows in arbitrary order until
   // one happens to look editable.
+  // Confirmed via live dump: unscoped `.x-column-header-text` /
+  // `tr.x-grid-row` queries do NOT return just the Contacts list grid - they
+  // also pick up the left-nav TREE (rows like ["Summary"], ["Workplan"]...,
+  // same bug already fixed for the exposures reader and the reserve grid) AND
+  // a SEPARATE "Roles" detail sub-grid for whichever contact happens to be
+  // selected (headers "Related To"/"Role"[singular]/"Active?"/"Comments").
+  // That concatenation put a second, unrelated "Name" header into the array,
+  // so `headers.indexOf('Name')` picked the wrong one and every column read
+  // after it was offset - which is why this returned zero candidates twice in
+  // a row on a claim CC was actively rejecting for exactly this reason.
+  //
+  // Anchor on "Roles" (PLURAL - the sub-grid uses singular "Role", a clean,
+  // confirmed differentiator), climb to its owning grid view, and read ONLY
+  // that grid's own headers and rows - same proven technique already used for
+  // the "New Available Reserves" reserve grid.
   const candidates = await page.evaluate(() => {
-    const headers = [...document.querySelectorAll('.x-column-header-text')].map(h => (h.textContent || '').trim());
+    const rolesHeader = [...document.querySelectorAll('.x-column-header-text')]
+      .find(h => (h.textContent || '').trim() === 'Roles');
+    if (!rolesHeader) return [];
+    let panel = rolesHeader.closest('.x-column-header') || rolesHeader;
+    let headerCt = null, view = null;
+    for (let up = 0; up < 8 && panel && panel.parentElement && !view; up++) {
+      panel = panel.parentElement;
+      headerCt = panel.querySelector('.x-grid-header-ct') || headerCt;
+      view = panel.querySelector('.x-grid-view');
+    }
+    if (!view) return [];
+    const scope = headerCt || view.parentElement || document;
+    const headers = [...scope.querySelectorAll('.x-column-header-text')].map(h => (h.textContent || '').trim());
     const nameIdx = headers.indexOf('Name');
     const rolesIdx = headers.indexOf('Roles');
     const addrIdx = headers.indexOf('Address');
     const cityIdx = headers.indexOf('City');
+    const stateIdx = headers.indexOf('State');
     if (nameIdx < 0) return [];
     const out = [];
-    const rows = document.querySelectorAll('tr.x-grid-row');
+    const rows = view.querySelectorAll('tr.x-grid-row');
+    for (const el of view.querySelectorAll('[data-e2e-party-name]')) el.removeAttribute('data-e2e-party-name');
     rows.forEach((row, i) => {
       const cells = [...row.querySelectorAll('.x-grid-cell')].map(c => (c.textContent || '').trim());
+      const cellEls = [...row.querySelectorAll('.x-grid-cell')];
       const offset = cells.length - headers.length;
-      const at = (idx) => idx < 0 ? '' : (cells[idx + (offset > 0 ? offset : 0)] || '');
+      const realIdx = (idx) => idx < 0 ? -1 : idx + (offset > 0 ? offset : 0);
+      const at = (idx) => { const ri = realIdx(idx); return ri < 0 || ri >= cells.length ? '' : cells[ri]; };
       const name = at(nameIdx);
       const roles = at(rolesIdx);
       const addr = addrIdx >= 0 ? at(addrIdx) : '';
       const city = cityIdx >= 0 ? at(cityIdx) : '';
-      if (name && /claimant/i.test(roles) && !addr && !city) out.push({ row: i, name });
+      const state = stateIdx >= 0 ? at(stateIdx) : '';
+      // CC's own rule is "must have a STREET, CITY and STATE" - all three,
+      // not "address AND city both happen to be blank". Confirmed via live
+      // run: after a first repair pass filled Address 1 only, the grid showed
+      // addr="123 Main St", city="", state="" - the OLD `!addr && !city`
+      // check (BOTH required blank) then evaluated false and stopped
+      // flagging this row, even though CC's validation kept failing on the
+      // still-missing city/state. Flag on ANY of the three being blank.
+      if (name && /claimant/i.test(roles) && (!addr || !city || !state)) {
+        // Tag the actual clickable element for THIS row/column directly,
+        // rather than relying on a separate Playwright locator (getByRole
+        // 'link') to re-find the same contact by name afterward - that
+        // locator is untested on this specific screen and this class of
+        // ExtJS grid has repeatedly turned out not to expose the expected
+        // accessible roles. Prefer a real <a> inside the cell; fall back to
+        // the cell itself if the name isn't rendered as a link at all.
+        const nameCell = cellEls[realIdx(nameIdx)];
+        const clickTarget = nameCell && (nameCell.querySelector('a') || nameCell);
+        if (clickTarget) clickTarget.setAttribute('data-e2e-party-name', String(out.length));
+        out.push({ row: i, name });
+      }
     });
     return out;
   }).catch(() => []);
   console.log('fixMissingPartyAddress: claimant contact(s) with a blank address -> ' + JSON.stringify(candidates));
 
-  for (const candidate of candidates) {
-    const nameLink = page.getByRole('link', { name: candidate.name, exact: false }).first();
-    const opened = await nameLink.click().then(() => true).catch(() => false);
-    if (!opened) continue;
+  if (!candidates.length) {
+    // This has now returned empty TWICE while "Validate Claim + Exposures"
+    // kept reporting the address error unfixed - meaning either the grid's
+    // Address/City columns don't reflect the "primary address" CC actually
+    // validates (a summary column showing something else, e.g. a mailing
+    // address, while primary address is a separate structured field), or the
+    // Roles/Address column indices are being computed wrong for this screen.
+    // Dump the raw grid - headers AND every row - so the next attempt is
+    // built on what the screen actually contains, not a second guess at
+    // which columns mean what.
+    const rawGrid = await page.evaluate(() => {
+      const headers = [...document.querySelectorAll('.x-column-header-text')].map(h => (h.textContent || '').trim());
+      const rows = [...document.querySelectorAll('tr.x-grid-row')].map(row =>
+        [...row.querySelectorAll('.x-grid-cell')].map(c => (c.textContent || '').trim()));
+      return { headers, rows };
+    }).catch(() => null);
+    console.log('fixMissingPartyAddress: raw Contacts grid -> ' + JSON.stringify(rawGrid));
+    await page.screenshot({ path: 'results/party-address-contacts-grid.png' }).catch(() => {});
+  }
+
+  for (let ci = 0; ci < candidates.length; ci++) {
+    const candidate = candidates[ci];
+    const taggedTarget = page.locator('[data-e2e-party-name="' + ci + '"]').first();
+    let opened = await taggedTarget.count().then(n => n > 0).catch(() => false);
+    if (opened) {
+      opened = await taggedTarget.click().then(() => true).catch(() => false);
+    }
+    if (!opened) {
+      // Fall back to a generic role=link lookup - kept in case a different
+      // LOB/screen renders this grid without the tagging surviving (e.g. a
+      // re-render between tagging and click).
+      const nameLink = page.getByRole('link', { name: candidate.name, exact: false }).first();
+      opened = await nameLink.click().then(() => true).catch(() => false);
+    }
+    if (!opened) {
+      console.log('fixMissingPartyAddress: could not open contact "' + candidate.name +
+                  '" via tagged element or role=link fallback - skipping');
+      continue;
+    }
     await page.waitForLoadState('domcontentloaded').catch(() => {});
     await page.waitForSelector('.x-mask', { state: 'hidden', timeout: 10000 }).catch(() => {});
 
@@ -3393,20 +3479,172 @@ async function fixMissingPartyAddress(page) {
 
     console.log('fixMissingPartyAddress: filling address for "' + candidate.name + '"');
     await address1Field.fill('123 Main St').catch(() => {});
-    const cityField = page.getByRole('textbox', { name: 'City', exact: true });
-    if (await cityField.waitFor({ state: 'visible', timeout: 2000 }).then(() => true).catch(() => false)) {
-      await cityField.fill('Harrisburg').catch(() => {});
+
+    // Ground truth instead of a fourth guess: City/State/Zip have now been
+    // confirmed missing/unreachable on THREE consecutive repair passes (not
+    // just failing to stick - "textbox not found" every time). Something
+    // about this screen after Address 1 is filled does not expose plain
+    // role=textbox City/State/Zip fields the way the payee-address fallback
+    // elsewhere in this codebase successfully finds them. Capture exactly
+    // what is on screen right now before guessing at another selector.
+    await page.screenshot({ path: 'results/party-address-after-address1.png' }).catch(() => {});
+    const afterAddr1 = await page.evaluate(() => ({
+      visibleTextboxes: [...document.querySelectorAll('input:not([type=hidden])')]
+        .filter(el => el.offsetParent)
+        .map(el => ({
+          label: (el.getAttribute('aria-label') || '').slice(0, 30),
+          name: (el.getAttribute('name') || '').slice(0, 40),
+          id: (el.id || '').slice(-50),
+          value: (el.value || '').slice(0, 24),
+        })).slice(0, 25),
+      tabs: [...document.querySelectorAll('.x-tab-inner, [role="tab"]')]
+        .filter(el => el.offsetParent).map(el => (el.textContent || '').trim()).filter(Boolean),
+    })).catch(() => null);
+    console.log('fixMissingPartyAddress: screen right after Address 1 fill -> ' + JSON.stringify(afterAddr1));
+
+    // Confirmed via live screenshot: this "Primary Address" panel stacks
+    // Country/Address 1/Address 2/City/State/Zip Code as LABEL-PROXIMITY
+    // fields, not role-accessible ones - Address 1 filled fine via
+    // getByRole('textbox', {name:'Address 1'}), but City/State/Zip Code all
+    // reported "not found" via the equivalent role lookups even though the
+    // screenshot shows this is a perfectly ordinary field (just scrolled
+    // below Address 1 in the panel). Same "label div next to an unlabeled
+    // input" pattern already solved elsewhere in this file via
+    // `.x-form-item-label` proximity matching (fillGridCostCombo,
+    // sweepComboboxesOnPrem, etc.) - use that proven technique instead of
+    // role-based lookup, which has now failed on this exact screen twice.
+    // Confirmed via live run: the label-anchored field IS the right element -
+    // "Harrisburg"/"PA"/"17101" all read back correctly immediately after
+    // filling - but the SAME values got re-filled from scratch on every one
+    // of 3 repair passes and "Validate Claim + Exposures" kept failing
+    // identically each time. That means the SAVE never persisted them, not
+    // the fill: setNative() dispatches synthetic input/change/blur events,
+    // which can leave the raw DOM .value looking correct while never
+    // registering as "dirty" with whatever framework backs this form - the
+    // same class of problem the reserve amount editor had earlier today,
+    // which needed a real Playwright .fill() + Enter, not a JS-level value
+    // hack, before Update actually persisted it. Locate via the same label-
+    // proximity technique (that part was correct), tag the real elements,
+    // then commit through Playwright's real .fill() instead of a native
+    // setter simulation.
+    const tagged = await page.evaluate(({ cityLabel, stateLabels, zipLabels }) => {
+      const byLabel = (labelText) => {
+        for (const lbl of document.querySelectorAll('.x-form-item-label')) {
+          if ((lbl.textContent || '').trim().replace(/[:\s*]+$/, '') !== labelText) continue;
+          const item = lbl.closest('.x-form-item') || lbl.parentElement;
+          if (!item) continue;
+          const input = item.querySelector('input:not([type=hidden])');
+          if (input && input.offsetParent) return input;
+        }
+        return null;
+      };
+      const result = {};
+      const cityInput = byLabel(cityLabel);
+      if (cityInput) { cityInput.setAttribute('data-e2e-addr-city', '1'); result.city = true; }
+      const stateInput = stateLabels.map(byLabel).find(Boolean);
+      if (stateInput) { stateInput.setAttribute('data-e2e-addr-state', '1'); result.state = true; }
+      const zipInput = zipLabels.map(byLabel).find(Boolean);
+      if (zipInput) { zipInput.setAttribute('data-e2e-addr-zip', '1'); result.zip = true; }
+      return result;
+    }, { cityLabel: 'City', stateLabels: ['State'], zipLabels: ['Zip Code', 'ZIP Code', 'Postal Code'] }).catch(() => ({}));
+
+    const filled = {};
+    if (tagged.city) {
+      const el = page.locator('[data-e2e-addr-city="1"]').first();
+      await el.fill('Harrisburg').catch(() => {});
+      // Read back from the SAME tagged element, before untagging - re-locating
+      // by role afterward risks matching a DIFFERENT "City" field elsewhere on
+      // this busy screen, exactly the ambiguity this tagging was meant to avoid.
+      filled.city = await el.inputValue().catch(() => '(unreadable)');
+      await el.evaluate(e => e.removeAttribute('data-e2e-addr-city')).catch(() => {});
+    } else filled.city = '(label not found)';
+
+    // Two root causes found across two rounds, both confirmed by evidence:
+    //   1. State is a real ExtJS combobox - a bare .fill() writes raw INPUT
+    //      text without opening the boundlist or selecting a real record, so
+    //      the model stays null even though the DOM briefly shows "PA".
+    //   2. selectComboboxOnPrem(page, 'State', ...) - the proven picker used
+    //      successfully everywhere ELSE in this app - failed identically and
+    //      immediately on every single attempt here, with none of its own
+    //      click-diagnostics ever firing. That signature means its FIRST
+    //      step (`getByRole('combobox', {name:'State'}).waitFor(...)`) found
+    //      nothing at all: this specific Primary Address panel apparently
+    //      renders State the same way it renders City/Zip - a label-
+    //      proximity field with no accessible name - not the normal
+    //      accessible combobox selectComboboxOnPrem expects everywhere else.
+    //
+    // Fix: locate via the SAME label-proximity tagging already proven for
+    // City/Zip, then drive its boundlist directly (click to open, click the
+    // matching option) - the general-purpose helper cannot find this field
+    // at all, so routing through it can never work here regardless of retries.
+    filled.state = '(label not found)';
+    if (tagged.state) {
+      const stateEl = page.locator('[data-e2e-addr-state="1"]').first();
+      let opened = false;
+      for (const how of ['click', 'click', 'dblclick']) {
+        await stateEl[how]({ timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(300);
+        opened = await page.getByRole('option').first().waitFor({ state: 'visible', timeout: 1500 })
+          .then(() => true).catch(() => false);
+        if (opened) break;
+      }
+      if (opened) {
+        const picked = await page.evaluate((wantState) => {
+          const containers = [...document.querySelectorAll('.x-boundlist')].filter(c => c.offsetParent);
+          const container = containers[containers.length - 1];
+          if (!container) return null;
+          const items = [...container.querySelectorAll('.x-boundlist-item')];
+          // Match either a 2-letter code ("PA") or the full name ("Pennsylvania") -
+          // confirmed elsewhere in this app that state pickers render either way
+          // depending on screen.
+          const target = items.find(li => {
+            const t = (li.textContent || '').trim();
+            return t === wantState || /^pennsylvania$/i.test(t);
+          });
+          if (!target) return null;
+          const text = target.textContent.trim();
+          target.click();
+          return text;
+        }, 'PA').catch(() => null);
+        console.log('fixMissingPartyAddress: State boundlist option picked -> ' + (picked || '(no match found)'));
+        await page.keyboard.press('Tab').catch(() => {});
+      } else {
+        console.log('fixMissingPartyAddress: clicking the label-anchored State field never opened a boundlist');
+      }
+      filled.state = await stateEl.inputValue().catch(() => '(unreadable)');
+      await stateEl.evaluate(e => e.removeAttribute('data-e2e-addr-state')).catch(() => {});
+    } else {
+      // Fall back to the general-purpose picker only if label-proximity
+      // tagging itself failed to find a "State" label at all - a different
+      // failure mode than "found it but couldn't open its boundlist".
+      const stateOk = await selectComboboxOnPrem(page, 'State', 'PA', { exact: true }).catch(() => false);
+      filled.state = await page.getByRole('combobox', { name: 'State', exact: true }).first().inputValue().catch(() => '(unreadable)');
+      console.log('fixMissingPartyAddress: no State label found - combobox-picker fallback ' +
+                  (stateOk ? 'succeeded' : 'also failed') + ' -> "' + filled.state + '"');
     }
-    await selectComboboxOnPrem(page, 'State', 'PA', { exact: true }).catch(() => {});
-    const zipField = page.getByRole('textbox', { name: /zip code/i });
-    if (await zipField.waitFor({ state: 'visible', timeout: 2000 }).then(() => true).catch(() => false)) {
-      await zipField.fill('17101').catch(() => {});
-    }
+
+    if (tagged.zip) {
+      const el = page.locator('[data-e2e-addr-zip="1"]').first();
+      await el.fill('17101').catch(() => {});
+      filled.zip = await el.inputValue().catch(() => '(unreadable)');
+      await el.evaluate(e => e.removeAttribute('data-e2e-addr-zip')).catch(() => {});
+    } else filled.zip = '(label not found)';
+
+    console.log('fixMissingPartyAddress: label-anchored City/State/Zip fill (via real .fill()) -> ' + JSON.stringify(filled));
+
+    const readBack = {
+      address1: await address1Field.inputValue().catch(() => '(unreadable)'),
+      ...filled,
+    };
+    console.log('fixMissingPartyAddress: values before save -> ' + JSON.stringify(readBack));
+
     const updateBtn = page.locator('.x-btn').filter({ hasText: /^Update$/ }).first();
     if (await updateBtn.waitFor({ state: 'visible', timeout: 3000 }).then(() => true).catch(() => false)) {
       await updateBtn.click().catch(() => {});
       await page.waitForLoadState('domcontentloaded').catch(() => {});
       await page.waitForSelector('.x-mask', { state: 'hidden', timeout: 10000 }).catch(() => {});
+    } else {
+      console.log('fixMissingPartyAddress: no "Update" button found - the fill above may not have been saved');
     }
     return; // fixed one - re-validation will reveal if more remain
   }

@@ -7,6 +7,104 @@ const { pollForClaimNumber, IS_ON_PREM, BASE_URL,
   getUsedClaimantNumbers, addUsedClaimantNumber, getNextPolicy,
   openExistingClaim, waitForAllMasksGone } = require('./claimCenterBase');
 
+// Plausible per-state defaults for free-text address fields that need a real-
+// looking value rather than "Automated test entry" (which fails ZIP/City
+// validation). Module-level so any FNOL step's text-field sweep can use it,
+// not just fillLossDetailsOnPrem where this table originally lived.
+const STATE_DEFAULTS = {
+  PA: { city: 'Harrisburg',  county: 'Dauphin',    zip: '17101' },
+  MI: { city: 'Lansing',     county: 'Ingham',     zip: '48906' },
+  VA: { city: 'Richmond',    county: 'Richmond',   zip: '23219' },
+  DE: { city: 'Wilmington',  county: 'New Castle', zip: '19801' },
+  IA: { city: 'Des Moines',  county: 'Polk',       zip: '50301' },
+  IN: { city: 'Indianapolis',county: 'Marion',     zip: '46201' },
+  GA: { city: 'Atlanta',     county: 'Fulton',     zip: '30301' },
+};
+
+// ── fillEmptyTextboxesByLabel ────────────────────────────────────────────────
+// Sweeps every empty visible textbox/textarea on the CURRENT screen and fills
+// each with a value appropriate to its own label, read live from the DOM
+// rather than assumed - the same field name ("Description") can appear on
+// wildly different screens across the wizard.
+//
+// Originally a closure nested inside fillLossDetailsOnPrem (captured `page`
+// via its enclosing scope, no parameters) - promoted to a standalone,
+// page-parameterized function so OTHER FNOL steps can reuse it. Confirmed via
+// live failure: "Parties Involved" blocked with 'What Happened?', 'City' and
+// 'State' all reported as "Missing required field" - clickFnolNext's repair
+// callback for that step only ran the boolean-radio and combobox sweeps, so
+// nothing on that step ever touched plain text fields at all.
+async function fillEmptyTextboxesByLabel(page, lossState = 'PA') {
+  const stateDefaults = STATE_DEFAULTS[lossState] || STATE_DEFAULTS.PA;
+  // Confirmed via live screenshot: a blind "Automated test entry" string
+  // broke NUMERIC-only fields ("Year: must be a four-digit year between
+  // 1000 and 2999", "Loss Estimate: must be a numeric value.") - inspect
+  // each field's own label first and pick an appropriate value instead of
+  // one-size-fits-all text.
+  const emptyTextboxInfo = await page.evaluate(() => {
+
+    const boxes = Array.from(document.querySelectorAll('input[type="text"], textarea'))
+      .filter(el => el.offsetParent !== null && !el.value);
+    return boxes.map(el => {
+      const item = el.closest('.x-form-item') || el.closest('.x-field');
+      const labelEl = item ? item.querySelector('.x-form-item-label') : null;
+      const label = (labelEl ? labelEl.textContent : (el.getAttribute('aria-label') || '')).trim();
+      return { id: el.id, label };
+    });
+  }).catch(() => []);
+  // Confirmed via user report: a "Date" field (e.g. a repair/inspection
+  // date on the Vehicle/Property Damage incident popups) was ALSO getting
+  // the same blind "Automated test entry" string - a date PICKER field
+  // rejects free text outright, so the field stayed invalid no matter how
+  // many sweep passes ran, and the caller's own OK-verify-retry loop (3
+  // attempts, each re-typing the same bad value) burned a long time before
+  // finally giving up. Same MM/DD/YYYY format already used for Loss Date.
+  function formattedDate(daysOffset) {
+    const d = new Date();
+    d.setDate(d.getDate() + daysOffset);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return mm + '/' + dd + '/' + d.getFullYear();
+  }
+  for (const { id, label } of emptyTextboxInfo) {
+    if (!id) continue;
+    let value = 'Automated test entry';
+    // Confirmed via live screenshot: "When to Inspect" is a FUTURE-dated
+    // appointment, not a past loss/incident date - a general "date" fill
+    // using yesterday's date failed its own validation ("must be a valid
+    // date in the format ..."). Schedule/appointment-style labels need a
+    // date ahead of today instead; everything else "date"-labeled is
+    // treated as a past incident/loss-related date.
+    if (/inspect|schedule|appointment/i.test(label)) value = formattedDate(7);
+    else if (/date/i.test(label)) value = formattedDate(-1);
+    else if (/^#\s*of\s+stories$/i.test(label) || /number of/i.test(label)) value = '2';
+    else if (/year/i.test(label)) value = '2020';
+    else if (/estimate|amount|value|cost|price/i.test(label)) value = '1000';
+    // Confirmed via live screenshot: a blind "Automated test entry" string
+    // also broke ADDRESS fields - ZIP Code flagged invalid (non-numeric),
+    // and City/Address held garbage text instead of a real-looking value.
+    // Use a plausible fake address instead for these specific labels.
+    else if (/^address\s*1$/i.test(label)) value = '123 Main St';
+    else if (/^address\s*2$/i.test(label)) value = '';
+    else if (/^city$/i.test(label)) value = stateDefaults.city;
+    else if (/^county$/i.test(label)) value = stateDefaults.county;
+    else if (/zip\s*code/i.test(label)) value = stateDefaults.zip;
+    // Added for "Parties Involved": confirmed via live failure this screen
+    // can require a plain-text "State" field (not the combobox picker used
+    // elsewhere) and a "What Happened?" free-text description.
+    else if (/^state$/i.test(label)) value = lossState;
+    else if (/what happened/i.test(label)) value = 'Automated test entry - loss description';
+    if (value === '') continue;
+    const box = page.locator(`[id="${id}"]`);
+    await box.fill(value).catch(() => {});
+    // Confirmed via user report: moving to the next field too fast after
+    // typing can outrun the app's own commit of the value - Tab out to
+    // force a blur/commit before continuing to the next field.
+    await box.press('Tab').catch(() => {});
+    await page.waitForTimeout(150);
+  }
+}
+
 // Extracts the policy number from the claim header (e.g. "Pol: 1002241918",
 // visible on every claim workspace screen per every screenshot in this
 // project) so per-policy claimant-number dedup can be keyed correctly
@@ -36,13 +134,31 @@ async function clickFnolNext(page, stepName, { attempts = 4, repair = null } = {
                 (attempt + 1) + '/' + attempts + ')');
     if (repair) await repair().catch(() => {});
   }
+  // Confirmed via live failure on "Parties Involved": this regex - restricted
+  // to "Missing required field/must not be/is required" - matched nothing
+  // even though Next was genuinely still refused, meaning CC's real objection
+  // used different wording. Same narrow-regex bug already fixed twice
+  // elsewhere today (Validate Claim + Exposures, Payment Step 2 diagnostics);
+  // this is the shared function multiple wizard steps call, so the fix here
+  // benefits all of them. Widened to the same broad validation-verb set, plus
+  // a full body dump and screenshot as a last resort so a truly novel wording
+  // still leaves something to read instead of another blind guess.
   const why = await page.evaluate(() => {
     const t = (document.body.innerText || '') + ' ' + (document.body.textContent || '');
-    return [...new Set([...t.matchAll(/([^\n]{0,90}(?:Missing required field|must not be|is required)[^\n]{0,40})/gi)]
-      .map(m => m[1].trim()))].slice(0, 4);
+    return [...new Set([...t.matchAll(
+      /([^\n]{0,90}(?:Missing required field|must not be|must be|must have|is required|cannot be|not allowed|not permitted|exceeds|invalid|insufficient|denied|already exists|Rule:)[^\n]{0,60})/gi)]
+      .map(m => m[1].replace(/\s+/g, ' ').trim()))].slice(0, 8);
   }).catch(() => []);
+  if (!why.length) {
+    const body = await page.evaluate(() => (document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 1200))
+      .catch(() => '');
+    const shot = 'results/clickfnolnext-' + stepName.replace(/\W+/g, '_') + '-blocked.png';
+    await page.screenshot({ path: shot }).catch(() => {});
+    console.log('clickFnolNext: "' + stepName + '" blocked with no matched validation text. Body: "' + body +
+                '". Screenshot: ' + shot);
+  }
   throw new Error('FNOL "' + stepName + '" would not advance after ' + attempts + ' attempts' +
-    (why.length ? ' — CC reports: ' + why.join(' || ') : ' and reported no validation text'));
+    (why.length ? ' — CC reports: ' + why.join(' || ') : ' and reported no validation text (see log/screenshot for raw page state)'));
 }
 
 async function getPolicyNumberFromPage(page) {
@@ -3148,15 +3264,8 @@ async function fillLossDetailsOnPrem(page, { whatHappened = 'Automated FNOL test
     await sweepComboboxesOnPrem(page, null);
   }
 
-  const STATE_DEFAULTS = {
-    PA: { city: 'Harrisburg',  county: 'Dauphin',    zip: '17101' },
-    MI: { city: 'Lansing',     county: 'Ingham',     zip: '48906' },
-    VA: { city: 'Richmond',    county: 'Richmond',   zip: '23219' },
-    DE: { city: 'Wilmington',  county: 'New Castle', zip: '19801' },
-    IA: { city: 'Des Moines',  county: 'Polk',       zip: '50301' },
-    IN: { city: 'Indianapolis',county: 'Marion',     zip: '46201' },
-    GA: { city: 'Atlanta',     county: 'Fulton',     zip: '30301' },
-  };
+  // STATE_DEFAULTS now lives at module scope (see top of file) so
+  // fillEmptyTextboxesByLabel can use it too, standalone.
   const stateDefaults = STATE_DEFAULTS[lossState] || STATE_DEFAULTS.PA;
 
   const cityField = page.getByRole('textbox', { name: /^City/i });
@@ -3180,70 +3289,9 @@ async function fillLossDetailsOnPrem(page, { whatHappened = 'Automated FNOL test
   // each, and since there's no recorded codegen for Vehicle/Property
   // Damage's own field sets, use the generic sweep helpers (unscoped - no
   // known id prefix for these inline forms) to fill whatever they need.
-  async function fillEmptyTextboxesByLabel() {
-    // Confirmed via live screenshot: a blind "Automated test entry" string
-    // broke NUMERIC-only fields ("Year: must be a four-digit year between
-    // 1000 and 2999", "Loss Estimate: must be a numeric value.") - inspect
-    // each field's own label first and pick an appropriate value instead of
-    // one-size-fits-all text.
-    const emptyTextboxInfo = await page.evaluate(() => {
-
-      const boxes = Array.from(document.querySelectorAll('input[type="text"], textarea'))
-        .filter(el => el.offsetParent !== null && !el.value);
-      return boxes.map(el => {
-        const item = el.closest('.x-form-item') || el.closest('.x-field');
-        const labelEl = item ? item.querySelector('.x-form-item-label') : null;
-        const label = (labelEl ? labelEl.textContent : (el.getAttribute('aria-label') || '')).trim();
-        return { id: el.id, label };
-      });
-    }).catch(() => []);
-    // Confirmed via user report: a "Date" field (e.g. a repair/inspection
-    // date on the Vehicle/Property Damage incident popups) was ALSO getting
-    // the same blind "Automated test entry" string - a date PICKER field
-    // rejects free text outright, so the field stayed invalid no matter how
-    // many sweep passes ran, and the caller's own OK-verify-retry loop (3
-    // attempts, each re-typing the same bad value) burned a long time before
-    // finally giving up. Same MM/DD/YYYY format already used for Loss Date.
-    function formattedDate(daysOffset) {
-      const d = new Date();
-      d.setDate(d.getDate() + daysOffset);
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      return mm + '/' + dd + '/' + d.getFullYear();
-    }
-    for (const { id, label } of emptyTextboxInfo) {
-      if (!id) continue;
-      let value = 'Automated test entry';
-      // Confirmed via live screenshot: "When to Inspect" is a FUTURE-dated
-      // appointment, not a past loss/incident date - a general "date" fill
-      // using yesterday's date failed its own validation ("must be a valid
-      // date in the format ..."). Schedule/appointment-style labels need a
-      // date ahead of today instead; everything else "date"-labeled is
-      // treated as a past incident/loss-related date.
-      if (/inspect|schedule|appointment/i.test(label)) value = formattedDate(7);
-      else if (/date/i.test(label)) value = formattedDate(-1);
-      else if (/^#\s*of\s+stories$/i.test(label) || /number of/i.test(label)) value = '2';
-      else if (/year/i.test(label)) value = '2020';
-      else if (/estimate|amount|value|cost|price/i.test(label)) value = '1000';
-      // Confirmed via live screenshot: a blind "Automated test entry" string
-      // also broke ADDRESS fields - ZIP Code flagged invalid (non-numeric),
-      // and City/Address held garbage text instead of a real-looking value.
-      // Use a plausible fake address instead for these specific labels.
-      else if (/^address\s*1$/i.test(label)) value = '123 Main St';
-      else if (/^address\s*2$/i.test(label)) value = '';
-      else if (/^city$/i.test(label)) value = stateDefaults.city;
-      else if (/^county$/i.test(label)) value = stateDefaults.county;
-      else if (/zip\s*code/i.test(label)) value = stateDefaults.zip;
-      if (value === '') continue;
-      const box = page.locator(`[id="${id}"]`);
-      await box.fill(value).catch(() => {});
-      // Confirmed via user report: moving to the next field too fast after
-      // typing can outrun the app's own commit of the value - Tab out to
-      // force a blur/commit before continuing to the next field.
-      await box.press('Tab').catch(() => {});
-      await page.waitForTimeout(150);
-    }
-  }
+  //
+  // fillEmptyTextboxesByLabel is now a standalone, page-parameterized
+  // function (see top of file) - call sites below pass (page, lossState).
 
   async function addRecordAtStep3(buttonLabel) {
     const btn = page.getByText(buttonLabel, { exact: true }).first();
@@ -3293,7 +3341,7 @@ async function fillLossDetailsOnPrem(page, { whatHappened = 'Automated FNOL test
     for (let attempt = 0; attempt < 3 && !closed; attempt++) {
       await sweepComboboxesOnPrem(page, null);
       await clickUnansweredBooleanFieldsOnPrem(page, null);
-      await fillEmptyTextboxesByLabel();
+      await fillEmptyTextboxesByLabel(page, lossState);
       await page.waitForSelector('.x-mask', { state: 'hidden', timeout: 10000 }).catch(() => {});
       const okBtn = page.getByText('OK', { exact: true }).first();
       await okBtn.click().catch(() => {});
@@ -3335,7 +3383,7 @@ async function fillLossDetailsOnPrem(page, { whatHappened = 'Automated FNOL test
     for (let attempt = 0; attempt < 3 && !closed; attempt++) {
       await sweepComboboxesOnPrem(page, null);
       await clickUnansweredBooleanFieldsOnPrem(page, null);
-      await fillEmptyTextboxesByLabel();
+      await fillEmptyTextboxesByLabel(page, lossState);
       await page.waitForSelector('.x-mask', { state: 'hidden', timeout: 10000 }).catch(() => {});
       const okBtn = page.getByText('OK', { exact: true }).first();
       await okBtn.click().catch(() => {});
@@ -3901,6 +3949,15 @@ async function handlePartiesInvolvedOnPrem(page) {
     repair: async () => {
       await clickUnansweredBooleanFieldsOnPrem(page, null).catch(() => {});
       await sweepComboboxesOnPrem(page, null).catch(() => {});
+      // Confirmed via live failure: this step also requires plain TEXT
+      // fields ('What Happened?', City, State) that neither sweep above
+      // touches - the repair callback silently did nothing for them on every
+      // one of 4 retry attempts, and clickFnolNext's own diagnostic (once it
+      // gave up) named all three by CC's own "Missing required field" text.
+      // handlePartiesInvolvedOnPrem doesn't carry a lossState parameter, so
+      // this defaults to 'PA' - matches the fallback fillLossDetailsOnPrem
+      // itself already uses when STATE_DEFAULTS has no entry for the real one.
+      await fillEmptyTextboxesByLabel(page).catch(() => {});
     },
   });
   console.log('Parties Involved done → Step 5 (on-prem)');
