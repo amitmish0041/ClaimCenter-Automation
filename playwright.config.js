@@ -58,5 +58,9 @@ module.exports = defineConfig({
     // Development harness: post-FNOL flow from an existing claim. Not part of
     // the regression set - needs CC_EXISTING_CLAIM.
     { name: 'Dev - Cloud Workflow',     testMatch: '**/cloud/CloudWorkflow.dev.test.js', use: { ...chrome } },
+
+    // SmartCOMM Template Validator — cloud only (see helpers/smartComm/).
+    // Run a single template: SMARTCOMM_TEMPLATE_ID=DIG47 npm run smartcomm:dev
+    { name: 'SmartCOMM Validator',      testMatch: '**/smartComm/**/*.spec.js', use: { ...chrome } },
   ],
 });

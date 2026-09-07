@@ -46,7 +46,9 @@
     "compare:envs": "node scripts/compareEnvironments.js",
     "compare:envs:dev": "node scripts/compareEnvironments.js --tier=dev",
     "compare:envs:test": "node scripts/compareEnvironments.js --tier=test",
-    "paired:dev": "npm run e2e:dev:all && npm run e2e:cloud:dev:all && npm run compare:envs:dev"
+    "paired:dev": "npm run e2e:dev:all && npm run e2e:cloud:dev:all && npm run compare:envs:dev",
+    "smartcomm:dev": "cross-env CC_ENV=cloud CC_TIER=dev npx playwright test --project=\"SmartCOMM Validator\" --workers=1",
+    "smartcomm:test": "cross-env CC_ENV=cloud CC_TIER=test npx playwright test --project=\"SmartCOMM Validator\" --workers=1"
   },
   "dependencies": {
     "cross-env": "^7.0.3",
@@ -55,6 +57,9 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.45.0",
+    "adm-zip": "^0.5.18",
+    "fast-xml-parser": "^5.11.1",
+    "pdf-parse": "^1.1.4",
     "xlsx": "^0.18.5"
   }
 }

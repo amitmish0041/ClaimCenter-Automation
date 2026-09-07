@@ -4263,6 +4263,7 @@ module.exports = {
   reopenClaim,
   archiveClaim,
   assignClaim,
+  openClaimActionsMenu,
   createDocumentFromTemplate,
   validateClaimAndExposures, validateAndRepairClaim,
   closeExposure,

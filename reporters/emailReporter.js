@@ -231,6 +231,16 @@ class EmailReporter {
   }
 
   async onEnd() {
+    // SmartCOMM Validator runs (helpers/smartComm/) send their own scenario-
+    // level report via reportService.js — its per-requirement expected/actual
+    // detail doesn't fit this reporter's generic pass/fail/LOB-tag shape, so
+    // this one stays quiet rather than sending a second, less useful email.
+    // SMARTCOMM_TEMPLATE_ID is only ever set by the Runner UI's SmartCOMM job
+    // (runner/server.js's buildSmartCommJob) — every other suite is unaffected.
+    if (process.env.SMARTCOMM_TEMPLATE_ID) {
+      console.log('[EmailReporter] SMARTCOMM_TEMPLATE_ID set — skipping (SmartCOMM sends its own report)');
+      return;
+    }
     const smtpHost = process.env.EMAIL_SMTP_HOST;
     if (!smtpHost) {
       console.log('[EmailReporter] EMAIL_SMTP_HOST not set — skipping email notification');
