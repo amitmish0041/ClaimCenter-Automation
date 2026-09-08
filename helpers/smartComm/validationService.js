@@ -100,7 +100,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     console.log(`[SmartComm] ${scenario.scenarioId}: claim data — insuredName=${JSON.stringify(effectiveTestData.insuredName)} lossDate=${JSON.stringify(effectiveTestData.lossDate)} lossLocation=${JSON.stringify(effectiveTestData.lossLocation)} claimantName=${JSON.stringify(effectiveTestData.claimantName)}`);
 
     await documentService.openCreateFromTemplate(page);
-    await documentService.selectTemplate(page, template.searchName);
+    await documentService.selectTemplate(page, [template.searchName, template.searchNameAlt]);
     const recipient = await documentService.setPrimaryRecipient(page, { preferredName: effectiveTestData.insuredName }); // { name, address }
     await documentService.setDeliveryChannel(page, 'Print');
     await documentService.setEmail(page, recipientEmail);

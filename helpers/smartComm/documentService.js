@@ -34,11 +34,7 @@ async function openCreateFromTemplate(page) {
   await page.waitForLoadState('domcontentloaded').catch(() => {});
 }
 
-// templateName must be the exact, full registered name (catalogService's
-// template.searchName — "<DIG#> <Document Name>") — CONFIRMED via live
-// search that this screen does an exact, case-sensitive match with no
-// substring/prefix matching, so a partial name silently returns zero results.
-async function selectTemplate(page, templateName) {
+async function searchTemplateByName(page, templateName) {
   await page.getByRole('tab', { name: L.selectTemplate.tab, exact: true }).click();
   const nameField = page.getByRole('textbox', { name: L.selectTemplate.nameField }).first();
   await nameField.fill(templateName);
@@ -50,19 +46,41 @@ async function selectTemplate(page, templateName) {
   try {
     await row.waitFor({ state: 'visible', timeout: 10000 });
   } catch (_) {
-    // CONFIRMED live (DIG47, DIG124): a template that exists in the catalog
-    // spreadsheet but hasn't been released to this environment's SmartCOMM
-    // library yet returns zero search results — expected/known, not a
-    // crash. TEMPLATE_NOT_FOUND is matched by validationService to report
-    // this scenario as BLOCKED rather than ERROR.
-    throw new Error(`TEMPLATE_NOT_FOUND: "${templateName}" returned no search results — likely not yet released to this ClaimCenter environment's SmartCOMM library.`);
+    return null; // no results for this exact candidate — caller decides whether to try another
   }
-  const rowText = await row.innerText();
-  if (!rowText.toLowerCase().includes(templateName.toLowerCase())) {
-    throw new Error(`selectTemplate: search result row did not match requested template "${templateName}" (got "${rowText}")`);
+  return row;
+}
+
+// templateNameOrNames is the exact, full registered name (catalogService's
+// template.searchName — "<DIG#> <Document Name>"), or an array of candidate
+// names to try in order — CONFIRMED via live search that this screen does an
+// exact, case-sensitive match with no substring/prefix matching, so even a
+// casing/spacing difference silently returns zero results. The catalog's own
+// "Document Name" text isn't always byte-for-byte what's actually
+// registered (CONFIRMED live, DIG172B: catalog text is "...30 day late
+// notice", real registered name is "...30 Day Late Notice") — callers pass
+// [template.searchName, template.searchNameAlt] so the template's own local
+// filename (underscores standing in for spaces) gets a shot before this
+// gives up.
+async function selectTemplate(page, templateNameOrNames) {
+  const candidates = [...new Set((Array.isArray(templateNameOrNames) ? templateNameOrNames : [templateNameOrNames]).filter(Boolean))];
+  for (const templateName of candidates) {
+    const row = await searchTemplateByName(page, templateName);
+    if (!row) continue;
+    const rowText = await row.innerText();
+    if (!rowText.toLowerCase().includes(templateName.toLowerCase())) {
+      throw new Error(`selectTemplate: search result row did not match requested template "${templateName}" (got "${rowText}")`);
+    }
+    await row.getByRole('button', { name: L.selectTemplate.selectButtonInRow }).click();
+    await page.waitForLoadState('domcontentloaded').catch(() => {});
+    return;
   }
-  await row.getByRole('button', { name: L.selectTemplate.selectButtonInRow }).click();
-  await page.waitForLoadState('domcontentloaded').catch(() => {});
+  // CONFIRMED live (DIG47, DIG124): a template that exists in the catalog
+  // spreadsheet but hasn't been released to this environment's SmartCOMM
+  // library yet returns zero search results for every candidate name —
+  // expected/known, not a crash. TEMPLATE_NOT_FOUND is matched by
+  // validationService to report this scenario as BLOCKED rather than ERROR.
+  throw new Error(`TEMPLATE_NOT_FOUND: none of [${candidates.map(c => `"${c}"`).join(', ')}] returned search results — likely not yet released to this ClaimCenter environment's SmartCOMM library.`);
 }
 
 // Default = the claim's first party/insured (confirmed default per the

@@ -87,21 +87,45 @@ function loadTemplateCatalog({ refresh = false } = {}) {
   cachedCatalog = rows.map(o => {
     const digNumber = normalizeDig(o['Form Number']);
     const documentName = String(o['Document Name'] || '').trim();
+    const templateMappingDoc = o['Template Mapping Document (Word)'];
+    // CONFIRMED via live search 2026-09-03 (cloud/dev): the "Select
+    // Template" screen's Name search is an exact, case-sensitive match —
+    // no substring/prefix matching — and the registered template name is
+    // "<DIG#> <Document Name>" (e.g. "DIG52 Contact Letter"), not just the
+    // catalog's Document Name column alone. Every row browsed via a blank
+    // search follows this same pattern, so it's generic across templates.
+    const searchName = `${digNumber} ${documentName}`.trim();
+    // The catalog's own "Document Name" text isn't always byte-for-byte what
+    // ClaimCenter actually has registered — CONFIRMED live, DIG172B: the
+    // catalog says "Followup to 30 day late notice" but the real registered
+    // name is "Followup to 30 Day Late Notice" (different casing/spacing),
+    // which the exact-match search above silently misses. The template's own
+    // local .docx filename encodes that real display name too, with
+    // underscores standing in for spaces (e.g.
+    // "DIG172B_Followup_to_30_Day_Late_Notice.docx") — a second,
+    // independently-sourced name documentService.selectTemplate can fall
+    // back to. Only kept when it actually differs from searchName, so a
+    // template with no naming drift doesn't get a pointless duplicate search.
+    const mappingStem = path.basename(String(templateMappingDoc || '').trim()).replace(/\.[a-zA-Z0-9]+$/, '');
+    const searchNameAlt = mappingStem ? mappingStem.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim() : '';
+    // Only trust the alt name when its own leading DIG number agrees with
+    // this catalog row's — the mapping doc column is occasionally just
+    // wrong about which template it names entirely (CONFIRMED live: DIG34's
+    // row points at a "DIG35_..." file), and a mismatched-DIG alt is never a
+    // useful search candidate for THIS row, just a wasted round-trip at best
+    // (same defensive check as templateRequirementService's own
+    // exactMatchesOwnDig, for the same reason).
+    const altMatchesOwnDig = new RegExp('^' + digNumber + '(?:\\s|$)', 'i').test(searchNameAlt);
     return {
       digNumber,
       documentName,
-      // CONFIRMED via live search 2026-09-03 (cloud/dev): the "Select
-      // Template" screen's Name search is an exact, case-sensitive match —
-      // no substring/prefix matching — and the registered template name is
-      // "<DIG#> <Document Name>" (e.g. "DIG52 Contact Letter"), not just the
-      // catalog's Document Name column alone. Every row browsed via a blank
-      // search follows this same pattern, so it's generic across templates.
-      searchName: `${digNumber} ${documentName}`.trim(),
+      searchName,
+      searchNameAlt: (searchNameAlt && searchNameAlt !== searchName && altMatchesOwnDig) ? searchNameAlt : undefined,
       states: splitList(o['State(s)']),
       lob: splitList(o['LOB']),
       formType: o['Form Type'],
       overlay: o['Overlay'],
-      templateMappingDoc: o['Template Mapping Document (Word)'],
+      templateMappingDoc,
       notes: o['Notes'],
       sourceFile: file,
     };
