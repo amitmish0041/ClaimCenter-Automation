@@ -59,6 +59,13 @@ const SmartCommLocators = {
     // screenshot showing a completed Generate result, described as
     // "Downloads the payload for investigation if an error occurs".
     downloadPayloadButton: 'Download Payload',
+    // Clicking Generate can also fail server-side with CC's own inline error
+    // instead of ever producing a results row — CONFIRMED live (DIG59,
+    // claim CPP-DE-01-26-0000049): "Data required to create document not
+    // found. Please try again. If problem persists, contact your
+    // administrator", docked in the same south-panel wizard as an
+    // accessible group named exactly this (its heading text).
+    errorsGroup: 'Errors on current page:',
   },
 };
 

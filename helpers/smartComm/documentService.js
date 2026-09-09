@@ -245,7 +245,31 @@ async function generateOnDemand(page, { fileNamePrefix = 'SmartComm' } = {}) {
     .getByRole('row')
     .filter({ has: page.locator(L.create.downloadIcon) })
     .first();
-  await resultRow.waitFor({ state: 'visible', timeout: 120000 });
+  // Generate can also fail server-side with CC's own inline error instead of
+  // ever producing a results row (CONFIRMED live, DIG59/claim
+  // CPP-DE-01-26-0000049: "Data required to create document not found...").
+  // Racing both means a real CC-side failure surfaces immediately, with its
+  // own message, instead of masquerading as a generic 120s locator timeout —
+  // the row and the error are mutually exclusive outcomes of the same click,
+  // so whichever becomes visible first is the real one.
+  const errorBanner = page.getByRole('group', { name: L.create.errorsGroup });
+  // Each branch swallows its own eventual rejection (rather than letting
+  // Promise.race's overall .catch do it) so the LOSING wait — still running
+  // in the background for up to 120s after the other one already settled —
+  // never produces an unhandled promise rejection once its own timeout hits.
+  const winner = await Promise.race([
+    resultRow.waitFor({ state: 'visible', timeout: 120000 }).then(() => 'row').catch(() => 'row-timeout'),
+    errorBanner.waitFor({ state: 'visible', timeout: 120000 }).then(() => 'error').catch(() => 'error-timeout'),
+  ]);
+
+  if (winner === 'error') {
+    const message = (await errorBanner.innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+    throw new Error(`GENERATE_FAILED: ClaimCenter reported an error instead of producing a document — ${message || '(error text unavailable)'}`);
+  }
+  if (winner !== 'row') {
+    // Neither the row nor an error banner showed up inside 120s.
+    throw new Error('GENERATE_TIMEOUT: neither a results row nor a ClaimCenter error message appeared within 120s of clicking Generate.');
+  }
 
   const downloadPromise = page.waitForEvent('download', { timeout: 30000 });
   await resultRow.locator(L.create.downloadIcon).click();

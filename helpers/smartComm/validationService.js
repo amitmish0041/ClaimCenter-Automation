@@ -179,7 +179,15 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // on DIG47, DIG124) is a known, expected precondition failure, not an
     // automation crash — report it as BLOCKED like any other missing
     // precondition, not ERROR.
-    if (err.message.startsWith('TEMPLATE_NOT_FOUND')) {
+    // Same reasoning for documentService.generateOnDemand's GENERATE_FAILED
+    // (CONFIRMED live, DIG59/claim CPP-DE-01-26-0000049: ClaimCenter's own
+    // "Data required to create document not found..." instead of a
+    // document) — this claim is missing something the letter needs (that
+    // claim had no claimant party at all), not a script defect, so it's a
+    // precondition failure too. GENERATE_TIMEOUT (neither a result nor an
+    // error ever showed up) stays an ERROR — that's an unexplained hang, not
+    // a confirmed CC-side "can't run this" response.
+    if (err.message.startsWith('TEMPLATE_NOT_FOUND') || err.message.startsWith('GENERATE_FAILED')) {
       console.log(`[SmartComm] BLOCKED ${scenario.scenarioId}: ${err.message}`);
       return { ...base, status: 'BLOCKED', reason: err.message, passed: 0, failed: 0, blocked: 1, skipped: 0 };
     }
