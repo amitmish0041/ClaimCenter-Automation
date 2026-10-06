@@ -78,16 +78,59 @@ async function captureClaimSummary(page) {
   let claimantName;
   try {
     const table = page.getByRole('table', { name: 'Parties Involved' });
-    const rows = await table.getByRole('row').allInnerTexts();
+    const readRows = () => table.getByRole('row').allInnerTexts();
+    let rows = await readRows();
+    const nonHeader = (rs) => rs.filter(r => !/^name\b/i.test(r.trim()) && r.trim());
+    // CONFIRMED live 2026-10-04 (DIG87, PA-MI-70-26-0748000): the Roles column can come back completely
+    // BLANK for every single party ("Aaron Birchmeier | ", "Melora Fiiray | ", ...) on the FIRST read — not
+    // one party genuinely using different terminology (a real claim with no claimant at all would still show
+    // OTHER roles like "Driver"/"Insured" for its other parties), but the whole Roles column not rendered yet
+    // — the same render-lag class of bug already fixed elsewhere in this file's own header (merge fields,
+    // "0 found" races). One short wait-and-reread before concluding "no claimant" is cheap insurance against
+    // reporting a real claim as having no claimant data just because we read the grid a beat too early.
+    const allRolesBlank = (rs) => { const dr = nonHeader(rs); return dr.length > 0 && dr.every(r => !(r.split('\n')[1] || '').trim()); };
+    if (allRolesBlank(rows)) {
+      await page.waitForTimeout(1500);
+      rows = await readRows();
+    }
     // Header row's first cell is "Name" — skip it; find the first data row
     // whose Roles cell mentions "Claimant" (CONFIRMED live: a claim's
     // Parties Involved table lists each party's Name/Roles/Phone, e.g. one
     // row "Adams Claimant | Claimant | 515-025-6659").
     const claimantRow = rows.find(r => !/^name\b/i.test(r.trim()) && /\bclaimant\b/i.test(r));
     if (claimantRow) claimantName = claimantRow.split('\n')[0].trim() || undefined;
+    if (!claimantRow) {
+      const nonHeaderRows = nonHeader(rows);
+      console.log(`[claimSummaryService] DIAG — no row matched /\\bclaimant\\b/i${allRolesBlank(rows) ? ' (roles still blank after retry)' : ''}; ${nonHeaderRows.length} data row(s): ${nonHeaderRows.map(r => JSON.stringify(r.split('\n').slice(0,2).join(' | '))).join(' ;; ')}`);
+    }
   } catch (_) { /* Parties Involved table not present/visible on this claim — leave unset */ }
 
   return { insuredName, lossDate, lossLocation, claimantName, policyNumber, underwritingCompany };
 }
 
-module.exports = { captureClaimSummary, extractLabelValue, toLongDateFormat };
+// Every party's own Name -> Roles (e.g. "Mark Antolick" -> ["Main Contact", "Driver", "Covered Party",
+// "Defendant", "Primary Defense Attorney"]) off the SAME "Parties Involved" table captureClaimSummary already
+// reads the claimant's name from — added 2026-10-02 so setAdditionalRecipient can prefer a specific role
+// (e.g. "Producer") when a template's own requirements need one, instead of just picking the first eligible,
+// non-excluded menu item regardless of role (CONFIRMED live via a full-catalog scan: DIG141/DIG226/DIG239
+// only print "Agent Number" when the additional recipient specifically has the role "Producer").
+async function capturePartiesRoles(page) {
+  try {
+    const table = page.getByRole('table', { name: 'Parties Involved' });
+    const rows = await table.getByRole('row').allInnerTexts();
+    return rows
+      .filter((r) => !/^name\b/i.test(r.trim()))
+      .map((r) => {
+        const lines = r.split('\n').map((l) => l.trim()).filter(Boolean);
+        const name = lines[0] || '';
+        const rolesLine = lines[1] || '';
+        const roles = rolesLine.split(',').map((x) => x.trim()).filter(Boolean);
+        return { name, roles };
+      })
+      .filter((p) => p.name);
+  } catch (_) {
+    return []; // Parties Involved table not present/visible on this claim
+  }
+}
+
+module.exports = { captureClaimSummary, capturePartiesRoles, extractLabelValue, toLongDateFormat };

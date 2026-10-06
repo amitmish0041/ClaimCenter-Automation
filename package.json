@@ -48,12 +48,16 @@
     "compare:envs:test": "node scripts/compareEnvironments.js --tier=test",
     "paired:dev": "npm run e2e:dev:all && npm run e2e:cloud:dev:all && npm run compare:envs:dev",
     "smartcomm:dev": "cross-env CC_ENV=cloud CC_TIER=dev npx playwright test --project=\"SmartCOMM Validator\" --workers=1",
-    "smartcomm:test": "cross-env CC_ENV=cloud CC_TIER=test npx playwright test --project=\"SmartCOMM Validator\" --workers=1"
+    "smartcomm:test": "cross-env CC_ENV=cloud CC_TIER=test npx playwright test --project=\"SmartCOMM Validator\" --workers=1",
+    "ccui:test": "cross-env CC_ENV=cloud CC_TIER=test node scripts/validateCcUi.js",
+    "ccui:dev": "cross-env CC_ENV=cloud CC_TIER=dev node scripts/validateCcUi.js"
   },
   "dependencies": {
     "cross-env": "^7.0.3",
     "dotenv": "^16.0.0",
-    "nodemailer": "^6.10.1"
+    "exceljs": "^4.4.0",
+    "nodemailer": "^6.10.1",
+    "word-extractor": "^1.0.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.45.0",

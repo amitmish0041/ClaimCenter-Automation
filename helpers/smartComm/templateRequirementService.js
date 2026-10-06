@@ -27,6 +27,8 @@ const fs = require('fs');
 const path = require('path');
 let AdmZip;
 try { AdmZip = require('adm-zip'); } catch (_) { /* reported lazily in extractDocxParagraphs */ }
+let WordExtractor;
+try { WordExtractor = require('word-extractor'); } catch (_) { /* reported lazily in getRequirements' .doc branch */ }
 
 const synonyms = require('./fieldLabelSynonyms');
 
@@ -89,6 +91,17 @@ function isShortLabel(line) {
     && /[A-Z]{2,}/.test(line);
 }
 
+// "Static content must appear" was the SAME, bare description on every one of these checks regardless of
+// WHICH content — a cross-template pattern scan (2026-10-04 full-catalog run, 238 templates) found it was the
+// single biggest FAIL bucket (38 templates) purely because every genuinely-different missing string got
+// lumped under one identical label, hiding the fact that these are 38 unrelated single-template issues, not
+// one shared defect. A short quoted snippet of the actual expected text turns this back into something a
+// cross-template report can usefully group by description.
+function staticContentDescription(value) {
+  const snippet = String(value || '').trim().slice(0, 60);
+  return `Static content must appear: "${snippet}${value && value.length > 60 ? '…' : ''}"`;
+}
+
 function classifyDynamicShape(line) {
   if (synonyms.PATTERNS.date.test(line)) return 'date';
   if (synonyms.PATTERNS.currency.test(line)) return 'currency';
@@ -105,9 +118,13 @@ function classifyDynamicShape(line) {
 // trivially true of nearly any document, silently losing the one genuinely
 // meaningful check — that "Dear" is followed by a comma, not a colon — by
 // diluting it into two checks, one of which verifies nothing). Not real,
-// assertable content either way.
+// assertable content either way. "|" added CONFIRMED live 2026-09-30 (65-
+// template sweep, DIG78/DIG54/DIG5/others): a table-cell border/divider
+// character extracted as its own standalone "static content" requirement,
+// always FAILing since it's a layout artifact of the reference .docx's own
+// table structure, never real rendered text in the generated document.
 function isNoiseLine(line) {
-  return /^[\s.,:;!?'"()-]+$/.test(line) && line.replace(/\s/g, '').length <= 3;
+  return /^[\s.,:;!?'"()|-]+$/.test(line) && line.replace(/\s/g, '').length <= 3;
 }
 
 // Some templates put label+value on the SAME line, sometimes several pairs
@@ -134,22 +151,59 @@ function extractInlineLabelValues(line) {
   return pairs.length ? pairs : null;
 }
 
+// Conditional content gated on an ADDITIONAL RECIPIENT being entered is, by construction, that recipient's
+// own name/number/address — inherently per-claim data (whoever happens to get added that scenario), never
+// fixed boilerplate — unlike e.g. a letterhead paragraph gated on a Choices-panel Yes/No, which prints the
+// exact same text every time. CONFIRMED live 2026-10-02 (DIG223): "Only display 'CC:' Name and Number and
+// Address if additional recipient is entered" anchors on the reference .docx's own SAMPLE name/address
+// ("John Thompson ... Denver, CO 80205") — the real additional recipient (a different contact per claim)
+// will never match that sample text, so useLiteralText below must not fire for these; they're a guaranteed
+// FAIL otherwise regardless of whether the real recipient's own name/address correctly prints elsewhere.
+const RECIPIENT_DEPENDENT_RE = /\badditional recipient\b|\bcc\b.*\b(?:name|address|number)\b|^copy\b/i;
+
+// Some BA comments describe the EDITOR'S OWN mechanics ("Checkboxes are editable", "Checkboxes selected
+// manually", "Free Form Editable") rather than real document content — CONFIRMED live 2026-10-04 (full-
+// catalog scan, 238 templates): these can never resolve to an actual expected VALUE (there's no "correct
+// answer" for whether a checkbox is editable — it's not a fact about the claim), so they sat permanently
+// BLOCKED ("no shape or test-data field known") rather than being genuinely-unmapped per-claim content.
+// Whether a field is actually editable is ALREADY verified separately by this tool's own interactiveChecks
+// (dictionary-declared vs. observed editability) — this was the same fact being described twice, once as a
+// real check and once as a dead-end content requirement.
+const BEHAVIORAL_COMMENTARY_RE = /\b(?:is|are)\s+editable\b|selected manually|free form editable/i;
+
 function makeDynamicRequirement(n, fieldName, value, { conditional = false, conditionReason = '' } = {}) {
   const field = synonyms.lookup(fieldName);
   const shape = classifyDynamicShape(value) || 'text';
+  // A CONDITIONAL field with no dictionary mapping and a generic "text" shape is very likely a static,
+  // toggleable content block (e.g. a letterhead paragraph shown only when a Choices-panel question is Yes)
+  // rather than an unrecognized PER-CLAIM placeholder sample value — CONFIRMED live 2026-10-02 (DIG52's
+  // medical-letterhead block): the BA comment itself ("Display only if Apply Medical Letterhead? is selected
+  // Yes...") is the display CONDITION, while the paragraph it's anchored on (this `value`) is the actual
+  // literal text that prints once the condition is met — real, checkable content, not a vague unmapped
+  // shape that can only ever report BLOCKED. Scoped to conditional fields only: a NON-conditional unmapped
+  // field could still legitimately be an unrecognized per-claim-varying sample value, where a literal match
+  // would be wrong. Additional-recipient-dependent content (see RECIPIENT_DEPENDENT_RE) is excluded even
+  // though it's conditional and text-shaped — it's per-claim data, not boilerplate.
+  const useLiteralText = !field && conditional && shape === 'text' && value && value.trim().length > 3 && !RECIPIENT_DEPENDENT_RE.test(fieldName);
   const req = {
     id: `R${n}`,
     description: field
       ? `Value for "${fieldName}" must match ${field}`
-      : `A ${shape}-shaped value must appear for "${fieldName}"`,
-    type: field ? 'dynamicValueMatch' : 'dynamicShape',
+      : useLiteralText
+        ? `The template's own literal text must appear for "${fieldName}"`
+        : `A ${shape}-shaped value must appear for "${fieldName}"`,
+    type: field ? 'dynamicValueMatch' : (useLiteralText ? 'requiredText' : 'dynamicShape'),
     expectedSource: field || undefined,
+    ...(useLiteralText ? { expectedValue: value.trim() } : {}),
     shape,
     fieldName, // raw BA-comment/label text — lets tooling audit field-name coverage across the whole catalog without re-parsing descriptions
   };
   if (conditional) {
     req.enabled = false;
     req.disabledReason = conditionReason;
+  } else if (!field && BEHAVIORAL_COMMENTARY_RE.test(fieldName)) {
+    req.enabled = false;
+    req.disabledReason = `Describes the editor's own mechanics ("${fieldName}"), not document content — already covered by this tool's own interactive-field editability checks.`;
   }
   return req;
 }
@@ -198,7 +252,7 @@ function buildRequirementsHeuristic(paragraphs) {
     }
 
     requirements.push({
-      id: `R${++n}`, description: 'Static content must appear',
+      id: `R${++n}`, description: staticContentDescription(line),
       type: 'requiredText', expectedValue: line, docOrder: i,
     });
   }
@@ -299,17 +353,76 @@ function normalizeWs(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
 // been removed — the same static/label logic the heuristic path uses, just
 // applied to residual fragments (e.g. "Our Insured.:" left behind once its
 // own comment-anchored value "Insured Person" is stripped out).
-function classifyResidualFragment(n, fragment, docOrder) {
+//
+// Returns an ARRAY (zero or more requirements) rather than one-or-null —
+// see the inline-label-pairs case below, which can emit several from a
+// single fragment.
+function classifyResidualFragment(fragment, docOrder) {
   const line = fragment.trim();
-  if (!line || isBlankField(line) || isNoiseLine(line)) return null;
+  if (!line || isBlankField(line) || isNoiseLine(line)) return [];
+  // CONFIRMED live 2026-09-30 (DIG52's own "See Fraud Language sheet for details..."): a plain BODY
+  // paragraph (not a tracked comment, so makeDynamicRequirement's own CONDITIONAL_RE never sees it) can
+  // ALSO just be the BA's note-to-self pointing at the Fraud Language reference sheet, rather than literal
+  // print content — the SAME phrase docxMentionsFraudLanguage already watches for, to trigger the REAL
+  // state-specific check validationService builds separately (see buildFraudLanguageRequirements). Treating
+  // this sentence itself as "static content must appear" always failed, since it's instructional text never
+  // meant to print — excluded here the same way blank/noise lines are, not turned into a requirement at all.
+  if (/fraud\s+language/i.test(line)) return [];
+
+  // A recognized label glued directly to its value on the SAME line (e.g.
+  // "Date of Loss:May 03,") — left over because the BA's own comments never
+  // anchored this field at all, not because it's genuinely static. Without
+  // this check it fell straight through to the plain "Static content must
+  // appear" case below, pinned verbatim to whatever example date/value the
+  // source Word doc happened to be authored with — CONFIRMED live: every
+  // scenario across DIG24/DIG25/DIG34/DIG35 failed on exactly this, "Date of
+  // Loss:May 03," never matching any real claim's actual loss date. The
+  // heuristic fallback path already solves this via extractInlineLabelValues
+  // (built from the same fieldLabelSynonyms.js catalog "DATE OF LOSS" ->
+  // testData.lossDate entry) — reusing it here gives a residual fragment the
+  // same dynamic-value treatment the heuristic path already gets, instead of
+  // needing a second, separate fix.
+  const inlinePairs = extractInlineLabelValues(line);
+  if (inlinePairs) {
+    return inlinePairs.map(({ label, value }) => ({ ...makeDynamicRequirement(0, label, value), docOrder }));
+  }
+
   if (isShortLabel(line)) {
-    return { id: `R${n}`, description: `Label "${line}" must appear`, type: 'requiredText', expectedValue: line, docOrder };
+    return [{ id: 'R0', description: `Label "${line}" must appear`, type: 'requiredText', expectedValue: line, docOrder }];
   }
   const shape = classifyDynamicShape(line);
   if (shape) {
-    return { id: `R${n}`, description: `A ${shape}-shaped value must appear`, type: 'dynamicShape', shape, docOrder };
+    return [{ id: 'R0', description: `A ${shape}-shaped value must appear`, type: 'dynamicShape', shape, docOrder }];
   }
-  return { id: `R${n}`, description: 'Static content must appear', type: 'requiredText', expectedValue: line, docOrder };
+
+  // A residual fragment can still contain an EMBEDDED gap — a merge field the BA's own comments never
+  // anchored at all (CONFIRMED live: DIG166 has only 21 BA-annotated fields for a 26-merge-field document),
+  // which document.xml extraction renders as plain empty space between two genuinely static runs (e.g. "of
+  //         Dollars ($        )" — two un-commented currency fields sitting inside an otherwise fully
+  // static sentence). Treating the WHOLE fragment as one literal "static" string means it can never match
+  // again once a real value fills that gap — CONFIRMED live: this exact fragment FAILs 100% of the time on
+  // any scenario with real data, even though the wording on either side of the gap never changes. Splits
+  // around any interior run of 2+ whitespace characters and asserts each surrounding piece separately
+  // instead, so filling the gap with real content no longer breaks the (still genuinely static) wording
+  // around it. Safe even for a fragment whose double-space is just an unrelated formatting artifact, not an
+  // un-annotated field — each split piece is still a real, findable substring of the document either way.
+  const rawPieces = line.split(/\s{2,}/);
+  if (rawPieces.length > 1) {
+    // A genuine gap WAS found (that's what matters here, not how many pieces survive next) — CONFIRMED live
+    //2026-09-30 (DIG158): "This is in response to your request dated      ." splits into the real sentence
+    // plus a lone ".", and that trailing "." correctly gets dropped as noise by the SAME filter used
+    // elsewhere in this file — but the ORIGINAL bug used `pieces.length > 1` (i.e. requiring at least 2
+    // pieces to SURVIVE the filter) as the trigger, so a gap with only one meaningful side fell through to
+    // the unsplit `line` below, silently undoing the split it just did. Whatever survives the filter (even
+    // just one piece) is what must be asserted — never the original gap-containing string.
+    const pieces = rawPieces.map((p) => p.trim()).filter((p) => p && !isNoiseLine(p));
+    if (pieces.length) {
+      return pieces.map((p) => ({ id: 'R0', description: staticContentDescription(p), type: 'requiredText', expectedValue: p, docOrder }));
+    }
+    return [];
+  }
+
+  return [{ id: 'R0', description: staticContentDescription(line), type: 'requiredText', expectedValue: line, docOrder }];
 }
 
 function buildRequirementsFromComments(paragraphs, anchors, comments) {
@@ -413,8 +526,10 @@ function buildRequirementsFromComments(paragraphs, anchors, comments) {
   // actually falls in the document.
   let offset = 0;
   for (const frag of residual.split('\n')) {
-    const req = classifyResidualFragment(0, frag, offset);
-    if (req) { req.id = `R${++n}`; requirements.push(req); }
+    for (const req of classifyResidualFragment(frag, offset)) {
+      req.id = `R${++n}`;
+      requirements.push(req);
+    }
     offset += frag.length + 1; // +1 for the '\n' consumed by split
   }
 
@@ -529,11 +644,43 @@ function resolveLocalTemplatePath(template, dataDir) {
   return exactHit || null;
 }
 
-function getRequirements(template, dataDir) {
+// True when a "Fraud Language" instruction appears ANYWHERE in the Word
+// template — body, comments, or (the case that mattered) the header/footer,
+// which requirement extraction never reads. DIG52's footer, for one, holds
+// only the BA note "See Fraud Language sheet for details of language to
+// include by state", which is what tells us this letter must carry the
+// state-specific wording from the Claims_Documents_Index "Fraud Language" tab.
+function docxMentionsFraudLanguage(zip) {
+  return zip.getEntries().some((e) =>
+    /^word\/(document|comments|footer\d*|header\d*)\.xml$/i.test(e.entryName) &&
+    /fraud\s+language/i.test(textOfRuns(e.getData().toString('utf8'))));
+}
+
+async function getRequirements(template, dataDir) {
   const localPath = resolveLocalTemplatePath(template, dataDir);
   if (!localPath) {
     console.log(`[SmartComm] templateRequirementService: no local Word doc found for ${template.digNumber} (mapped: "${template.templateMappingDoc}")`);
     return { requirements: [], sourceFile: null, mode: null };
+  }
+  // A legacy .doc (pre-2007 binary Word format — CONFIRMED live for DIG15/DIG26/DIG125/DIG167/DIG168/DIG175,
+  // see resolveLocalTemplatePath's own note) is a REAL, readable template, not an overlay PDF form — it was
+  // previously lumped in with genuinely-unparseable files and silently produced zero requirements. AdmZip
+  // can't read it (.doc isn't a ZIP), so it goes through word-extractor instead, straight into the SAME
+  // heuristic classifier a comments-less .docx already uses — .doc has no BA-comment equivalent, so the
+  // comment-driven path is never available for it.
+  if (localPath.toLowerCase().endsWith('.doc')) {
+    if (!WordExtractor) throw new Error('word-extractor is not installed — run npm install in ClaimCenter-Automation');
+    let extracted;
+    try {
+      extracted = await new WordExtractor().extract(localPath);
+    } catch (e) {
+      console.log(`[SmartComm] templateRequirementService: ${localPath} could not be read as a .doc file (${e.message}) — skipping`);
+      return { requirements: [], sourceFile: localPath, mode: null };
+    }
+    const paragraphs = extracted.getBody().split(/\r?\n/).map((p) => p.trim()).filter(Boolean);
+    const mentionsFraudLanguage = /fraud\s+language/i.test(`${extracted.getHeaders() || ''} ${extracted.getFooters() || ''} ${extracted.getBody() || ''}`);
+    console.log(`[SmartComm] templateRequirementService: ${template.digNumber} is a legacy .doc — using word-extractor + the heuristic classifier (${paragraphs.length} paragraphs)`);
+    return { requirements: buildRequirementsHeuristic(paragraphs), sourceFile: localPath, mode: 'heuristic-doc', mentionsFraudLanguage };
   }
   if (!localPath.toLowerCase().endsWith('.docx')) {
     console.log(`[SmartComm] templateRequirementService: ${localPath} is not a .docx (likely an overlay PDF form) — generic parsing doesn't apply yet; skipping`);
@@ -542,6 +689,7 @@ function getRequirements(template, dataDir) {
   if (!AdmZip) throw new Error('adm-zip is not installed — run npm install in ClaimCenter-Automation');
 
   const zip = new AdmZip(localPath);
+  const mentionsFraudLanguage = docxMentionsFraudLanguage(zip);
   const documentEntry = zip.getEntry('word/document.xml');
   if (!documentEntry) throw new Error(`templateRequirementService: ${localPath} has no word/document.xml (not a .docx?)`);
   const documentXml = documentEntry.getData().toString('utf8');
@@ -553,12 +701,12 @@ function getRequirements(template, dataDir) {
     const anchors = parseCommentAnchors(documentXml);
     if (anchors.length) {
       console.log(`[SmartComm] templateRequirementService: ${template.digNumber} using comment-driven requirements (${anchors.length} BA-annotated fields)`);
-      return { requirements: buildRequirementsFromComments(paragraphs, anchors, comments), sourceFile: localPath, mode: 'comments' };
+      return { requirements: buildRequirementsFromComments(paragraphs, anchors, comments), sourceFile: localPath, mode: 'comments', mentionsFraudLanguage };
     }
   }
 
   console.log(`[SmartComm] templateRequirementService: ${template.digNumber} has no usable Word comments — using heuristic classifier`);
-  return { requirements: buildRequirementsHeuristic(paragraphs), sourceFile: localPath, mode: 'heuristic' };
+  return { requirements: buildRequirementsHeuristic(paragraphs), sourceFile: localPath, mode: 'heuristic', mentionsFraudLanguage };
 }
 
 module.exports = {

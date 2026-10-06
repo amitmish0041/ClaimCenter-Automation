@@ -302,6 +302,19 @@ async function loginAsAdmin(page) {
   console.log('Switched to admin login:', adminUser);
 }
 
+// Same clearCookies -> re-login pattern as loginAsAdmin above, but for an
+// arbitrary {username, password} pair rather than the fixed admin account —
+// used by the SmartCOMM validator (helpers/smartComm/scenarioVariants.js)
+// to run different scenarios as different real users, since document
+// content is confirmed to depend on who's logged in (see
+// helpers/smartComm/fieldLabelSynonyms.js's "From ..." field notes).
+async function loginAsUser(page, username, password) {
+  if (!username || !password) throw new Error('loginAsUser: username and password are both required');
+  await page.context().clearCookies();
+  await loginToClaimCenter(page, { username, password });
+  console.log('Switched login to:', username);
+}
+
 // ── Open an existing claim by claim number (on-prem) ──────────────────────────
 // Confirmed via a real user-recorded codegen script: search is a plain <a>
 // link ("Search"), not a role=menuitem nav item; the Claim # field's submit
@@ -1294,7 +1307,7 @@ module.exports = {
   BASE_URL, MAX_POLL_MS, POLL_INT,
   ENV, TIER, IS_ON_PREM, L,
   waitForAllMasksGone,
-  loginToClaimCenter, loginAsAdmin, openExistingClaim, navigateTo,
+  loginToClaimCenter, loginAsAdmin, loginAsUser, openExistingClaim, navigateTo,
   openTabMenu, clickTabMenuItem, selectTab,
   selectDropdown, selectComboboxOnPrem, selectComboboxByIdOnPrem, fillTextField, fillIntegerCommaField, fillDateField,
   waitForEnabled, clickSave, clickNext, dismissNotification,

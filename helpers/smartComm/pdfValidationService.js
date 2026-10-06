@@ -13,7 +13,30 @@ const fs = require('fs');
 let pdfParse;
 try { pdfParse = require('pdf-parse'); } catch (_) { /* reported lazily below */ }
 
-const { UNANCHORED_PATTERNS, FAIL_IF_PAYLOAD_MISSING } = require('./fieldLabelSynonyms');
+const { UNANCHORED_PATTERNS, FAIL_IF_PAYLOAD_MISSING, LABEL_TO_TESTDATA_FIELD } = require('./fieldLabelSynonyms');
+
+// Two labels that map to the SAME testData/payload/recipient path (e.g. "D/L" and "DATE OF LOSS" both ->
+// testData.lossDate) are synonyms for the same real-world field — reused here rather than a second,
+// separately-maintained table, since fieldLabelSynonyms.js already encodes exactly this equivalence for
+// dynamicValueMatch's OWN label-to-source lookup. `null`-valued (shape-only) labels are excluded: a shared
+// "we don't know the real value" doesn't mean two labels mean the same thing.
+function buildLabelSynonymGroups() {
+  const byPath = new Map();
+  for (const [label, path] of Object.entries(LABEL_TO_TESTDATA_FIELD)) {
+    if (!path) continue;
+    if (!byPath.has(path)) byPath.set(path, []);
+    byPath.get(path).push(label);
+  }
+  return byPath;
+}
+const LABEL_SYNONYM_GROUPS = buildLabelSynonymGroups();
+function findLabelSynonyms(expectedValue) {
+  const key = String(expectedValue || '').trim().toUpperCase().replace(/:$/, '');
+  for (const labels of LABEL_SYNONYM_GROUPS.values()) {
+    if (labels.includes(key)) return labels.filter((l) => l !== key);
+  }
+  return [];
+}
 
 async function extractPdfText(pdfPath) {
   if (!pdfParse) throw new Error('pdf-parse is not installed — run npm install in ClaimCenter-Automation');
@@ -36,15 +59,37 @@ function resolvePath(obj, dotted) {
 // invisible glyph it's meant to strip.
 const PUA_GLYPH_RE = new RegExp('[' + String.fromCharCode(0xE000) + '-' + String.fromCharCode(0xF8FF) + ']', 'g');
 
+// SmartCOMM/Word render "smart"/typographic punctuation (curly quotes, en/em
+// dashes, ellipsis) even when the .doc source we extract requirements from
+// has plain ASCII punctuation — CONFIRMED live: DIG15's source has a straight
+// `"health plan"`, the rendered PDF has curly `“health plan”`,
+// otherwise character-for-character identical. That's a typesetting
+// substitution, not a content difference, so fold both sides to the same
+// ASCII punctuation before comparing rather than letting it fall through to
+// a "punctuation differs" FAIL.
+const TYPOGRAPHIC_MAP = [
+  [/[‘’‚‛]/g, "'"],
+  [/[“”„‟]/g, '"'],
+  [/[–—]/g, '-'],
+  [/…/g, '...'],
+  [/[   ]/g, ' '],
+];
+function normalizeTypography(s) {
+  let out = String(s || '');
+  for (const [re, replacement] of TYPOGRAPHIC_MAP) out = out.replace(re, replacement);
+  return out;
+}
+
 // The reference Word doc lays fields out with tab stops that collapse to
 // multiple spaces once extracted, while the generated PDF may line-wrap the
 // same content differently (a run of spaces here, a newline there) — collapse
 // all whitespace to single spaces on both sides before comparing, or a
 // perfectly-correct document fails purely on spacing (CONFIRMED via live
-// run). Also strips PUA checkbox glyphs first (see above) so their mere
-// presence, or a different representation between source and rendered PDF,
-// never fails an otherwise word-for-word identical sentence.
-function normalizeWs(s) { return String(s || '').replace(PUA_GLYPH_RE, ' ').replace(/\s+/g, ' ').trim(); }
+// run). Also strips PUA checkbox glyphs and folds smart/typographic
+// punctuation to ASCII first (see above) so their mere presence, or a
+// different representation between source and rendered PDF, never fails an
+// otherwise word-for-word identical sentence.
+function normalizeWs(s) { return normalizeTypography(String(s || '').replace(PUA_GLYPH_RE, ' ')).replace(/\s+/g, ' ').trim(); }
 
 function shapeRegex(shape) {
   return UNANCHORED_PATTERNS[shape] || /\S+/;
@@ -113,14 +158,60 @@ function evaluateOne(req, haystack, context) {
       if (found) return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS' };
       const fuzzy = findPunctuationRelaxedMatch(haystack, req.expectedValue);
       if (fuzzy) {
+        // CONFIRMED live 2026-09-30 (user direction): the SAME words are genuinely present, just punctuated/
+        // spaced differently than the reference — a template choosing its own punctuation for a value
+        // (comma placement, line-wrap, etc.) is a legitimate rendering choice, not a defect. Reporting this
+        // as PASS (rather than FAIL-with-explanation) avoids flagging every such business-level formatting
+        // choice as a failure; `actual` still shows the real literal text so the difference stays visible.
         return {
-          expected: req.expectedValue, actual: fuzzy, result: 'FAIL',
-          reason: `Same wording is present but punctuation differs from the template — likely a genuine template-vs-rendered-output difference, not missing content. Compare Expected vs. Actual above.`,
+          expected: req.expectedValue, actual: fuzzy, result: 'PASS',
+          reason: `Same wording is present but punctuation/spacing differs from the template — treated as a match.`,
         };
+      }
+      // CONFIRMED live 2026-09-30 (user direction, "D/L" vs "Date of Loss"): the template's own reference
+      // label and the rendered document can genuinely spell out the SAME field differently (an abbreviation
+      // vs. the full name) — fieldLabelSynonyms.js already groups known equivalents by the real-world field
+      // they both mean, so check each one before giving up, rather than treating a reworded-but-correct
+      // label as missing content.
+      for (const synonym of findLabelSynonyms(req.expectedValue)) {
+        const synMatch = findPunctuationRelaxedMatch(haystack, synonym);
+        if (synMatch) {
+          return {
+            expected: req.expectedValue, actual: synMatch, result: 'PASS',
+            reason: `The template's own label "${req.expectedValue}" wasn't found verbatim, but its known synonym "${synonym}" was found as "${synMatch}" — same field, worded differently in the rendered document. Treated as a match.`,
+          };
+        }
       }
       return {
         expected: req.expectedValue, actual: 'Not Found', result: 'FAIL',
         reason: `No similar wording found anywhere in the generated document — this content appears to be missing entirely, not just reworded.`,
+      };
+    }
+    // CONFIRMED live 2026-09-30 (user direction): for an Interactive template, the SAME dictionary field was
+    // already captured individually during the editing session (see validationService.buildXpathRequirements)
+    // — comparing against THAT field's own specific value is a precise field-to-field check, rather than
+    // asking "does this value appear ANYWHERE in the whole document" the way 'requiredText' does. `fieldValue`
+    // is attached directly on the requirement (no haystack/context lookup needed) since it was already
+    // resolved when the requirement was built.
+    case 'fieldValueMatch': {
+      if (req.fieldValue === undefined) {
+        return { expected: req.expectedValue, actual: 'N/A', result: 'BLOCKED', reason: 'No captured interactive field value to compare against for this requirement.' };
+      }
+      const normField = normalizeWs(req.fieldValue).toLowerCase();
+      const normExpected = normalizeWs(req.expectedValue).toLowerCase();
+      if (normField === normExpected || (normField && normExpected && (normField.includes(normExpected) || normExpected.includes(normField)))) {
+        return { expected: req.expectedValue, actual: req.fieldValue, result: 'PASS' };
+      }
+      const fuzzy = findPunctuationRelaxedMatch(req.fieldValue, req.expectedValue) || findPunctuationRelaxedMatch(req.expectedValue, req.fieldValue);
+      if (fuzzy) {
+        return {
+          expected: req.expectedValue, actual: req.fieldValue, result: 'PASS',
+          reason: `Same wording is present but punctuation/spacing differs — treated as a match.`,
+        };
+      }
+      return {
+        expected: req.expectedValue, actual: req.fieldValue, result: 'FAIL',
+        reason: `The interactive field "${req.fieldLabel || 'this field'}" is captured as "${req.fieldValue}", which doesn't match the payload-derived expected value above.`,
       };
     }
     case 'forbiddenText': {
@@ -172,9 +263,11 @@ function evaluateOne(req, haystack, context) {
       if (found) return { expected, actual: expected, result: 'PASS' };
       const fuzzy = findPunctuationRelaxedMatch(haystack, expected);
       if (fuzzy) {
+        // See the same change in the 'requiredText' case above for the reasoning — a punctuation/spacing-only
+        // difference is treated as a match now, not a failure.
         return {
-          expected, actual: fuzzy, result: 'FAIL',
-          reason: `Same wording is present but punctuation differs from the test-data value — likely a genuine template-vs-rendered-output difference, not missing content.`,
+          expected, actual: fuzzy, result: 'PASS',
+          reason: `Same wording is present but punctuation/spacing differs from the test-data value — treated as a match.`,
         };
       }
       return {
@@ -206,4 +299,4 @@ function evaluateRequirements(requirements, text, context) {
   }));
 }
 
-module.exports = { extractPdfText, evaluateRequirements };
+module.exports = { extractPdfText, evaluateRequirements, normalizeWs };

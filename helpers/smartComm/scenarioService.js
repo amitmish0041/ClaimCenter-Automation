@@ -32,6 +32,8 @@ function norm(s) { return String(s || '').trim().toLowerCase(); }
 // still be valid/testable in a dev environment than an old one.
 const MAX_SCENARIOS_PER_TEMPLATE = Number(process.env.SMARTCOMM_MAX_SCENARIOS_PER_TEMPLATE) || 3;
 
+const MAX_ALTERNATE_CLAIMS = 3;
+
 function appliesToTemplate(template, record) {
   const states = template.states; // array of codes, or ['ALL']
   const lobs = template.lob;      // array of codes, or ['ALL']
@@ -56,7 +58,34 @@ function getScenariosForTemplate(template, testDataRecords) {
     });
     if (scenarios.length >= MAX_SCENARIOS_PER_TEMPLATE) break;
   }
-  return scenarios;
+  // Same-LOB/State backups, used only if the scenario's own claim can't be
+  // opened even as admin ("you do not have permission to view this claim").
+  for (const sc of scenarios) {
+    const key = `${norm(sc.lob)}|${norm(sc.state)}`;
+    sc.alternates = testDataRecords
+      .filter(r => appliesToTemplate(template, r) && `${norm(r.lob)}|${norm(r.state)}` === key && r.claimNumber !== sc.testData.claimNumber)
+      .slice(0, MAX_ALTERNATE_CLAIMS);
+  }
+  if (scenarios.length) return scenarios;
+
+  // FALLBACK (per user direction 2026-10-05): nothing in the real test-data inventory actually carries the
+  // State/LOB codes a template's own catalog entry names (e.g. DIG238 wants LOB "PROPERTY", but the live
+  // inventory's own LOB column never literally says that — a naming-convention mismatch between the BA's
+  // index and the real claim data, not evidence the template is untestable). Reporting a hard BLOCKED with
+  // ZERO coverage for that is worse than running ONE real, clearly-flagged non-matching claim instead — some
+  // content validation beats none, as long as it's obvious in the report that this scenario's LOB/State don't
+  // actually match what the template claims to need. Only engages when there's SOME test data to fall back
+  // to at all; a genuinely empty inventory still reports BLOCKED (nothing to run).
+  if (!testDataRecords.length) return [];
+  const r = testDataRecords[0];
+  return [{
+    scenarioId: `${template.digNumber}-FALLBACK-${r.lob}-${r.state}`.replace(/\s+/g, ''),
+    lob: r.lob,
+    state: r.state,
+    testData: r,
+    isFallbackClaim: true,
+    alternates: testDataRecords.slice(1, 1 + MAX_ALTERNATE_CLAIMS),
+  }];
 }
 
 module.exports = { getScenariosForTemplate, appliesToTemplate };

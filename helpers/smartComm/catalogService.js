@@ -125,6 +125,12 @@ function loadTemplateCatalog({ refresh = false } = {}) {
       lob: splitList(o['LOB']),
       formType: o['Form Type'],
       overlay: o['Overlay'],
+      // CONFIRMED via a full scan of the index 2026-09-28: only 4 of 238 rows say "On Demand"
+      // (DIG4/DIG7/DIG14/DIG16) — everything else, including DIG52, says "Interactive". This is the
+      // BUSINESS-intended creation mode (validationService branches on it), not a statement that the
+      // On-Demand button is unavailable — the Create tab's button availability is still driven
+      // separately by whichever tags SmartCOMM itself returns for the template (see documentService).
+      interactiveOrOnDemand: /^on demand$/i.test(String(o['Interactive/On Demand'] || '').trim()) ? 'On Demand' : 'Interactive',
       templateMappingDoc,
       notes: o['Notes'],
       sourceFile: file,
@@ -138,4 +144,4 @@ function getTemplate(digNumber) {
   return loadTemplateCatalog().find(t => t.digNumber === dig) || null;
 }
 
-module.exports = { DATA_DIR, normalizeDig, loadTemplateCatalog, getTemplate };
+module.exports = { DATA_DIR, normalizeDig, loadTemplateCatalog, getTemplate, findFile };

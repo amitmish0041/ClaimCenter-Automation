@@ -54,7 +54,10 @@ const SmartCommLocators = {
     closeButton: 'Close',
     resultsGrid: '[role="grid"], table',
     // Per the spec's preferred locator.
-    downloadIcon: '[aria-label="document_download"]',
+    // CC Test's icon label drifted from "document_download" to "document
+    // download" (CONFIRMED live 2026-09-23) — accept either so a further
+    // revert/rename doesn't silently turn every Generate into a 120s hang.
+    downloadIcon: '[aria-label="document_download"], [aria-label="document download"]',
     // "Development" section's own button — CONFIRMED present in the same
     // screenshot showing a completed Generate result, described as
     // "Downloads the payload for investigation if an error occurs".
@@ -65,7 +68,11 @@ const SmartCommLocators = {
     // found. Please try again. If problem persists, contact your
     // administrator", docked in the same south-panel wizard as an
     // accessible group named exactly this (its heading text).
-    errorsGroup: 'Errors on current page:',
+    // The banner's accessible name is now just "Errors:" (CONFIRMED live
+    // 2026-09-23, e.g. "Certified Mail is required for recipient ... when the
+    // delivery channel is Print"); older builds said "Errors on current
+    // page:". Match on the prefix so both are caught.
+    errorsGroup: /^Errors/i,
   },
 };
 

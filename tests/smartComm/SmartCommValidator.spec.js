@@ -7,6 +7,10 @@
  * aggregated report.
  *
  * Adding a template or a LOB/State scenario never touches this file.
+ *
+ * To speed up a multi-scenario template, set SMARTCOMM_CONCURRENCY=2 (or higher) — this test itself is a
+ * single Playwright test/single process, so the --workers CLI flag has nothing to parallelize; scenario
+ * concurrency is handled inside validateTemplate() instead (see its own comment in validationService.js).
  */
 const { test, expect } = require('@playwright/test');
 const { validateTemplate } = require('../../helpers/smartComm/validationService');
@@ -35,8 +39,12 @@ test.describe('SmartCOMM Template Validator', () => {
     // one, so this claim is used directly instead of matching
     // fixtures/smartComm/testData.js by the template's LOB/State applicability.
     const claimNumberOverride = process.env.SMARTCOMM_CLAIM_NUMBER || undefined;
+    // Opt-in: templates the index marks "Interactive" are BLOCKED (not silently run via On-Demand) unless
+    // this is set — the Interactive flow opens a real Azure SSO/MFA prompt only a person at the keyboard
+    // can clear. This project already runs headed (playwright.config.js), so the window is visible either way.
+    const interactive = /^(1|true|yes)$/i.test(process.env.SMARTCOMM_INTERACTIVE || '');
 
-    templateResult = await validateTemplate(page, { digNumber, recipientEmail, claimNumberOverride });
+    templateResult = await validateTemplate(page, { digNumber, recipientEmail, claimNumberOverride, interactive });
     console.log(`[SmartComm] Overall: ${templateResult.overall} — ${templateResult.passed} passed / ${templateResult.failed} failed / ${templateResult.blocked} blocked${templateResult.errored ? ` / ${templateResult.errored} errored` : ''}`);
 
     for (const s of templateResult.scenarios || []) {

@@ -24,6 +24,7 @@
 'use strict';
 const fs = require('fs');
 const { XMLParser } = require('fast-xml-parser');
+const reviewCaseAdapter = require('./reviewCasePayloadAdapter');
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -74,6 +75,34 @@ function findUserContactByDisplayName(node, targetName, seen) {
     if (found) return found;
   }
   return undefined;
+}
+
+// claim.lossLocation is frequently NOT a real address at all — CONFIRMED live 2026-10-05 (DIG6,
+// DFC-AL-03-26-0747922): its own displayName is the literal text "See Policy Tab" with no nested
+// <state> property whenever the loss happened at the insured's own premises, so
+// claim.lossLocation.state.code comes back undefined even though the claim unambiguously has a real
+// state — printed right there in the letter's own recipient address block. The insured contact's
+// primaryAddress is that same address (role "insured" — also this claim's root.recipient), so it's
+// the right fallback once lossLocation itself has nothing to offer.
+function contactStateCode(contact) {
+  return (contact && contact.primaryAddress && contact.primaryAddress.state && contact.primaryAddress.state.code) || undefined;
+}
+
+// Commercial policies can carry several locations; the one actually used to
+// rate the policy isn't in a field literally labeled "rating state" — the
+// closest CONFIRMED proxy (2026-09-22 sample) is whichever location carries
+// primaryLocation="true" (falls back to policyAddress="true", then just the
+// first location if neither flag is present). Flagged clearly as a
+// best-effort proxy, not a confirmed "policy rating state" field, per user
+// direction to place a marked placeholder here pending further guidance.
+function findPolicyState(policy) {
+  const outer = asArray(policy && policy.locations)[0];
+  const locations = asArray(outer && outer.locations);
+  if (!locations.length) return undefined;
+  const pick = locations.find((l) => l.primaryLocation === 'true')
+    || locations.find((l) => l.policyAddress === 'true')
+    || locations[0];
+  return pick.address && pick.address.state ? pick.address.state.code : undefined;
 }
 
 // The vehicle sits several policy-structure layers deep (policyLocations ->
@@ -134,18 +163,29 @@ function contactSummary(contact) {
 }
 
 function parsePayload(xmlText) {
-  const parser = new XMLParser({
-    ignoreAttributes: true,
-    isArray: (name) => name === 'contacts' || name === 'roles' || name === 'editableRoles',
-    // Without this, fast-xml-parser auto-coerces numeric-looking tag text
-    // (policyNumber, postalCode, phone numbers) to JS numbers — CONFIRMED:
-    // "1001002576" came back as the number 1001002576, which then throws in
-    // pdfValidationService's normalizeWs(expected).toLowerCase() the moment
-    // it's used as an expected value. Every field here is text as far as
-    // this service cares, so keep it all as strings.
-    parseTagValue: false,
-  });
-  const doc = parser.parse(xmlText);
+  // Two real source formats reach this function — see reviewCasePayloadAdapter.js's own header for the
+  // CONFIRMED-live structural difference: the Create tab's "Download Payload" button produces direct XML
+  // (<ccDocumentCreationRequest><claim>...), while the S3-fetched payload (ClaimCenter Outbound > smartcomm
+  // > input) is a Thunderhead "review-case" transaction log using a generic <object>/<property> vocabulary
+  // for the same data. The adapter converts the latter into the exact shape this function already expects
+  // from the former, so everything below (and every *Ext/find* helper in this file) is format-agnostic.
+  let doc;
+  if (reviewCaseAdapter.isReviewCaseXml(xmlText)) {
+    doc = reviewCaseAdapter.convertReviewCaseXml(xmlText);
+  } else {
+    const parser = new XMLParser({
+      ignoreAttributes: true,
+      isArray: (name) => name === 'contacts' || name === 'roles' || name === 'editableRoles',
+      // Without this, fast-xml-parser auto-coerces numeric-looking tag text
+      // (policyNumber, postalCode, phone numbers) to JS numbers — CONFIRMED:
+      // "1001002576" came back as the number 1001002576, which then throws in
+      // pdfValidationService's normalizeWs(expected).toLowerCase() the moment
+      // it's used as an expected value. Every field here is text as far as
+      // this service cares, so keep it all as strings.
+      parseTagValue: false,
+    });
+    doc = parser.parse(xmlText);
+  }
   const root = doc.ccDocumentCreationRequest;
   if (!root) throw new Error('payloadService: not a recognized SmartCOMM payload — no <ccDocumentCreationRequest> root element');
   const claim = root.claim || {};
@@ -172,6 +212,21 @@ function parsePayload(xmlText) {
   return {
     claimNumber: claim.claimNumber || undefined,
     lossDate: isoToLongDateFormat(claim.lossDate),
+    // CONFIRMED live 2026-09-22 (claim.lossType.code): matches the same
+    // AUTO/GL/PR/WC vocabulary testDataService's own lob column already
+    // uses, and claim.lossLocation.state.code the same 2-letter codes
+    // (PA/NC/OH/...) everywhere else in this payload uses — both used by
+    // fraudLanguageService to resolve the state/LOB-specific required text.
+    // Falls back to the insured contact's own address state (see
+    // contactStateCode above) whenever lossLocation itself has no state —
+    // "See Policy Tab" claims still need a real state for the fraud-language
+    // check, and the insured's address is the same one the letter prints.
+    lossState: (claim.lossLocation && claim.lossLocation.state && claim.lossLocation.state.code) || contactStateCode(byRole.insured) || undefined,
+    lossType: (claim.lossType && claim.lossType.code) || undefined,
+    lossCauseName: (claim.lossCause && claim.lossCause.name) || undefined,
+    // See findPolicyState's own comment above — best-effort proxy for
+    // "policy rating state", not a field ClaimCenter itself labels as such.
+    policyState: findPolicyState(policy),
     policyNumber: policy.policyNumber || undefined,
     policyEffectiveDate: isoToLongDateFormat(policy.effectiveDate),
     policyExpirationDate: isoToLongDateFormat(policy.expirationDate),

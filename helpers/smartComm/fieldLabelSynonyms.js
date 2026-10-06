@@ -102,6 +102,16 @@ const LABEL_TO_TESTDATA_FIELD = {
   'TO ADDRESS': 'recipient.address',
   'TO CITY, STATE, ZIP': 'recipient.cityStateZip',
   'TO CITY, STATE ZIP': 'recipient.cityStateZip',
+  // "Copy ..." / "CC ..." — the SECOND recipient added via the Recipients tab's own "Additional Recipient"
+  // control (see documentService.setAdditionalRecipient), mirroring recipient.* above exactly. Previously
+  // always SKIPPED (templateRequirementService's CONDITIONAL_RE treats any "^copy" field as conditional on
+  // "if additional recipient is entered", which no scenario used to ever do) — now exercised for real on any
+  // template whose own requirements reference one of these (see validationService's
+  // templateExpectsAdditionalRecipient).
+  'COPY NAME': 'additionalRecipient.name',
+  'COPY ADDRESS': 'additionalRecipient.address',
+  'COPY CITY, STATE, ZIP': 'additionalRecipient.cityStateZip',
+  'COPY CITY, STATE ZIP': 'additionalRecipient.cityStateZip',
   // "From ..." is the DOCUMENT'S SENDER — whoever is actually logged in and
   // generating it (the payload's own <from_ext> block) — NOT the claim's
   // assigned adjuster (the "Adj:" info-bar field, testData.fromName). Those

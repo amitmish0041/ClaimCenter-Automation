@@ -5,5 +5,7 @@ results/
 *.log
 .env
 .env.local
+.smartcomm-azure-session.json
+.smartcomm-okta-session.json
 .DS_Store
 Thumbds.db
