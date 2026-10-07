@@ -32,8 +32,22 @@ try { WordExtractor = require('word-extractor'); } catch (_) { /* reported lazil
 
 const synonyms = require('./fieldLabelSynonyms');
 
+// Word's own XML escapes &, <, >, ", ' as entities inside <w:t> text — CONFIRMED live 2026-10-06 (DIG122A,
+// "Date &amp; Time of Accident"): raw regex extraction below never decoded these back, so a requirement's own
+// expected text carried the LITERAL string "&amp;" instead of a real "&", which the generated PDF (a genuine
+// ampersand) could never literally match — a false FAIL on an otherwise-correct document. Also handles
+// numeric entities (Word uses those for some punctuation too). "&amp;" is decoded LAST so a double-escaped
+// "&amp;amp;" (if Word ever produces one) doesn't get decoded twice into the wrong character.
+function decodeXmlEntities(s) {
+  return String(s || '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/&amp;/g, '&');
+}
+
 function textOfRuns(xmlFragment) {
-  return Array.from(xmlFragment.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)).map(m => m[1]).join('');
+  return decodeXmlEntities(Array.from(xmlFragment.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)).map(m => m[1]).join(''));
 }
 
 // Like textOfRuns, but also emits a space for every paragraph boundary
@@ -51,7 +65,7 @@ function textOfRunsWithParagraphBreaks(xmlFragment) {
   for (const m of xmlFragment.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>|<\/w:p>/g)) {
     result += m[1] !== undefined ? m[1] : ' ';
   }
-  return result;
+  return decodeXmlEntities(result);
 }
 
 function paragraphsFromDocumentXml(xml) {
@@ -273,7 +287,7 @@ function parseComments(commentsXml) {
     comments[id] = {
       author,
       fullText: textOfRuns(body).trim(),
-      highlightedTag: highlightMatch ? highlightMatch[1].trim() : null,
+      highlightedTag: highlightMatch ? decodeXmlEntities(highlightMatch[1]).trim() : null,
     };
   }
   return comments;

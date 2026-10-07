@@ -61,9 +61,16 @@ function loadAttributes({ refresh = false } = {}) {
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '' });
   const header = rows[0].map(clean);
   const col = (name) => header.indexOf(name);
+  // CONFIRMED live 2026-10-07 (direct read of the raw .xlsb): this sheet's column D header cell literally
+  // contains the single character "y", not "Attribute Data Type" — a source-file authoring artifact (its own
+  // DATA rows underneath are fine, e.g. D2/D3 = "Text") — so name-based lookup for this one column always
+  // failed and `dataType` has been silently blank on every row ever since this field was added. Column D's
+  // position is otherwise stable (immediately after "Template Attribute Name", before "Form(s)"), so fall
+  // back to it positionally only when the expected header text truly isn't present.
+  const dataTypeCol = col('Attribute Data Type') >= 0 ? col('Attribute Data Type') : 3;
   const idx = {
     attributeName: col('Attribute Name'), templateAttributeName: col('Template Attribute Name'),
-    dataType: col('Attribute Data Type'), forms: col('Form(s)'), sampleValue: col('Target Sample Values'),
+    dataType: dataTypeCol, forms: col('Form(s)'), sampleValue: col('Target Sample Values'),
     editable: col('Editable in SmartCOMM?'), comments: col('Comments'), ccField: col('ClaimCenter Field Display'),
     xpath: col('Xpath'), status: col('Status'),
   };

@@ -22,6 +22,7 @@ const fraudLanguageService = require('./fraudLanguageService');
 const dataDictionaryService = require('./dataDictionaryService');
 const payloadXpathService = require('./payloadXpathService');
 const interactiveEditService = require('./interactiveEditService');
+const livePreviewService = require('./livePreviewService');
 const s3AdminService = require('../s3Download/s3AdminService');
 const { createS3SessionManager } = require('../s3Download/s3SessionManager');
 const { loginAsAdmin, loginAsUser, openExistingClaim } = require('../claimCenterBase');
@@ -33,14 +34,44 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
     return blockedTemplateResult(dig, `Template "${dig}" was not found in the SmartCOMM catalog (Claims_Documents_Index.xlsx)`);
   }
 
-  const { requirements, sourceFile, mentionsFraudLanguage } = await templateRequirementService.getRequirements(template, catalogService.DATA_DIR);
+  const { requirements, sourceFile, mode, mentionsFraudLanguage } = await templateRequirementService.getRequirements(template, catalogService.DATA_DIR);
   if (!requirements.length) {
-    return blockedTemplateResult(
-      dig,
-      `No requirements could be derived for ${dig} (${template.documentName}) — its Word template ` +
-      `("${template.templateMappingDoc || 'not set'}") was not found under ${catalogService.DATA_DIR}\\Templates\\ClaimCenter, or is not a .docx.`,
-      template
-    );
+    // CONFIRMED live 2026-10-07 (DIG150MIC): this previously always blamed "not found / not a .docx" even
+    // when getRequirements had ALREADY found and parsed a real .docx (via resolveLocalTemplatePath's fuzzy
+    // fallback — the catalog's OWN mapped path pointed at a ".pdf" that doesn't exist, but a same-stem .docx
+    // sits right next to it and resolves fine) — the classifier just derived zero checkable requirements from
+    // its actual content. Those are two genuinely different problems with two different fixes (fix the
+    // catalog/file location vs. look at why this document's own content yielded nothing), so the reason text
+    // now says which one actually happened instead of always guessing the file-location one.
+    // CONFIRMED live 2026-10-07 (DIG150MIC): attempted letting an Interactive template with zero derived
+    // requirements continue anyway, on the theory that the interactive field-editability check is independent
+    // of static content requirements — it IS independent, but this specific document (catalog's own
+    // `overlay: "Yes"` flag) turned out to be a genuinely different SmartCOMM rendering mode entirely: its
+    // live editor content lives inside a SEPARATE nested preview iframe our field-scanner never looks inside
+    // (confirmed via a live DOM dump — the scanned frame's own content area just showed Thunderhead's empty-
+    // state "ENTER CONTENT HERE" watermark), and its generated PDF also fails `pdf-parse` ("Invalid PDF
+    // structure"). Continuing just traded one clean BLOCKED result for a confusing crash further downstream,
+    // with no actual validation gained — reverted per user direction 2026-10-07. An "overlay" template is
+    // flagged clearly and immediately instead, rather than attempting a session this tool doesn't support yet.
+    if (template.overlay === 'Yes') {
+      return blockedTemplateResult(
+        dig,
+        `${dig} (${template.documentName}) is marked "overlay" in the SmartCOMM catalog — this automation does not ` +
+        `support overlay-type templates yet. Confirmed live: its live editor content renders inside a separate ` +
+        `nested preview iframe this tool's field-scanner doesn't look inside (0 merge fields found despite the ` +
+        `Data Dictionary tracking real fields for it), and its generated PDF also fails text extraction ("Invalid ` +
+        `PDF structure"). Not a missing-file or configuration problem — this document type needs its own, not-yet-` +
+        `built support.`,
+        template
+      );
+    }
+    const reason = sourceFile
+      ? `No requirements could be derived for ${dig} (${template.documentName}) — its template file WAS found and parsed ` +
+        `(${sourceFile}, mode: ${mode || 'unknown'}), but ${mode === 'heuristic' || mode === 'heuristic-doc' ? 'the heuristic classifier' : 'parsing'} ` +
+        `derived zero checkable requirements from its actual content — not a missing-file problem.`
+      : `No requirements could be derived for ${dig} (${template.documentName}) — its Word template ` +
+        `("${template.templateMappingDoc || 'not set'}") was not found under ${catalogService.DATA_DIR}\\Templates\\ClaimCenter, or is not a .docx.`;
+    return blockedTemplateResult(dig, reason, template);
   }
   console.log(`[SmartComm] ${dig}: derived ${requirements.length} requirements from ${sourceFile}`);
   if (templateExpectsAdditionalRecipient(requirements)) {
@@ -632,7 +663,14 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
       return { ...base, status: 'BLOCKED', reason: err.message, passed: 0, failed: 0, blocked: 1, skipped: 0 };
     }
     console.log(`[SmartComm] ERROR ${scenario.scenarioId}: ${err.message}`);
-    return { ...base, status: 'ERROR', reason: err.message, passed: 0, failed: 0, blocked: 0, skipped: 0 };
+    // err.interactiveChecks/choicesApplied (see runInteractiveGeneration's own completeDocument try/catch)
+    // preserve whatever field-editing progress happened before the throw, so a Complete-Document failure's
+    // saved report still shows what was/wasn't edited at that point instead of just the raw error text.
+    return {
+      ...base, status: 'ERROR', reason: err.message, passed: 0, failed: 0, blocked: 0, skipped: 0,
+      ...(err.interactiveChecks ? { interactiveChecks: err.interactiveChecks } : {}),
+      ...(err.choicesApplied ? { conditionalSummary: { choicesAnswered: err.choicesApplied } } : {}),
+    };
   }
 }
 
@@ -660,6 +698,72 @@ function pickFieldLabel(n, field, outcome, dictRow) {
 
 function normForKnownValueMatch(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
 
+const EDIT_DATE_RE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+
+// Builds a real, validly-formatted calendar date, offset by `n` days from the dictionary's own sample date
+// (or a fixed base if the sample isn't MM/DD/YYYY-shaped) so every field still gets its own distinct value —
+// same reasoning as the dollar-amount fix below, just for Date-typed fields instead of numeric ones. This
+// closes a gap verifyInteractiveEditsInPdf already flagged in its own comments: a synthetic non-date marker
+// risks being silently reformatted/rejected downstream even where the editor itself accepts it.
+function buildDateValue(sampleValue, n) {
+  const m = EDIT_DATE_RE.exec(String(sampleValue || '').trim());
+  const base = m ? new Date(Number(m[3]), Number(m[1]) - 1, Number(m[2])) : new Date(2026, 0, 1);
+  base.setDate(base.getDate() + n);
+  const mm = String(base.getMonth() + 1).padStart(2, '0');
+  const dd = String(base.getDate()).padStart(2, '0');
+  return `${mm}/${dd}/${base.getFullYear()}`;
+}
+
+const EDIT_TIME_RE = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i;
+
+// Builds a plausible "H:MMAM/PM"-shaped time, offset by `n` minutes from the dictionary's own sample time (or
+// 3:30PM if the sample isn't in that shape) so it stays unique per field. Works in minutes-since-midnight
+// throughout so AM/PM actually flips correctly once the offset crosses noon/midnight — an earlier version
+// tracked only a 12-hour span and could never produce PM, since "hour" could then never reach 12.
+function buildTimeValue(sampleValue, n) {
+  const m = EDIT_TIME_RE.exec(String(sampleValue || '').trim());
+  let totalMinutes = 15 * 60 + 30; // 3:30 PM fallback, in 24-hour minutes-since-midnight
+  if (m) {
+    let hour24 = Number(m[1]) % 12;
+    if (/pm/i.test(m[3])) hour24 += 12;
+    totalMinutes = hour24 * 60 + Number(m[2]);
+  }
+  totalMinutes = (totalMinutes + n) % (24 * 60);
+  const hour24 = Math.floor(totalMinutes / 60);
+  const minute = totalMinutes % 60;
+  const ampm = hour24 >= 12 ? 'PM' : 'AM';
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${String(minute).padStart(2, '0')}${ampm}`;
+}
+
+// A field immediately preceded by "$" (e.g. "...in the amount of $[--<<EditableField>>--]") almost certainly
+// expects a numeric dollar amount, not free text — CONFIRMED live 2026-10-06 (DIG36): typing the usual
+// "[QA-EDIT-N]" bracketed TEXT marker into one of these is the same kind of "non-text-typed field silently
+// rejects free text" failure already seen for checkboxes, just triggered by a numeric-only field instead of a
+// checkbox. `900 + n` keeps the value plainly numeric while still unique per field (so the PDF-survival check
+// can't mistake one field's edit for a different field's) — field counts never get anywhere near 100 per
+// document, so collisions aren't a real risk.
+//
+// Per user direction 2026-10-07: the Data Dictionary's own "Attribute Data Type" column (Date/Money/Number/
+// Time/Text/...) is now consulted BEFORE falling back to the "$"-prefix heuristic above — a far more general
+// signal than guessing from surrounding text, and it covers every Date-typed field, not just ones immediately
+// preceded by a dollar sign. The dictionary match here is necessarily looked up by labelContext ALONE (the
+// live editor's own technicalName isn't known until the field is actually double-clicked, inside
+// inspectAndMaybeEdit — a chicken-and-egg ordering this sidesteps rather than restructures, since
+// matchAttributeForField's label-matching tier alone already resolves the large majority of fields; the final,
+// fuller match recorded on interactiveChecks after the edit can still use technicalName too). A field that
+// doesn't resolve to a dictionary row at all, or resolves to "Text"/blank, keeps the exact prior behavior
+// (dollar heuristic, else the bracketed marker) — this only changes behavior for fields the dictionary
+// positively identifies as Date/Money/Number/Time.
+function buildEditValue(field, n, digNumber) {
+  const match = digNumber && dataDictionaryService.matchAttributeForField(digNumber, { labelContext: field.labelContext });
+  const dataType = match && match.row && match.row.dataType;
+  if (dataType === 'Date') return buildDateValue(match.row.sampleValue, n);
+  if (dataType === 'Money' || dataType === 'Number') return String(900 + n);
+  if (dataType === 'Time') return buildTimeValue(match.row.sampleValue, n);
+  return /\$\s*\[?\s*$/.test(field.labelContext || '') ? String(900 + n) : `[QA-EDIT-${n}]`;
+}
+
 // Claims a still-unmatched interactiveChecks entry by comparing its OWN captured value (`before` — the
 // field's initial, pre-edit rendered text) against a list of {attributeName, value} pairs this scenario
 // already knows to be true (who was picked as Primary/Additional Recipient, the 'From' contact's own
@@ -678,12 +782,20 @@ function assignByKnownValue(interactiveChecks, digNumber, knownValues) {
     if (c.dictionaryField) continue; // already matched (label-based pass runs first)
     const beforeNorm = normForKnownValueMatch(c.before);
     if (!beforeNorm) continue;
-    const hit = knownValues.find((kv) => {
-      if (claimed.has(kv.attributeName)) return false;
+    // CONFIRMED live 2026-10-06 (DIG162): finding the first NOT-YET-CLAIMED match (the original approach) lets
+    // a field whose text equally matches an EARLIER-priority, ALREADY-claimed value (e.g. "To Name" — already
+    // claimed by the address block) fall through and settle for a LATER, lower-priority value that happens to
+    // share the same text (e.g. "Claimant Name") — wrongly relabeling a salutation that repeats the recipient's
+    // own name as the claimant instead. Find the single BEST match first (array priority order, regardless of
+    // claimed status), and only act on it if that best match is still free — if it's already taken, this field
+    // is genuinely ambiguous between two coincidentally-same-valued concepts, so it's safer to leave it
+    // unmatched (flagged for manual review) than to guess a worse-priority concept just because it's unclaimed.
+    const best = knownValues.find((kv) => {
       const vNorm = normForKnownValueMatch(kv.value);
       return vNorm.length >= 3 && (beforeNorm === vNorm || beforeNorm.includes(vNorm) || vNorm.includes(beforeNorm));
     });
-    if (!hit) continue;
+    if (!best || claimed.has(best.attributeName)) continue;
+    const hit = best;
     claimed.add(hit.attributeName);
     // Scoped-first, falling back to an exact-name-only match beyond the dictionary's own Form(s) column (see
     // dataDictionaryService.getAttributeByExactName's header) — `hit.attributeName` here is a literal,
@@ -708,8 +820,20 @@ function assignByKnownValue(interactiveChecks, digNumber, knownValues) {
 async function runInteractiveGeneration(page, { template, scenario, effectiveTestData, recipient, additionalRecipient, fileNamePrefix, s3Session, commentFieldNames }) {
   const log = (m) => console.log(`[SmartComm] ${scenario.scenarioId}: ${m}`);
 
-  await interactiveEditService.clickInteractiveAndWaitForEditor(page, page.context(), { log, scenarioId: scenario.scenarioId });
-  const frame = await interactiveEditService.getEditorFrame(page);
+  // Live preview for the Runner UI (Commercial Line Performance test/runner) — a read-only, auto-refreshing
+  // screenshot a person watching that UI can poll, independent of whether they have desktop access to
+  // whichever machine is actually running this headed browser. `activePage` starts as the main page and
+  // swings over to the Azure sign-in popup for as long as one is open (see onPopup below and
+  // livePreviewService.js's own header for why that redirect matters) — stopped unconditionally in `finally`
+  // so a thrown error from anywhere below still cleans up its screenshot file.
+  let activePage = page;
+  const stopLivePreview = livePreviewService.startLivePreview(page, scenario.scenarioId, { getActivePage: () => activePage });
+  try {
+    await interactiveEditService.clickInteractiveAndWaitForEditor(page, page.context(), {
+      log, scenarioId: scenario.scenarioId,
+      onPopup: (popup) => { activePage = popup; popup.once('close', () => { activePage = page; }); },
+    });
+    const frame = await interactiveEditService.getEditorFrame(page);
 
   // "Apply Medical Letterhead?"-style choices (a separate right-hand panel, not inline merge fields — see
   // interactiveEditService's own header) drive conditional content/headers, so they need to be set BEFORE
@@ -720,7 +844,21 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     ...(await interactiveEditService.selectAllYesNoChoices(frame, { log, label: 'editor frame' })),
   ];
   if (choicesApplied.length) {
-    log(`selected "Yes" for ${choicesApplied.length} choice(s): ${choicesApplied.join('; ')}`);
+    log(`made ${choicesApplied.length} choice selection(s): ${choicesApplied.join('; ')}`);
+  }
+  if (process.env.DEBUG_CHOICES_HTML) {
+    const html = await frame.evaluate(() => {
+      const header = Array.from(document.querySelectorAll('*')).find((e) => (e.textContent || '').trim() === 'Select Language to display in Paragraph' && e.children.length === 0);
+      if (!header) return '(header not found)';
+      let node = header;
+      for (let i = 0; i < 10 && node.parentElement; i++) {
+        node = node.parentElement;
+        if ((node.textContent || '').includes('garagekeepers comprehensive')) break;
+      }
+      return node.outerHTML.slice(0, 30000);
+    }).catch((e) => `(eval failed: ${e.message})`);
+    require('fs').writeFileSync(require('path').join(__dirname, '..', '..', 'results', 'smartComm', 'DEBUG_choices_html.html'), html);
+    log(`DEBUG_CHOICES_HTML: dumped to results/smartComm/DEBUG_choices_html.html (${html.length} chars)`);
   }
 
   // CONFIRMED live 2026-09-30 (65-template sweep: 22 of 65 hit this) — "0 merge fields found" is usually NOT
@@ -766,8 +904,15 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // Yes, editor renders it locked, or vice versa) surface as its own signal instead of staying invisible.
   const interactiveChecks = [];
   let n = 0;
+  let skippedUnselectedChoiceCount = 0;
   for (const field of fields) {
     n += 1;
+    // This field is a duplicate copy living inside a Choices-panel option that ISN'T the one we selected (see
+    // readMergeFields' own `inUnselectedChoice` — CONFIRMED live 2026-10-06, DIG36: SmartCOMM previews every
+    // option's paragraph simultaneously). It can never survive into the actual generated document, so editing
+    // or validating it would just waste time and duplicate-report whatever the SELECTED copy already finds —
+    // skip it entirely rather than double-click it or give it its own interactiveChecks entry.
+    if (field.inUnselectedChoice) { skippedUnselectedChoiceCount += 1; continue; }
     // inspectAndMaybeEdit's own internal timeouts (5s dblclick, 15s default action timeout) bound EVERY
     // individual Playwright call it makes — but CONFIRMED live 2026-09-29 (DIG166, 26 fields) the whole
     // call can still sit with ZERO progress far longer than any of those could explain, which points at
@@ -783,7 +928,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
         .then((diagPath) => log(`[Interactive] Stuck-field diagnostic ${diagPath ? `saved: ${diagPath}.png / .json` : 'capture FAILED (page may be fully frozen, not just this one action)'}`));
     }, 15000);
     const outcome = await interactiveEditService.inspectAndMaybeEdit(frame, page, field, {
-      newValue: field.editable ? `[QA-EDIT-${n}]` : undefined, log,
+      newValue: field.editable ? buildEditValue(field, n, template.digNumber) : undefined, log,
     }).finally(() => clearTimeout(watchdog));
     // A locked field's "identify only" double-click (newValue left undefined, see inspectAndMaybeEdit) returns
     // changed:null — not false — whenever the double-click unexpectedly opens SOME editor popup anyway (a
@@ -812,7 +957,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     interactiveChecks.push({
       id: `INT${n}`,
       label: pickFieldLabel(n, field, outcome, dictRow),
-      labelContext: field.labelContext || null,
+      labelContext: field.labelContext || null, technicalName: outcome.technicalName || null,
       expectedEditable: field.editable, observedChanged: outcome.changed, result,
       before: outcome.before, after: outcome.after, committedMarker: outcome.committedMarker, reason: outcome.note,
       dictionaryField: dictRow ? dictRow.attributeName : null,
@@ -845,7 +990,8 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
 
   const passedChecks = interactiveChecks.filter((c) => c.result === 'PASS').length;
   const failedChecks = interactiveChecks.filter((c) => c.result === 'FAIL').length;
-  log(`interactive field checks: ${passedChecks} passed, ${failedChecks} failed (${interactiveChecks.length} total)`);
+  log(`interactive field checks: ${passedChecks} passed, ${failedChecks} failed (${interactiveChecks.length} total)` +
+    (skippedUnselectedChoiceCount ? ` — ${skippedUnselectedChoiceCount} more field(s) skipped entirely (duplicate copies inside a non-selected Choices-panel option)` : ''));
 
   const dictionaryReference = dataDictionaryService.getAttributesForTemplate(template.digNumber)
     .map((a) => `${a.attributeName} (${a.templateAttributeName || 'n/a'}): editable=${a.editable === null ? 'unspecified' : a.editable}`);
@@ -855,35 +1001,64 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // handle). CONFIRMED live 2026-09-29 (DIG166, user-suggested): leaving even ONE required field unedited
   // doesn't just fail that one field — Complete Document rejects the whole submission and the editor reloads
   // back to its ORIGINAL unedited state, discarding every other field's edit too (a real user confirmed
-  // manually filling every single field completes cleanly). `.nth(idx)`-based locators (see readMergeFields)
-  // stay valid across this re-scan even though the DOM nodes have changed since the first pass. Bounded to 3
-  // rounds total (not per field) so a field that's genuinely never going to accept an edit can't loop forever.
+  // manually filling every single field completes cleanly). Bounded to 3 rounds total (not per field) so a
+  // field that's genuinely never going to accept an edit can't loop forever.
+  //
+  // CONFIRMED live 2026-10-06 (DIG200): `.nth(idx)` positional re-location, trusted here since
+  // readMergeFields' own header documented it as stable "as long as the field COUNT and ORDER stay stable",
+  // turned out to be the ROOT CAUSE of fields that looked permanently stuck — committing an edit can make
+  // Thunderhead regenerate/re-split NEARBY spans (a field's content moving between one "th__split-line" piece
+  // and two, or back), shifting what sits at a given numeric position without changing the total field COUNT
+  // at all. A later retry round then grabbed whatever ucconnected, often already-resolved (frequently locked)
+  // element now happened to occupy that position — confirmed by a live DOM dump showing a "retry" target
+  // resolve to a locked address-continuation span that was never the intended field. Re-identifying each
+  // stuck field by its own STABLE labelContext (the on-page text immediately before it — unaffected by a
+  // DIFFERENT field's internal reflow, only by edits to text earlier in the SAME block) fixes this; position
+  // is now only a same-editable-only fallback, specifically so a field that's now locked at the old position
+  // (the exact drift symptom) is never wrongly mistaken for the real target.
   let retryRound = 0;
   // CONFIRMED live 2026-10-04 (DIG53): a field whose committed value shows up NOWHERE on the page afterward
   // (interactiveEditService's own `vanished` flag — a non-text-typed field silently rejecting free text, not
-  // a timing fluke) can never pass by retrying the exact same fill-text strategy, since its live text never
-  // contains "QA-EDIT" no matter how many times this runs — without this set, such a field burns all 3 retry
-  // rounds for nothing, every single time. Tracked by idx since that's what readMergeFields' `.nth(idx)`
-  // locators are keyed on.
+  // a timing fluke) can never pass by retrying the exact same fill-text strategy. Keyed by this field's OWN
+  // position in `interactiveChecks` (stable — that array is built once, in order, during the first pass, and
+  // never reordered) rather than by a live DOM idx, which is exactly what can no longer be trusted round to
+  // round.
   const hopelessIdx = new Set();
-  let stillUnedited = (await interactiveEditService.readMergeFields(frame)).filter((f) => f.editable && !f.stripped.includes('QA-EDIT') && !hopelessIdx.has(f.idx));
-  while (stillUnedited.length && retryRound < 3) {
+  const normalizeLabelForRematch = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  // The authoritative "what still needs work" list, driven entirely by OUR OWN interactiveChecks state (never
+  // by a live DOM read) — same reasoning as the user-confirmed fix above it: trust what we already recorded,
+  // don't re-derive it from a page that may have reflowed.
+  function pendingRetryTargets() {
+    return interactiveChecks
+      .map((c, i) => ({ c, i }))
+      .filter(({ c, i }) => !hopelessIdx.has(i) && c.expectedEditable === true && c.result !== 'PASS');
+  }
+  let targets = pendingRetryTargets();
+  while (targets.length && retryRound < 3) {
     retryRound += 1;
-    log(`Second pass #${retryRound}: ${stillUnedited.length} editable field(s) still not edited — retrying: ${stillUnedited.map((f) => `#${f.idx + 1}`).join(', ')}`);
-    for (const field of stillUnedited) {
-      const n2 = field.idx + 1;
-      const outcome = await interactiveEditService.inspectAndMaybeEdit(frame, page, field, { newValue: `[QA-EDIT-${n2}]`, log });
-      const existing = interactiveChecks[field.idx];
-      // CONFIRMED live 2026-09-30 (DIG89, full 65-template sweep): the merge-field COUNT itself can grow
-      // between the first pass and this re-scan (4 fields found initially, 9 seen on the very first retry
-      // round) — presumably Thunderhead lazily renders/registers some fields only once nearby content
-      // settles. A field at a position beyond the FIRST pass's own list has no matching entry to update; that
-      // used to crash the whole scenario ("Cannot set properties of undefined") instead of just leaving this
-      // one surprise field unaccounted for in the report.
-      if (!existing) {
-        log(`field #${n2}: appeared only on retry pass #${retryRound} (not present in the initial ${interactiveChecks.length}-field scan) — skipping, not tracked in interactiveChecks.`);
-        continue;
+    const freshFields = await interactiveEditService.readMergeFields(frame);
+    const claimed = new Set();
+    const relocated = [];
+    const stillMissing = [];
+    for (const t of targets) {
+      const wantLabel = normalizeLabelForRematch(t.c.labelContext);
+      let field = wantLabel
+        ? freshFields.find((f) => f.editable && !claimed.has(f.idx) && normalizeLabelForRematch(f.labelContext) === wantLabel)
+        : null;
+      if (!field) {
+        // No labelContext to match on (or no match found) — fall back to the original position, but ONLY if
+        // it's STILL editable there. A locked field at the old position is exactly the drift symptom, not a
+        // legitimate same-field match.
+        const positional = freshFields.find((f) => f.idx === t.i && !claimed.has(f.idx));
+        if (positional && positional.editable) field = positional;
       }
+      if (field) { claimed.add(field.idx); relocated.push({ field, target: t }); } else { stillMissing.push(t); }
+    }
+    log(`Second pass #${retryRound}: ${targets.length} editable field(s) still not edited (${relocated.length} relocated, ${stillMissing.length} could not be relocated this round) — retrying: ${relocated.map(({ target }) => `#${target.i + 1}`).join(', ')}`);
+    for (const { field, target } of relocated) {
+      const n2 = target.i + 1;
+      const outcome = await interactiveEditService.inspectAndMaybeEdit(frame, page, field, { newValue: buildEditValue(field, n2, template.digNumber), log });
+      const existing = target.c; // same object reference as interactiveChecks[target.i]
       if (outcome.attempted && outcome.changed) {
         existing.result = 'PASS';
         existing.observedChanged = outcome.changed;
@@ -894,24 +1069,42 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       } else if (outcome.note) {
         existing.reason = `Still failing after retry pass #${retryRound}: ${outcome.note}`;
         if (outcome.vanished) {
-          hopelessIdx.add(field.idx);
+          hopelessIdx.add(target.i);
           log(`field #${n2}: giving up after this attempt — value vanishes completely, not just a timing/retry issue.`);
         }
       }
     }
-    stillUnedited = (await interactiveEditService.readMergeFields(frame)).filter((f) => f.editable && !f.stripped.includes('QA-EDIT') && !hopelessIdx.has(f.idx));
+    targets = pendingRetryTargets();
   }
   if (retryRound) {
     const passedAfterRetry = interactiveChecks.filter((c) => c.result === 'PASS').length;
     const failedAfterRetry = interactiveChecks.filter((c) => c.result === 'FAIL').length;
     log(`interactive field checks after ${retryRound} retry pass(es): ${passedAfterRetry} passed, ${failedAfterRetry} failed (${interactiveChecks.length} total)`);
   }
-  // stillUnedited deliberately excludes `hopelessIdx` fields (no point re-reading them every round — see
-  // above), but they're still genuinely unedited for THIS purpose: Complete Document doesn't care why a
-  // field never got filled, only that it didn't.
-  const trulyUneditedCount = stillUnedited.length + hopelessIdx.size;
+  // `targets` here is the FINAL post-loop pendingRetryTargets() result — still-authoritative, driven by our
+  // own interactiveChecks state, not a live DOM read. Genuinely unedited for THIS purpose either way: Complete
+  // Document doesn't care why a field never got filled, only that it didn't.
+  const trulyUneditedCount = targets.length + hopelessIdx.size;
   if (trulyUneditedCount) {
-    log(`WARNING: ${trulyUneditedCount} editable field(s) remain unedited after ${retryRound} retry pass(es) (${hopelessIdx.size} given up on as unfillable, ${stillUnedited.length} still genuinely pending) — Complete Document will very likely fail and revert ALL edits (CONFIRMED live: even one unedited required field does this).`);
+    log(`WARNING: ${trulyUneditedCount} editable field(s) remain unedited after ${retryRound} retry pass(es) (${hopelessIdx.size} given up on as unfillable, ${targets.length} still genuinely pending) — Complete Document will very likely fail and revert ALL edits (CONFIRMED live: even one unedited required field does this).`);
+    if (process.env.DEBUG_STUCK_FIELD_HTML) {
+      const stuckChecks = [...targets.map((t) => t.i), ...hopelessIdx].map((i) => ({ i, c: interactiveChecks[i] }));
+      const freshFields = await interactiveEditService.readMergeFields(frame);
+      const dumps = [];
+      for (const { i, c } of stuckChecks) {
+        const wantLabel = normalizeLabelForRematch(c.labelContext);
+        const field = (wantLabel && freshFields.find((f) => normalizeLabelForRematch(f.labelContext) === wantLabel)) || freshFields[i];
+        const html = field
+          ? await field.locator.evaluate((el) => (el.closest('p, div, li, td, th') || el.parentElement).outerHTML.slice(0, 4000)).catch((e) => `(eval failed: ${e.message})`)
+          : '(could not relocate this field in the current DOM at all)';
+        dumps.push(`=== interactiveChecks #${i + 1} (label: "${c.label}") ===\n${html}`);
+      }
+      require('fs').writeFileSync(
+        require('path').join(__dirname, '..', '..', 'results', 'smartComm', 'DEBUG_stuck_fields.html'),
+        dumps.join('\n\n')
+      );
+      log(`DEBUG_STUCK_FIELD_HTML: dumped ${stuckChecks.length} stuck field(s) to results/smartComm/DEBUG_stuck_fields.html`);
+    }
   }
 
   // CONFIRMED live 2026-09-30: skipping "Save Changes" (an earlier attempt to cut wall-clock time — Complete
@@ -921,7 +1114,19 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // evidently does not itself commit a pending field edit the way Save Changes does — Save Changes is back,
   // clicked before Complete Document, so an edit is actually persisted before the document is finalized.
   await interactiveEditService.saveChanges(page, { log });
-  await interactiveEditService.completeDocument(page, { log, scenarioId: scenario.scenarioId });
+  try {
+    await interactiveEditService.completeDocument(page, { log, scenarioId: scenario.scenarioId });
+  } catch (err) {
+    // CONFIRMED live 2026-10-06 (DIG200, "Content is not allowed in prolog"): this throw previously lost
+    // every field this scenario had already edited/validated up to this exact point — runScenario's own
+    // catch block only had err.message to save, so a Complete-Document failure left NOTHING to diagnose WHY
+    // beyond the raw ClaimCenter error text (not our own values, not which fields were touched). Attaching
+    // the in-progress interactiveChecks (and choicesApplied) to the error itself lets the ERROR result still
+    // carry them through to the saved report, instead of this scenario's whole edit history vanishing.
+    err.interactiveChecks = interactiveChecks;
+    err.choicesApplied = choicesApplied;
+    throw err;
+  }
   const identifier = await interactiveEditService.readDocumentPropertiesIdentifier(page);
   log(`Document Properties Identifier: ${identifier}`);
 
@@ -935,11 +1140,14 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   const path = require('path');
   const fs = require('fs');
   return s3Session.withPage(async (s3Page) => {
-    const matches = await s3AdminService.searchSmartComm(s3Page, identifier, { log });
-    if (!matches.length) throw new Error(`INTERACTIVE_S3_NOT_FOUND: no S3 object matched Identifier "${identifier}" under ClaimCenter Inbound Pending > smartcomm > output > output.`);
-    const downloaded = await s3AdminService.downloadMatches(s3Page, matches.slice(0, 1), documentService.DOWNLOAD_DIR, { log });
-    const finalPath = path.join(path.dirname(downloaded[0].localPath), `${fileNamePrefix}_interactive.pdf`);
-    fs.renameSync(downloaded[0].localPath, finalPath);
+    // CONFIRMED live 2026-10-07: the naive "take the first match" approach this used to use can silently grab
+    // ClaimCenter's own document-indexing metadata object (same folder, same Identifier) instead of the real
+    // PDF — see downloadFirstValidPdf's own header for the full story (12/12 scenarios across 4 templates,
+    // 100% reproducible, not a flake).
+    const pdfResult = await s3AdminService.downloadFirstValidPdf(s3Page, identifier, documentService.DOWNLOAD_DIR, { log });
+    if (pdfResult.error) throw new Error(`INTERACTIVE_S3_NOT_FOUND: ${pdfResult.error}`);
+    const finalPath = path.join(path.dirname(pdfResult.downloaded.localPath), `${fileNamePrefix}_interactive.pdf`);
+    fs.renameSync(pdfResult.downloaded.localPath, finalPath);
 
     // CONFIRMED live 2026-09-30: the SAME identifier that finds the PDF above also resolves the ORIGINAL
     // payload ClaimCenter sent to SmartCOMM, under a different branch (Outbound > smartcomm > input) — this
@@ -1047,6 +1255,9 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
 
     return { pdfPath: finalPath, interactiveChecks, dictionaryReference, payload, rawPayloadRoot, choicesApplied, trackedFields, unmatchedTrackedFields };
   });
+  } finally {
+    stopLivePreview();
+  }
 }
 
 // interactiveEditService.inspectAndMaybeEdit only proves the EDITOR accepted an edit (a new span with the
@@ -1116,14 +1327,33 @@ function annotateInteractiveEditFailures(validations, interactiveChecks) {
   // count below exactly like a tracked one would be.
   const edited = (interactiveChecks || []).filter((c) => c.observedChanged === true && c.verifiedInPdf === true && c.expectedEditable === true);
   if (!edited.length) return;
+  // CONFIRMED live 2026-10-07 (DIG226): matching only on the field's display label appearing inside the
+  // requirement's description missed most real overwrites — label-less fields (Claimant Name printed after
+  // "Employee:", and the Copy Name/Address/City block, identified only later by known-value matching) never
+  // have a label that appears in "Value for "Copy Name" must match additionalRecipient.name". The field's own
+  // ORIGINAL pre-edit value (`before`) is the reliable link: it's exactly what that requirement expected to
+  // find before we overwrote it. Containment both ways, since one requirement's expected value can span
+  // several separately-editable fields (e.g. "BIRMINGHAM, MI 48009-6571" = city + state + zip fields).
+  const minLen = 4;
   for (const v of validations) {
     if (v.result !== 'FAIL') continue;
-    const hit = edited.find((c) => (v.description || '').toLowerCase().includes(c.label.toLowerCase()));
-    if (!hit) continue;
-    v.actual = hit.after;
+    const desc = (v.description || '').toLowerCase();
+    const expectedNorm = normForKnownValueMatch(v.expected);
+    const hits = edited.filter((c) => {
+      if (c.label && desc.includes(c.label.toLowerCase())) return true;
+      if (c.dictionaryField && desc.includes(`"${c.dictionaryField.toLowerCase()}"`)) return true;
+      const beforeNorm = normForKnownValueMatch(c.before);
+      return expectedNorm.length >= minLen && beforeNorm.length >= minLen
+        && (expectedNorm.includes(beforeNorm) || beforeNorm.includes(expectedNorm));
+    });
+    if (!hits.length) continue;
+    // committedMarker is the plain value actually typed; `after` carries the live editor's own extra bracket
+    // decoration ("[[QA-EDIT-18]]") that never appears in the real PDF.
+    const editedValue = hits.map((h) => h.committedMarker || h.after).join(' ');
+    v.actual = editedValue;
     v.result = 'SKIPPED';
     v.intentionalEdit = true; // report renderers: still show Expected/Actual for this one, unlike a plain SKIPPED
-    v.reason = `Intentionally overwritten with "${hit.after}" as part of the interactive-editable-field test (see the Interactive Session section) — not a template defect.${v.reason ? ` (Original reason: ${v.reason})` : ''}`;
+    v.reason = `Intentionally overwritten with "${editedValue}" (${hits.map((h) => h.id).join(', ')}) as part of the interactive-editable-field test (see the Interactive Session section) — not a template defect.${v.reason ? ` (Original reason: ${v.reason})` : ''}`;
   }
 }
 
@@ -1211,6 +1441,11 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
     // block) even though this one specific editable merge field no longer shows it.
     const matchedCheck = (interactiveChecks || []).find((c) => c.dictionaryField === row.attributeName && c.observedChanged !== true);
     if (matchedCheck) fieldScoped += 1;
+    // This run's OWN interactive-field check overwrote this exact attribute (observedChanged===true) even
+    // though it's excluded from matchedCheck above — if the fallback whole-document search below still can't
+    // find the original value anywhere, pdfValidationService needs to know it was this test's own edit that
+    // did that, not a real template defect (per user direction 2026-10-06, DIG236).
+    const editedByTest = (interactiveChecks || []).some((c) => c.dictionaryField === row.attributeName && c.observedChanged === true);
     requirements.push({
       id: `XP${n}`,
       description: `Value for "${row.attributeName}" must match the SmartCOMM payload (via Data Dictionary Xpath)`,
@@ -1218,6 +1453,7 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
       expectedValue: String(result.value),
       fieldValue: matchedCheck ? (matchedCheck.committedMarker || matchedCheck.after || matchedCheck.before) : undefined,
       fieldLabel: matchedCheck ? matchedCheck.label : undefined,
+      wasEditedByTest: !matchedCheck && editedByTest,
       docOrder: Number.MAX_SAFE_INTEGER,
     });
   }
@@ -1233,6 +1469,23 @@ function buildFraudLanguageRequirements(payload) {
   const context = {};
   const details = {};
   const conditionNote = (m) => (m ? ` — Fraud Language sheet row: "${m.conditions || 'All'}"` : '');
+  const statesDiffer = policyState && lossState && policyState !== lossState;
+  const policyMatch = statesDiffer ? fraudLanguageService.getExpectedFraudLanguage(policyState, { lob: lossType, lossCauseName }) : null;
+  const requiredWording = (m) => (m && !isNoFraudLanguageRequired(m) ? [m.fraudLanguage] : []);
+
+  // Per user direction 2026-10-07 (DIG120B, MI): a "None" state used to drop the fraud check silently, so the
+  // report gave no sign it was evaluated at all. Now an explicit check that the document prints NO fraud
+  // wording for that state (aside from wording the other state on the claim genuinely requires).
+  if (lossMatch && isNoFraudLanguageRequired(lossMatch)) {
+    requirements.push({
+      id: 'FL1',
+      description: `No fraud language for loss state (${lossState}, loss type ${lossType || 'unknown'}) — Fraud Language sheet says "None"${conditionNote(lossMatch)}`,
+      type: 'fraudLanguageAbsent',
+      stateLabel: `${lossMatch.stateName} [${lossMatch.conditions || 'All'}]`,
+      allowedFraudLanguage: requiredWording(policyMatch),
+      docOrder: Number.MAX_SAFE_INTEGER,
+    });
+  }
 
   if (!isNoFraudLanguageRequired(lossMatch) || !lossMatch) {
     // Still emit the check even when lossMatch is null (state not in the
@@ -1249,9 +1502,17 @@ function buildFraudLanguageRequirements(payload) {
     details.FL1 = { state: lossState, lossType, match: lossMatch };
   }
 
-  if (policyState && lossState && policyState !== lossState) {
-    const policyMatch = fraudLanguageService.getExpectedFraudLanguage(policyState, { lob: lossType, lossCauseName });
-    if (!isNoFraudLanguageRequired(policyMatch) || !policyMatch) {
+  if (statesDiffer) {
+    if (policyMatch && isNoFraudLanguageRequired(policyMatch)) {
+      requirements.push({
+        id: 'FL2',
+        description: `No fraud language for policy state (${policyState}) — Fraud Language sheet says "None" (loss state ${lossState} and policy state ${policyState} differ)${conditionNote(policyMatch)}`,
+        type: 'fraudLanguageAbsent',
+        stateLabel: `${policyMatch.stateName} [${policyMatch.conditions || 'All'}]`,
+        allowedFraudLanguage: requiredWording(lossMatch),
+        docOrder: Number.MAX_SAFE_INTEGER,
+      });
+    } else {
       requirements.push({
         id: 'FL2',
         description: `Fraud language for policy state (${policyState}) must also appear (loss state ${lossState} and policy state ${policyState} differ)${conditionNote(policyMatch)}`,
@@ -1277,8 +1538,9 @@ function explainFraudLanguageFailures(validations, pdfText, details) {
   const found = fraudLanguageService.findFraudLanguageInText(pdfText);
   const printed = fraudLanguageService.extractFraudLanguageFromText(pdfText);
   for (const v of validations) {
-    if (!/^FL[12]$/.test(v.id || '') || v.result !== 'FAIL') continue;
-    const d = details[v.id] || {};
+    // Only the presence checks carry `details`; a "None"-state absence check already explains itself.
+    if (!/^FL[12]$/.test(v.id || '') || v.result !== 'FAIL' || !details[v.id]) continue;
+    const d = details[v.id];
     const label = (r) => `${r.stateName} [${r.conditions || 'All'}]`;
     const required = `${d.state || 'state'}, loss type ${d.lossType || 'unknown'} → ${d.match ? label(d.match) : 'n/a'}`;
     // Actual = the fraud wording exactly as printed in the PDF.

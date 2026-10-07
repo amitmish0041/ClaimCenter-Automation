@@ -91,7 +91,7 @@ function installDialogAutoAccept(page, { log = console.log } = {}) {
 }
 
 // ── 1. Interactive button -> Azure SSO popup -> wait for a human to finish sign-in ──────────────────
-async function clickInteractiveAndWaitForEditor(page, context, { log = console.log, timeoutMs = 360000, scenarioId = 'scenario' } = {}) {
+async function clickInteractiveAndWaitForEditor(page, context, { log = console.log, timeoutMs = 360000, scenarioId = 'scenario', onPopup } = {}) {
   installDialogAutoAccept(page, { log });
   // Try a previously-saved session first — if it's still valid, the popup below may resolve on its own
   // without ever showing a login prompt. See azureSessionStore.js for why this is needed at all (each
@@ -106,6 +106,11 @@ async function clickInteractiveAndWaitForEditor(page, context, { log = console.l
   const popupPromise = context.waitForEvent('page', { timeout: 20000 });
   await page.getByRole('button', { name: 'Interactive', exact: true }).click();
   const popup = await popupPromise.catch(() => null);
+  // Lets a caller (validationService.js's live-preview screenshot loop) point itself at this popup instead of
+  // the main page for as long as it's open — this is where the actual Microsoft email/password/MFA fields
+  // render during the sign-in wait, not the main page (which just shows "Authenticating..."). Fired once,
+  // here, rather than on every poll below, since the popup reference itself never changes after this.
+  if (popup && !popup.isClosed() && onPopup) onPopup(popup);
   if (popup && !popup.isClosed()) {
     await popup.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
     if (!popup.isClosed()) {
@@ -204,13 +209,17 @@ async function scanChoicesOnce(root) {
       return clean((el.nextElementSibling && el.nextElementSibling.textContent) || (el.parentElement && el.parentElement.textContent) || '');
     };
     // CONFIRMED live 2026-10-02 (DIG181): the question text isn't rendered as visible DOM text anywhere near
-    // the radio group at all — it's embedded directly in each radio input's own `name` attribute, e.g.
-    // name="th-choice-list-ApplyMedicalLetterhead?-1" (the trailing "-1"/"-2" is the Yes/No option index,
-    // not a per-question id — any option in the pair carries the same question segment). Far more reliable
-    // than the DOM-text fallbacks below, which were guessing at a layout this widget doesn't actually use —
-    // tried first, before those.
+    // the radio group at all — it's embedded directly in each radio input's own `name` attribute (the trailing
+    // "-1"/"-2"/etc. is the option index, not a per-question id — every option in the same group carries the
+    // same question segment). Far more reliable than the DOM-text fallbacks below, which were guessing at a
+    // layout this widget doesn't actually use — tried first, before those.
+    // CONFIRMED live 2026-10-06 (DIG36): the real separator is an UNDERSCORE ("th_choice_Apply Medical
+    // Letterhead?-1", "th_choice_Select Language to display in Paragraph-2") with the question text already
+    // human-readable (spaces and punctuation intact, no camelCase blob to split) — not the hyphenated
+    // "th-choice-list-ApplyMedicalLetterhead?-1" this originally assumed, which never matched live and
+    // silently fell through to the DOM-text fallback for every single choice. Handles both forms.
     const nameAttrQuestion = (nameAttr) => {
-      const m = String(nameAttr || '').match(/^th-choice-list-(.+?)-\d+$/);
+      const m = String(nameAttr || '').match(/^th[_-]choice[_-](?:list[_-])?(.+?)-\d+$/);
       return m ? m[1].replace(/([a-z0-9])([A-Z])/g, '$1 $2').trim() : '';
     };
     const questionTextFor = (containerEl, diag) => {
@@ -234,11 +243,19 @@ async function scanChoicesOnce(root) {
       if (!question && diag) diag.push((row || containerEl) ? (row || containerEl).outerHTML.slice(0, 1200) : '(no row/container element to dump)');
       return question;
     };
-    // Group by the nearest ancestor that plausibly scopes ONE question's two options — role=radiogroup for
-    // ARIA widgets, the nearest <fieldset> (or just the parent) for native <input type="radio">.
-    const groupKeyEl = (el) => (el.getAttribute('role') === 'radio'
-      ? (el.closest('[role="radiogroup"]') || el.parentElement)
-      : (el.closest('fieldset') || el.parentElement));
+    // Group by the nearest ancestor that plausibly scopes ONE question's options — role=radiogroup for ARIA
+    // widgets. For a native <input type="radio">, the real, authoritative grouping signal is its OWN shared
+    // `name` attribute (that's what makes a browser treat a set of radios as mutually exclusive at all) — NOT
+    // DOM ancestry. CONFIRMED live 2026-10-06 (DIG36): a 6-option group ("Select Language to display in
+    // Paragraph") renders each option in its OWN separate wrapper <div> with no shared <fieldset>, so grouping
+    // by `el.closest('fieldset') || el.parentElement` split it into six different "groups of 1" instead of one
+    // real group of 6 — each got clicked independently rather than treated as one mutually-exclusive choice.
+    // Falls back to fieldset/parent only when there's genuinely no name attribute to group by.
+    const groupKeyEl = (el) => {
+      if (el.getAttribute('role') === 'radio') return el.closest('[role="radiogroup"]') || el.parentElement;
+      const name = el.getAttribute('name');
+      return name ? `radio-name:${name}` : (el.closest('fieldset') || el.parentElement);
+    };
     const radios = Array.from(document.querySelectorAll('[role="radio"], input[type="radio"]'));
     const groups = [];
     const seen = new Map();
@@ -253,12 +270,26 @@ async function scanChoicesOnce(root) {
     const skipped = [];
     const diag = [];
     for (const g of groups) {
-      if (g.items.length !== 2) { skipped.push(`group of ${g.items.length} (labels: ${g.items.map((it) => it.label).join('/')})`); continue; }
       const labels = g.items.map((it) => it.label);
-      if (!labels.includes('yes') || !labels.includes('no')) { skipped.push(`pair not yes/no (labels: ${labels.join('/')})`); continue; }
-      const yesItem = g.items.find((it) => it.label === 'yes');
-      if (yesItem.checked) { skipped.push('already Yes'); continue; }
-      results.push({ idx: yesItem.idx, question: nameAttrQuestion(g.nameAttr) || questionTextFor(g.key, diag) || '(unlabeled choice)' });
+      const alreadyChecked = g.items.find((it) => it.checked);
+      if (g.items.length === 2 && labels.includes('yes') && labels.includes('no')) {
+        const yesItem = g.items.find((it) => it.label === 'yes');
+        if (yesItem.checked) { skipped.push('already Yes'); continue; }
+        results.push({ idx: yesItem.idx, chosenLabel: 'Yes', question: nameAttrQuestion(g.nameAttr) || questionTextFor(g.key, diag) || '(unlabeled choice)' });
+        continue;
+      }
+      // CONFIRMED by user 2026-10-06 (DIG36): a radio group that ISN'T a binary yes/no pair (e.g. DIG36's own
+      // 6-way "for bodily injury/property damage per claim" / "...per occurrence" / two garagekeepers variants
+      // / etc.) used to be skipped here entirely — generalized to every template, not special-cased to this
+      // one: any group with NOTHING already selected gets its FIRST option picked, same reasoning as always
+      // picking "Yes" for a binary choice — exercising ONE real content path beats leaving a BA-authored,
+      // presumably-required selection blank (which can itself block Complete Document, and leaves every one
+      // of that group's conditional paragraphs entirely unvalidated either way). A group that already HAS a
+      // selection (the claim/template's own default) is left alone, same as an already-"Yes" pair above.
+      if (alreadyChecked) { skipped.push(`group of ${g.items.length} already has a selection (labels: ${labels.join('/')})`); continue; }
+      if (!g.items.length) continue;
+      const firstItem = g.items[0];
+      results.push({ idx: firstItem.idx, chosenLabel: firstItem.label || '(option 1)', question: nameAttrQuestion(g.nameAttr) || questionTextFor(g.key, diag) || '(unlabeled choice)' });
     }
     // Standalone checkboxes — a DIFFERENT question shape from the yes/no radio pairs above (not part of any
     // group at all): just check it if it isn't already checked. Indexed into its OWN separate list
@@ -305,7 +336,7 @@ async function selectAllYesNoChoices(root, { log = console.log, label = 'main pa
     }
   }
 
-  log(`selectAllYesNoChoices (${label}): ${found.totalRadios} radio(s) in ${found.totalGroups} group(s), ${found.totalCheckboxes} checkbox(es) total; ${found.results.length} yes/no choice(s) and ${found.checkboxResults.length} standalone checkbox(es) to set` + (found.skipped.length ? `; skipped: ${found.skipped.slice(0, 5).join(' | ')}` : ''));
+  log(`selectAllYesNoChoices (${label}): ${found.totalRadios} radio(s) in ${found.totalGroups} group(s), ${found.totalCheckboxes} checkbox(es) total; ${found.results.length} choice(s) and ${found.checkboxResults.length} standalone checkbox(es) to set` + (found.skipped.length ? `; skipped: ${found.skipped.slice(0, 5).join(' | ')}` : ''));
   if (found.diag && found.diag.length) {
     found.diag.forEach((html, i) => log(`selectAllYesNoChoices (${label}): DIAG — no real question label found for choice #${i + 1}, nearby HTML: ${html}`));
   }
@@ -333,15 +364,15 @@ async function selectAllYesNoChoices(root, { log = console.log, label = 'main pa
         }
       }
       if (confirmed) {
-        log(`selectAllYesNoChoices (${label}): selected "Yes" for "${item.question}"`);
-        applied.push(`${item.question}: Yes`);
+        log(`selectAllYesNoChoices (${label}): selected "${item.chosenLabel}" for "${item.question}"`);
+        applied.push(`${item.question}: ${item.chosenLabel}`);
       } else {
         // Genuinely never took, even after retries — this is OUR automation failing to click, not evidence
-        // the choice stayed No by the user's/claim's own doing. Don't push it into `applied`: per user
+        // the choice stayed unselected by the user's/claim's own doing. Don't push it into `applied`: per user
         // direction 2026-10-02, a choice that was never actually confirmed selected shouldn't have its gated
         // content validated (or even shown in the report) — conflating "we couldn't click it" with "it
         // printed and shouldn't have" would be a misleading FAIL, not a real document defect.
-        log(`selectAllYesNoChoices (${label}): WARNING — could not get "${item.question}" to register as Yes after 4 attempts; leaving it out so its gated content isn't wrongly expected to print.`);
+        log(`selectAllYesNoChoices (${label}): WARNING — could not get "${item.question}" to register as "${item.chosenLabel}" after 4 attempts; leaving it out so its gated content isn't wrongly expected to print.`);
       }
     } catch (e) {
       log(`selectAllYesNoChoices (${label}): could not click "Yes" for "${item.question}" — ${e.message}`);
@@ -431,9 +462,27 @@ async function readMergeFields(frame) {
       }
       return '';
     }
+    // CONFIRMED live 2026-10-06 (DIG36, via a full DOM dump of its "Select Language to display in Paragraph"
+    // choice): SmartCOMM renders EVERY option's own paragraph as a live, visible preview simultaneously — all
+    // 6 variants' merge fields (including duplicate copies of locked fields like "Claimant Name" and the
+    // editable deductible-amount field) sit in the DOM at once, inside their own `.th-choice` wrapper, with
+    // ONLY that wrapper's own radio (`.th-choice-input-checked` vs `-unchecked`) distinguishing which one will
+    // actually print. Only ONE copy (the selected option's) is real content; the other 5 will never appear in
+    // the generated document at all. Without this, every one of those fields gets edited/validated up to 6x
+    // over — wasted edit attempts on content that can't survive into the PDF, and the SAME underlying
+    // dictionary disagreement (e.g. "Claimant Name" or "Underwriting Company" locked-when-it-should-be-
+    // editable) reported as 6 near-duplicate failures instead of 1 (per user direction 2026-10-06).
+    function inUnselectedChoice(span) {
+      const wrapper = span.closest('.th-choice');
+      if (!wrapper) return false; // not part of any choice-option preview at all — unaffected
+      const radio = wrapper.querySelector('input[type="radio"], [role="radio"]');
+      if (!radio) return false; // no radio found — don't guess, leave it alone
+      const checked = radio.classList.contains('th-choice-input-checked') || radio.getAttribute('aria-checked') === 'true' || radio.checked === true;
+      return !checked;
+    }
     return spans.map((s, i) => ({
       idx: i, text: clean(s.textContent), editable: s.classList.contains('th-data-value-editable'),
-      labelContext: precedingLabelText(s, 80),
+      labelContext: precedingLabelText(s, 80), inUnselectedChoice: inUnselectedChoice(s),
     }));
   }, SELECTOR);
   const base = frame.locator(SELECTOR);

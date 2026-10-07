@@ -269,4 +269,48 @@ async function downloadMatches(page, matches, outDir, { log = console.log } = {}
   return results;
 }
 
-module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches };
+// The generated PDF's own S3 folder (ClaimCenter Inbound Pending > smartcomm > output > output) ALSO holds a
+// small per-document INDEXING/metadata object — ClaimCenter's own filing info (Drawer/Folder/DocType/
+// Description/DocumentDate), NOT the document itself — that can match the SAME Document Properties
+// Identifier. CONFIRMED live 2026-10-07 (DIG181/DIG223/DIG236/DIG36, 12/12 scenarios): every one of these
+// downloaded a ~185-byte JSON object ({"Drawer":"CLMS","FileNumber":...,"DocType":"CORO"/"FROI",...}) instead
+// of a real PDF, which then failed pdf-parse with "Invalid PDF structure" for every single scenario on every
+// one of those templates — not an intermittent flake. `searchSmartComm`'s caller always took `matches[0]`
+// (whichever object the admin UI's own table happened to sort first), with no way to tell the two apart —
+// and since that ordering doesn't change just because the real PDF later also lands alongside it, re-trying
+// the exact same "take the first match" logic can keep grabbing the SAME wrong object forever, not just
+// occasionally. Downloads each current match in turn and keeps the first one whose own BYTES start with the
+// real PDF magic header ("%PDF-") — content-sniffing instead of trusting position/order, which nothing here
+// has ever reliably predicted. If NONE of the current matches are a real PDF yet, that could still just be
+// genuine upload-delivery lag (the real document hasn't finished landing in S3) — re-searches and retries a
+// few times before giving up with a clear, specific error distinguishing "found nothing at all" from "found
+// only ClaimCenter's own metadata object, never the real document."
+async function downloadFirstValidPdf(page, key, outDir, { log = console.log, maxSearchAttempts = 3 } = {}) {
+  const fs = require('fs');
+  for (let attempt = 1; attempt <= maxSearchAttempts; attempt++) {
+    const matches = await searchSmartComm(page, key, { log });
+    if (!matches.length) {
+      if (attempt === maxSearchAttempts) {
+        return { error: `no S3 object matched Identifier "${key}" under ClaimCenter Inbound Pending > smartcomm > output > output.` };
+      }
+      await page.waitForTimeout(3000);
+      continue;
+    }
+    for (const m of matches) {
+      const [downloaded] = await downloadMatches(page, [m], outDir, { log });
+      const buf = fs.readFileSync(downloaded.localPath);
+      if (buf.slice(0, 5).toString('latin1') === '%PDF-') {
+        return { downloaded };
+      }
+      log(`[S3] "${downloaded.fileName}" matched Identifier "${key}" but isn't a real PDF (starts with "${buf.slice(0, 60).toString('latin1').replace(/\s+/g, ' ')}") — likely ClaimCenter's own document-indexing metadata object, not the generated document. Discarding and checking the next match.`);
+      fs.unlinkSync(downloaded.localPath);
+    }
+    if (attempt === maxSearchAttempts) {
+      return { error: `"${key}" matched ${matches.length} S3 object(s) under ClaimCenter Inbound Pending > smartcomm > output > output, but NONE of them were a real PDF (all looked like ClaimCenter's own document-indexing metadata) after ${maxSearchAttempts} attempt(s) — the actual generated document likely hasn't finished uploading to S3 yet.` };
+    }
+    log(`[S3] none of the ${matches.length} current match(es) for "${key}" were a real PDF yet — waiting in case the actual document is still uploading, then re-searching (attempt ${attempt}/${maxSearchAttempts})...`);
+    await page.waitForTimeout(3000);
+  }
+}
+
+module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches, downloadFirstValidPdf };

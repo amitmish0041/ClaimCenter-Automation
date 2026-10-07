@@ -322,7 +322,6 @@ async function setAdditionalRecipient(page, { excludeName, preferredRole, partie
   // up to capture a screenshot the moment this fails, instead of debugging blind from logs alone).
   await page.waitForTimeout(500);
   const btn = page.getByRole('button', { name: L.recipients.additionalRecipientButton });
-  await btn.click();
   // CONFIRMED live 2026-09-30, across many rounds of live diagnostics:
   //   1. `page.getByRole('menu').last()` is NOT reliable here — "Set Primary Recipient" and "Additional
   //      Recipient" each have their OWN structurally-identical gw-subMenu ALWAYS present in the DOM (toggled
@@ -338,19 +337,30 @@ async function setAdditionalRecipient(page, { excludeName, preferredRole, partie
   //      precisely-scoped Playwright locator combines correct targeting with a click that actually works.
   const container = btn.locator('xpath=ancestor::div[contains(@class,"gw-ToolbarButtonWidget")][1]');
   const menu = container.locator('.gw-subMenu, [role="menu"]').first();
-  try {
-    await menu.waitFor({ state: 'visible', timeout: 5000 });
-  } catch (e) {
-    // CONFIRMED live 2026-10-02: this menu intermittently never opens, and NOT because of a lack of eligible
-    // contacts — ruled out live on a claim with 5+ eligible parties visible in the dropdown when opened by
-    // hand, which still hit this exact timeout via automation. A diagnostic screenshot at the exact moment
-    // showed a completely normal, idle page: no native dialog, no error, nothing obstructing the button — so
-    // the real cause is still unknown (one candidate, untested: claims with a longer contact list may need
-    // more than 5s to render the dropdown). Root-causing this further was deprioritized in favor of not
-    // crashing the whole scenario over it — treated the same as "no eligible recipient found" below (log and
-    // return undefined): the template's "Copy ..." requirements just stay unverified for that one scenario.
+  // CONFIRMED live 2026-10-02: this menu intermittently never opens, and NOT because of a lack of eligible
+  // contacts — ruled out live on a claim with 5+ eligible parties visible in the dropdown when opened by
+  // hand, which still hit this exact timeout via automation. A diagnostic screenshot at the exact moment
+  // showed a completely normal, idle page: no native dialog, no error, nothing obstructing the button — root
+  // cause still unknown. CONFIRMED live 2026-10-06 (DIG200, back-to-back scenarios): hit twice in a row and,
+  // because this template's own "Copy .../cc:" requirements depend on a real additional recipient being set,
+  // silently continuing without one left Complete Document itself failing downstream ("Content is not allowed
+  // in prolog" — SmartCOMM's own backend chokes building the completion payload around the template's
+  // unmet conditional content) rather than just leaving a few requirements unverified as originally assumed.
+  // Same verify-and-retry approach that fixed the S3 admin tool's own tree-collapse flake — re-pressing
+  // Escape and re-clicking the button a few times before giving up, instead of trusting the first attempt.
+  let menuOpen = false;
+  for (let attempt = 1; attempt <= 3 && !menuOpen; attempt++) {
+    if (attempt > 1) {
+      await page.keyboard.press('Escape').catch(() => {});
+      await page.waitForTimeout(500);
+    }
+    await btn.click();
+    menuOpen = await menu.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
+    if (!menuOpen) log(`setAdditionalRecipient: menu didn't open on attempt ${attempt}/3${attempt < 3 ? ' — retrying' : ''}.`);
+  }
+  if (!menuOpen) {
     const diagPath = await saveDiagnostic(page, 'setAdditionalRecipient_menuTimeout').catch(() => null);
-    log(`setAdditionalRecipient: submenu never opened (cause unknown — continuing without an additional recipient) — ${e.message}${diagPath ? ` Diagnostic saved: ${diagPath}.png / .json` : ''}`);
+    log(`setAdditionalRecipient: submenu never opened after 3 attempts (cause unknown — continuing without an additional recipient).${diagPath ? ` Diagnostic saved: ${diagPath}.png / .json` : ''}`);
     return undefined;
   }
   const candidates = await findEligibleMenuCandidates(menu, excludeName);

@@ -225,7 +225,7 @@ function writeScenarioSheet(ws, s) {
     // of what SmartCOMM itself actually rendered (its own th-data-value(-editable) CSS class) — kept in its
     // own column (not folded into one combined cell) specifically so a disagreement between the two is
     // visible at a glance without reading the Note text (per user direction 2026-10-05).
-    styleHeaderRow(ws.addRow(['#', 'Field', 'Result', 'Dictionary says editable?', 'Observed in live session?', 'Edit took effect', 'PDF verified', 'Dictionary field', 'Note']));
+    styleHeaderRow(ws.addRow(['#', 'Field', 'Result', 'Dictionary says editable?', 'Observed in live session?', 'Edit took effect', 'Dictionary field', 'Note']));
     // A SKIPPED + locked/non-editable row is pure noise — it has no tracked dictionary row AND was never
     // editable, so its own content is already covered by the template's own requirement checks (per user
     // direction 2026-10-05: "we dont have to show those skipped fields...unless the field was editable").
@@ -234,8 +234,7 @@ function writeScenarioSheet(ws, s) {
     const visibleChecks = checks.filter((c) => c.result !== 'SKIPPED' || c.expectedEditable === true);
     for (const c of visibleChecks) {
       const dictSaysCell = c.dictionaryField && c.dictionaryEditable !== null ? yn(c.dictionaryEditable) : '—';
-      const pdfCell = c.expectedEditable === true ? yn(c.verifiedInPdf) : '—';
-      styleResultRow(ws.addRow([c.id, c.label, c.result, dictSaysCell, yn(c.expectedEditable), yn(c.observedChanged), pdfCell, c.dictionaryField || 'unmatched', c.reason || '']), c.result);
+      styleResultRow(ws.addRow([c.id, c.label, c.result, dictSaysCell, yn(c.expectedEditable), yn(c.observedChanged), c.dictionaryField || 'unmatched', c.reason || '']), c.result);
     }
     ws.addRow([]);
   }

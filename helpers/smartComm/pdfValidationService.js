@@ -14,6 +14,7 @@ let pdfParse;
 try { pdfParse = require('pdf-parse'); } catch (_) { /* reported lazily below */ }
 
 const { UNANCHORED_PATTERNS, FAIL_IF_PAYLOAD_MISSING, LABEL_TO_TESTDATA_FIELD } = require('./fieldLabelSynonyms');
+const fraudLanguageService = require('./fraudLanguageService');
 
 // Two labels that map to the SAME testData/payload/recipient path (e.g. "D/L" and "DATE OF LOSS" both ->
 // testData.lossDate) are synonyms for the same real-world field — reused here rather than a second,
@@ -182,6 +183,18 @@ function evaluateOne(req, haystack, context) {
           };
         }
       }
+      // CONFIRMED live 2026-10-06 (user direction, DIG236): a field this SAME run's own interactive-field
+      // check intentionally overwrote with a "[QA-EDIT-N]" marker (see validationService.buildXpathRequirements'
+      // `wasEditedByTest` flag) usually still passes here because the real value repeats elsewhere in the
+      // document (a letterhead, a signature block) — but for a template where this field's value genuinely
+      // only ever appears in that ONE merge field (no such repeat), the test's own edit is what erased it, not
+      // a real template defect. Nothing a human could act on, so SKIPPED rather than FAIL.
+      if (req.wasEditedByTest) {
+        return {
+          expected: req.expectedValue, actual: 'Not Found', result: 'SKIPPED',
+          reason: `Not found anywhere in the document — but this field was itself intentionally overwritten by this test's own editable-field check (see the Interactive Session section), and this template doesn't appear to repeat the value elsewhere. Not a template defect, just this test's own edit consuming the only occurrence.`,
+        };
+      }
       return {
         expected: req.expectedValue, actual: 'Not Found', result: 'FAIL',
         reason: `No similar wording found anywhere in the generated document — this content appears to be missing entirely, not just reworded.`,
@@ -212,6 +225,23 @@ function evaluateOne(req, haystack, context) {
       return {
         expected: req.expectedValue, actual: req.fieldValue, result: 'FAIL',
         reason: `The interactive field "${req.fieldLabel || 'this field'}" is captured as "${req.fieldValue}", which doesn't match the payload-derived expected value above.`,
+      };
+    }
+    // A state whose Fraud Language sheet row is literally "None" (e.g. MI, IL, CA...) — the document must NOT
+    // print any of the sheet's fraud wordings. Matches only real sheet wording (findFraudLanguageInText), not
+    // loose vocabulary like "penalty", so ordinary legal text elsewhere in a letter can't trip it. Wording that
+    // the OTHER state on this claim legitimately requires (loss vs policy state differ) is excluded.
+    case 'fraudLanguageAbsent': {
+      const allowed = new Set((req.allowedFraudLanguage || []).map((t) => normalizeWs(t).toLowerCase()));
+      const printed = fraudLanguageService.findFraudLanguageInText(haystack)
+        .filter((r) => !allowed.has(normalizeWs(r.fraudLanguage).toLowerCase()));
+      const expected = `No fraud language (Fraud Language sheet: ${req.stateLabel} → "None")`;
+      if (!printed.length) return { expected, actual: 'No fraud language printed', result: 'PASS' };
+      return {
+        expected,
+        actual: printed.map((r) => `${r.stateName} [${r.conditions || 'All'}]: ${r.fraudLanguage}`).join(' || '),
+        result: 'FAIL',
+        reason: `The Fraud Language sheet says ${req.stateLabel} requires no fraud language, but the document prints another state's/condition's fraud wording (see Actual).`,
       };
     }
     case 'forbiddenText': {
