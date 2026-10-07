@@ -29,6 +29,12 @@ const STAGING = require('./staging-path.js');
 const POLICY_DEST = path.join(STAGING, 'policy-repo');
 const CLAIMS_DEST = path.join(STAGING, 'ClaimCenter-Automation');
 const BROWSERS_DEST = path.join(STAGING, 'playwright-browsers');
+// Same env var + same default as ClaimCenter-Automation/helpers/smartComm/catalogService.js, so "override
+// if it ever moves" works identically for a build and for a live dev run. Bundled into the app itself (per
+// explicit 2026-10-07 direction) so an installed copy works out of the box with no per-user folder to find -
+// Settings' own SmartCOMM data folder field still overrides this at runtime if someone points it elsewhere.
+const SMARTCOMM_DATA_SRC = process.env.SMARTCOMM_DATA_DIR || 'C:\\Users\\amitmish\\Desktop\\CC Cloud\\SmartComm';
+const SMARTCOMM_DATA_DEST = path.join(STAGING, 'smartcomm-data');
 
 if (!fs.existsSync(POLICY_SRC)) {
   console.error(`Expected sibling repo not found: ${POLICY_SRC}`);
@@ -38,9 +44,17 @@ if (!fs.existsSync(POLICY_SRC)) {
 
 // Names matched at ANY depth (not just top-level) so e.g. a nested
 // tools/pdf-compare/__pycache__ is excluded too, not just a root-level one.
+// CONFIRMED LIVE BUG (fixed here): this used to also list bare 'playwright' (intending some repo's own
+// playwright/.cache-style dir), but shouldSkip() below only ever checks path.basename() with no path
+// context - that single entry silently deleted the entire node_modules/playwright PACKAGE (the actual npm
+// dependency @playwright/test's cli.js requires at runtime: 'playwright/lib/program') from every staged
+// build, so every packaged SmartCOMM/Policy/Claims run failed with "Cannot find module 'playwright/lib/
+// program'" the instant it tried to actually run a test (not caught by the earlier `--version` smoke test,
+// which exits before cli.js needs that module). Never match a bare name that could also be a real
+// node_modules package without a path check.
 const EXCLUDE_NAMES = new Set([
   '.git', '.gitignore', 'electron-app', // electron-app excluded from the CLAIMS copy to avoid copying this very staging step into itself
-  'test-results', 'playwright-report', 'playwright', // 'playwright' here = the project's own playwright/.cache dir pattern, not the npm package inside node_modules
+  'test-results', 'playwright-report',
   'results', 'runtime-data', 'reports',
   '__pycache__', '.backup-2026-07-07',
   '.smartcomm-azure-session.json', '.smartcomm-okta-session.json', // per-person SSO session cache - never ship someone else's
@@ -51,6 +65,7 @@ const EXCLUDE_EXT = new Set(['.log']);
 function shouldSkip(srcPath, name) {
   if (EXCLUDE_NAMES.has(name)) return true;
   if (EXCLUDE_EXT.has(path.extname(name))) return true;
+  if (name.startsWith('~$')) return true; // transient Office lock files (e.g. ~$Claims_Documents_Index.xlsx) - not real content
   return false;
 }
 
@@ -78,6 +93,15 @@ fs.mkdirSync(path.join(POLICY_DEST, 'runtime-data'), { recursive: true });
 console.log('── Staging ClaimCenter-Automation ──');
 copyTree(CLAIMS_SRC, CLAIMS_DEST);
 
+if (fs.existsSync(SMARTCOMM_DATA_SRC)) {
+  console.log('── Staging SmartCOMM data folder ──');
+  copyTree(SMARTCOMM_DATA_SRC, SMARTCOMM_DATA_DEST);
+} else {
+  // Doesn't block the build - SmartCOMM's own catalogService.js already handles a missing/wrong
+  // SMARTCOMM_DATA_DIR with a clear runtime error naming the exact path it tried, same as today.
+  console.warn(`WARNING: SmartCOMM data folder not found at ${SMARTCOMM_DATA_SRC} - packaged app will ship without it (set SMARTCOMM_DATA_DIR to override the source path for this build).`);
+}
+
 console.log('── Installing pinned Playwright Chromium for both repos into a shared bundle ──');
 fs.mkdirSync(BROWSERS_DEST, { recursive: true });
 const installEnv = { ...process.env, PLAYWRIGHT_BROWSERS_PATH: BROWSERS_DEST };
@@ -98,3 +122,4 @@ console.log('── Staging complete ──');
 console.log(`  ${POLICY_DEST}`);
 console.log(`  ${CLAIMS_DEST}`);
 console.log(`  ${BROWSERS_DEST}`);
+if (fs.existsSync(SMARTCOMM_DATA_DEST)) console.log(`  ${SMARTCOMM_DATA_DEST}`);
