@@ -1,4 +1,6 @@
 {
   "default": ["smartcomm"],
-  "grants": {}
+  "grants": {
+    "amitmishra@donegalgroup.com": ["smartcomm", "policy", "claims", "jiraReport"]
+  }
 }
