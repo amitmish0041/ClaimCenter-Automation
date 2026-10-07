@@ -1,0 +1,21 @@
+{
+  "name": "claimcenter-runner",
+  "productName": "ClaimCenter Runner",
+  "version": "1.0.0",
+  "description": "Self-contained Windows app for the Playwright Test Runner UI (SmartCOMM Validator and related tools)",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron .",
+    "stage": "node scripts/stage-resources.js",
+    "build": "npm run stage && electron-builder --win --config electron-builder.config.js",
+    "release": "npm run stage && electron-builder --win --config electron-builder.config.js --publish=always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  }
+}
