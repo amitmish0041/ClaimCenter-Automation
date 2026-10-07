@@ -1,7 +1,7 @@
 {
-  "default": ["smartcomm"],
+  "default": ["smartComm"],
   "grants": {
-    "amitmishra@donegalgroup.com": ["smartcomm", "policy", "claims", "jiraReport"],
-    "sarahsee@donegalgroup.com": ["smartcomm"]
+    "amitmishra@donegalgroup.com": ["smartComm", "policy", "claims", "jiraReport"],
+    "sarahsee@donegalgroup.com": ["smartComm"]
   }
 }
