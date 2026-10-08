@@ -50,5 +50,10 @@ module.exports = {
     provider: 'github',
     owner: 'amitmish0041',
     repo: 'ClaimCenter-Automation',
+    // electron-builder defaults to releaseType:'draft', which uploads the installer into an UNPUBLISHED draft
+    // release - invisible to the public API and to electron-updater, so nobody auto-updates until someone
+    // clicks "Publish" in the GitHub UI. 'release' publishes it live immediately, which is what we want here
+    // (to pull a bad one, mark that release a pre-release on GitHub - electron-updater stops offering it).
+    releaseType: 'release',
   },
 };
