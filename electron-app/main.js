@@ -44,6 +44,11 @@ function configureEnvAndStartServer() {
     process.env.PLAYWRIGHT_BROWSERS_PATH = BROWSERS_DIR;
     process.env.RUNNER_SETTINGS_FILE = path.join(userDataDir, 'settings.json');
     process.env.RUNNER_ENTITLEMENTS_CACHE = path.join(userDataDir, 'entitlements-cache.json');
+    // Saved Azure (SmartCOMM Interactive) and Okta (S3 download) sign-in cookies. Their stores default to a
+    // file inside the ClaimCenter-Automation folder - in a packaged build that's the install directory, which
+    // every update replaces, so everyone would have to sign in again after each update. userData survives.
+    process.env.SMARTCOMM_AZURE_SESSION_FILE = path.join(userDataDir, 'smartcomm-azure-session.json');
+    process.env.SMARTCOMM_OKTA_SESSION_FILE = path.join(userDataDir, 'smartcomm-okta-session.json');
     // Bundled copy of the BA/QA-maintained SmartCOMM template spreadsheet + .docx files (see
     // stage-resources.js) - works out of the box with no per-user folder to track down. server.js's own
     // settings-loading (runner-settings.json, written by the Settings tab) still overrides this afterwards
