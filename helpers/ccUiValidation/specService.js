@@ -13,7 +13,13 @@ const fs = require('fs');
 const path = require('path');
 const XLSX = require('xlsx');
 
-const DEFAULT_SPEC_DIR = process.env.CC_UI_SPEC_DIR || 'C:\\Users\\amitmish\\Desktop\\CC Cloud\\SmartComm\\Requirement';
+// The spec/dictionary workbooks live in the "Requirement" subfolder of the SmartCOMM data folder. Default to
+// the bundled copy's Requirement folder - SMARTCOMM_DATA_DIR is what the packaged app points at its own bundled
+// smartcomm-data (same var catalogService.js uses) - so this works on any machine, not just the one it was
+// built on. CC_UI_SPEC_DIR still overrides; the literal is only the dev-machine fallback when neither is set.
+const DEFAULT_SPEC_DIR = process.env.CC_UI_SPEC_DIR
+  || (process.env.SMARTCOMM_DATA_DIR && path.join(process.env.SMARTCOMM_DATA_DIR, 'Requirement'))
+  || 'C:\\Users\\amitmish\\Desktop\\CC Cloud\\SmartComm\\Requirement';
 
 function findSpecFile() {
   if (process.env.CC_UI_SPEC_FILE) return process.env.CC_UI_SPEC_FILE;

@@ -17,7 +17,11 @@ const path = require('path');
 const XLSX = require('xlsx');
 const { normalizeDig } = require('./catalogService');
 
-const DEFAULT_DIR = 'C:\\Users\\amitmish\\Desktop\\CC Cloud\\SmartComm\\Requirement';
+// Default to the bundled SmartCOMM data's "Requirement" subfolder (SMARTCOMM_DATA_DIR, same as catalogService.js
+// and specService.js) so this works on any machine; CC_UI_SPEC_DIR still overrides in findFile() below, and the
+// literal is only the dev-machine fallback.
+const DEFAULT_DIR = (process.env.SMARTCOMM_DATA_DIR && path.join(process.env.SMARTCOMM_DATA_DIR, 'Requirement'))
+  || 'C:\\Users\\amitmish\\Desktop\\CC Cloud\\SmartComm\\Requirement';
 
 function findFile() {
   const dir = process.env.CC_UI_SPEC_DIR || DEFAULT_DIR;
