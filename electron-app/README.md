@@ -20,7 +20,8 @@ Migration Reconciliation, Update Validation, and PDF Compare are visible but sho
   auto-update, routes external links (the "Request access" mailto link) to the OS's own handler.
 - **`electron-app/package.json`** — app + electron-builder config (NSIS installer, GitHub Releases publishing).
 - **`electron-app/scripts/stage-resources.js`** — build-time step: vendors both repos + a pinned Playwright
-  Chromium build into `electron-app/.staging/` for electron-builder to package.
+  Chromium build + the SmartCOMM data folder into a staging dir (outside both repos - see `staging-path.js`)
+  for electron-builder to package.
 - **`electron-app/entitlements/entitlements.json`** — the file you edit to grant tab access (see below).
 
 ## Build
@@ -50,6 +51,14 @@ prompt, installs per-user).
 
 **To pull a bad release:** mark it a "pre-release" on GitHub (or delete it). electron-updater only ever offers
 the latest *non-prerelease* release, so this takes effect immediately with no code change.
+
+**Updating the bundled SmartCOMM data** (the `Claims_Documents_Index*.xlsx` + `Templates/` folder, read from
+`C:\Users\amitmish\Desktop\CC Cloud\SmartComm` at build time, or wherever `SMARTCOMM_DATA_DIR` points): there's
+no separate push for this — it's part of the app bundle, so update your local copy of that folder, then publish
+a new version the normal way (steps above). Everyone's app picks up the new data on their next update check,
+same as a code change. Note this folder is bundled **as-is, in full** (a deliberate choice made 2026-10-07 despite
+it also containing some files - production coverage volume, claims-by-LOB-state, sample/test data - that aren't
+actually read by the app) — anything in it becomes downloadable from the public GitHub release.
 
 **Code signing is not set up.** An unsigned installer triggers a Windows SmartScreen warning on first run.
 Getting a code-signing certificate is a separate decision — flagging it again here since it'll affect how
@@ -82,10 +91,28 @@ comfortable people are double-clicking this the first time.
 
 ## Environment / production configuration
 
-Nothing needs to be set by hand for a normal install — the Settings tab (first launch) is where an installed
-user enters their name, email, and SmartCOMM data folder; these are written to
-`%APPDATA%/claimcenter-runner/settings.json` and picked up live (no restart needed). The one thing you control
-centrally is `electron-app/entitlements/entitlements.json`, above.
+No `.env` file is ever bundled (so no credential ships inside the installer). Everything an installed copy
+needs comes from its own **Settings** tab, entered once per machine on first launch:
+
+- **Name / email** — identity for entitlements and the default report recipient.
+- **ClaimCenter username/password + admin username/password** — required for the SmartCOMM and Claims tabs
+  (SmartCOMM needs the admin login for closing exposures/claims and some activities).
+- **WriteBiz username/password per state (DE/PA/MI/WI)** — required for the Policy tab.
+- **SmartCOMM data folder** — optional; leave blank to use the copy bundled with the app.
+
+These are written to `%APPDATA%/claimcenter-runner/settings.json` (plaintext, local to that user profile — the
+same exposure level as the `.env` files used in dev) and applied live, no restart needed. A blank field never
+wipes anything: on a dev machine it falls back to that repo's own `.env` value.
+
+Defaults baked into the packaged build (non-secret): Donegal's internal SMTP relay for SmartCOMM report emails.
+
+The one thing you control centrally is `electron-app/entitlements/entitlements.json`, above.
+
+**Known gaps (Policy/Jira tabs only):** the Policy tab's report email needs a recipient (`TO_EMAIL`) that isn't
+wired up in a packaged build yet, and the Jira Sprint Report tab needs `JIRA_SITE`/`JIRA_EMAIL`/`JIRA_API_TOKEN`,
+which have no Settings fields yet. SmartCOMM's optional per-scenario test users (`SMARTCOMM_TEST_USER_1..3`) also
+aren't in Settings — every scenario falls back to the admin login, which is supported but differs from a dev
+machine that has them set.
 
 ## Testing the packaged .exe on a clean machine
 
@@ -94,9 +121,8 @@ centrally is `electron-app/entitlements/entitlements.json`, above.
 2. Install and launch. Confirm: the window opens to `http://127.0.0.1:3100` with no console/terminal visible;
    SmartCOMM is unlocked; Policy/Claims/Jira Report show locked (request-access) until you grant them; Migration
    Reconciliation/Update Validation/PDF Compare show "not available in this build yet."
-3. Settings tab: enter a name/email, and a SmartCOMM data folder (ask the repo owner for a copy of
-   `Claims_Documents_Index*.xlsx` + the template `.docx` files — this isn't bundled into the installer since it
-   changes independently of app releases).
+3. Settings tab: enter a name/email. The SmartCOMM data folder field can stay blank — a copy ships inside the
+   installer and SmartCOMM templates should list correctly without touching this field at all.
 4. Run a real SmartCOMM template validation end-to-end. Check Task Manager while it runs — you should see the
    app's own process tree (no separately-installed system Node or Chrome involved).
 5. Grant that test machine's email `policy`/`claims`/`jiraReport` in `entitlements.json`, push, and confirm those

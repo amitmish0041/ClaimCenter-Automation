@@ -5,8 +5,21 @@
 // (see staging-path.js) - both must always agree on where that is.
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const STAGING = require('./scripts/staging-path.js');
+
+const extraResources = [
+  { from: path.join(STAGING, 'policy-repo'), to: 'policy-repo' },
+  { from: path.join(STAGING, 'ClaimCenter-Automation'), to: 'ClaimCenter-Automation' },
+  { from: path.join(STAGING, 'playwright-browsers'), to: 'playwright-browsers' },
+];
+// Conditional: stage-resources.js only creates this when it actually found a source folder to copy (see its
+// own warning there) - electron-builder errors outright on an extraResources.from path that doesn't exist.
+const smartCommDataStaged = path.join(STAGING, 'smartcomm-data');
+if (fs.existsSync(smartCommDataStaged)) {
+  extraResources.push({ from: smartCommDataStaged, to: 'smartcomm-data' });
+}
 
 module.exports = {
   appId: 'com.donegalgroup.claimcenter-runner',
@@ -24,11 +37,7 @@ module.exports = {
     '!.gitignore',
     '!electron-builder.config.js',
   ],
-  extraResources: [
-    { from: path.join(STAGING, 'policy-repo'), to: 'policy-repo' },
-    { from: path.join(STAGING, 'ClaimCenter-Automation'), to: 'ClaimCenter-Automation' },
-    { from: path.join(STAGING, 'playwright-browsers'), to: 'playwright-browsers' },
-  ],
+  extraResources,
   win: {
     target: 'nsis',
   },

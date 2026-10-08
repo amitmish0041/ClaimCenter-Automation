@@ -44,6 +44,20 @@ function configureEnvAndStartServer() {
     process.env.PLAYWRIGHT_BROWSERS_PATH = BROWSERS_DIR;
     process.env.RUNNER_SETTINGS_FILE = path.join(userDataDir, 'settings.json');
     process.env.RUNNER_ENTITLEMENTS_CACHE = path.join(userDataDir, 'entitlements-cache.json');
+    // Bundled copy of the BA/QA-maintained SmartCOMM template spreadsheet + .docx files (see
+    // stage-resources.js) - works out of the box with no per-user folder to track down. server.js's own
+    // settings-loading (runner-settings.json, written by the Settings tab) still overrides this afterwards
+    // if a user explicitly points at a different/newer copy, since that only runs when a value was actually
+    // saved there.
+    const bundledSmartCommData = path.join(process.resourcesPath, 'smartcomm-data');
+    if (fs.existsSync(bundledSmartCommData)) process.env.SMARTCOMM_DATA_DIR = bundledSmartCommData;
+    // Donegal's internal mail relay. Not secrets (unauthenticated relay, already in ClaimCenter-Automation's
+    // committed .env.example) - but that .env is never bundled, and without these every SmartCOMM report
+    // silently skips emailing (reportService.js no-ops when EMAIL_SMTP_HOST is unset). Recipient (EMAIL_TO)
+    // is set per run by server.js from the Report Email field, so it isn't defaulted here.
+    process.env.EMAIL_SMTP_HOST ||= 'smtp.donegalgroup.com';
+    process.env.EMAIL_SMTP_PORT ||= '25';
+    process.env.EMAIL_FROM ||= 'automation@donegalgroup.com';
   }
   // Starting this is a side effect of requiring it (it calls app.listen() at module scope) - see
   // runner/server.js's own bottom-of-file app.listen() call.
