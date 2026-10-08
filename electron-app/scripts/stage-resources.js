@@ -42,6 +42,13 @@ if (!fs.existsSync(POLICY_SRC)) {
   process.exit(1);
 }
 
+// CONFIRMED LIVE BUG (fixed here): makensis.exe fails with "Can't open output file" / generic
+// ERR_ELECTRON_BUILDER_CANNOT_EXECUTE if dist/<installer>.exe already exists from a previous build - it
+// cannot overwrite its own prior output in place. Every build now starts with a clean dist/, so this can't
+// recur regardless of what was left over from an earlier run.
+const DIST_DIR = path.join(ELECTRON_APP_DIR, 'dist');
+fs.rmSync(DIST_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 3000 });
+
 // Names matched at ANY depth (not just top-level) so e.g. a nested
 // tools/pdf-compare/__pycache__ is excluded too, not just a root-level one.
 // CONFIRMED LIVE BUG (fixed here): this used to also list bare 'playwright' (intending some repo's own
