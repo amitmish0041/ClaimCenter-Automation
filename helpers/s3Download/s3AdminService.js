@@ -59,6 +59,45 @@ async function currentPlanet(page) {
   return m ? m[1] : null;
 }
 
+// Ensures the admin tool is on Planet = Test, switching from whatever it's on if needed. Extracted so it can
+// run BEFORE EVERY search (see searchNode), not only once at login: a search on the wrong planet silently
+// returns the WRONG files or none at all, and this Jutro admin app is known to reset its own session UI state
+// unprompted (see ensureExpanded's note on the left-nav tree re-collapsing after idle). Cheap when already on
+// Test - it just reads the badge and returns; it only pays the multi-click switch cost when it genuinely
+// isn't. Retries the switch once before giving up, since every step is a click against the same flaky UI.
+async function ensureTestPlanet(page, { log = console.log, maxAttempts = 2 } = {}) {
+  // The "Planet: ..." badge can take a beat to (re)paint after a navigation - poll briefly for a non-null
+  // reading rather than misreading a mid-render blank as "not Test" and switching needlessly.
+  let planet = null;
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    planet = await currentPlanet(page);
+    if (planet) break;
+    await page.waitForTimeout(400);
+  }
+  if (planet === 'Test') { log('[S3] Planet already Test'); return; }
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    log(`[S3] Planet is "${planet}" — switching to Test (attempt ${attempt}/${maxAttempts})`);
+    await page.getByRole('menuitem', { name: 'Settings', exact: true }).first().click();
+    await page.waitForTimeout(1000);
+    // Card order: Language and Regional format / Theme / Navigation / Planet — Planet's own Edit button is the 4th.
+    const planetCard = page.locator('h2', { hasText: 'Planet' }).locator('..').locator('..');
+    await planetCard.getByRole('button', { name: 'Edit' }).click();
+    await page.waitForTimeout(500);
+    await page.locator('button[data-value="test"]').click();
+    await page.waitForTimeout(300);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.waitForTimeout(1500);
+    await page.getByRole('menuitem', { name: 'Integration Files', exact: true }).first().click();
+    await page.waitForTimeout(1500);
+    planet = await currentPlanet(page);
+    if (planet === 'Test') { log('[S3] Planet switched to Test'); return; }
+    log(`[S3] Planet still "${planet}" after switch attempt ${attempt} — retrying.`);
+  }
+  throw new Error(`S3_PLANET_SWITCH_FAILED: still shows "${planet}" after ${maxAttempts} attempt(s) to switch to Test.`);
+}
+
 // Logs in and lands on the Integration Files tab with Planet = Test. CONFIRMED live 2026-10-01: the
 // email-only "network-zone trust" flow this originally relied on now fails immediately with Okta's own 400
 // "GENERAL_NONSUCCESS" error (not a slow-but-working redirect — confirmed stable/unchanging at both 5s and
@@ -143,34 +182,7 @@ async function loginAndEnsureTestPlanet(page, { log = console.log } = {}) {
 
   await page.locator('[data-testid], text=Integration Files').first().waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
 
-  // The "Planet: ..." badge can take a beat to paint right after the login redirect — poll briefly
-  // rather than reading once, or a fine first run gets misreported as an unexplained "Planet is null".
-  let planet = null;
-  const planetDeadline = Date.now() + 8000;
-  while (Date.now() < planetDeadline) {
-    planet = await currentPlanet(page);
-    if (planet) break;
-    await page.waitForTimeout(400);
-  }
-  if (planet !== 'Test') {
-    log(`[S3] Planet is "${planet}" — switching to Test`);
-    await page.getByRole('menuitem', { name: 'Settings', exact: true }).first().click();
-    await page.waitForTimeout(1000);
-    // Card order: Language and Regional format / Theme / Navigation / Planet — Planet's own Edit button is the 4th.
-    const planetCard = page.locator('h2', { hasText: 'Planet' }).locator('..').locator('..');
-    await planetCard.getByRole('button', { name: 'Edit' }).click();
-    await page.waitForTimeout(500);
-    await page.locator('button[data-value="test"]').click();
-    await page.waitForTimeout(300);
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
-    await page.waitForTimeout(1500);
-    await page.getByRole('menuitem', { name: 'Integration Files', exact: true }).first().click();
-    await page.waitForTimeout(1500);
-    const confirmed = await currentPlanet(page);
-    if (confirmed !== 'Test') throw new Error(`S3_PLANET_SWITCH_FAILED: still shows "${confirmed}" after attempting to switch to Test.`);
-  } else {
-    log('[S3] Planet already Test');
-  }
+  await ensureTestPlanet(page, { log });
 }
 
 // Clicks `chevronTestId` and waits for `revealTestId` (the next chevron down, or the final label) to
@@ -198,6 +210,10 @@ async function ensureExpanded(page, chevronTestId, revealTestId, { log = console
 // level, VERIFIED (see ensureExpanded above) rather than a blind click-and-hope, since the tree can silently
 // re-collapse on its own after sitting idle; the label then selects the actual child folder to list/filter.
 async function searchNode(page, node, key, { log = console.log, folderDescription = node.label } = {}) {
+  // Re-verify Planet = Test before every search, not just once at login. A search on the wrong planet silently
+  // returns the wrong files or none, and this admin app resets its own session state unprompted (see
+  // ensureExpanded's tree-re-collapse note). No-op cost when already on Test (just a badge read).
+  await ensureTestPlanet(page, { log });
   for (let i = 0; i < node.chevrons.length; i++) {
     const revealTestId = i + 1 < node.chevrons.length ? node.chevrons[i + 1] : node.label;
     const ok = await ensureExpanded(page, node.chevrons[i], revealTestId, { log });
@@ -341,4 +357,4 @@ async function downloadFirstValidPdf(page, key, outDir, { log = console.log, max
   }
 }
 
-module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches, downloadFirstValidPdf };
+module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, ensureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches, downloadFirstValidPdf };
