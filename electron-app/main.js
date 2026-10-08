@@ -44,11 +44,20 @@ function configureEnvAndStartServer() {
     process.env.PLAYWRIGHT_BROWSERS_PATH = BROWSERS_DIR;
     process.env.RUNNER_SETTINGS_FILE = path.join(userDataDir, 'settings.json');
     process.env.RUNNER_ENTITLEMENTS_CACHE = path.join(userDataDir, 'entitlements-cache.json');
-    // Saved Azure (SmartCOMM Interactive) and Okta (S3 download) sign-in cookies. Their stores default to a
-    // file inside the ClaimCenter-Automation folder - in a packaged build that's the install directory, which
-    // every update replaces, so everyone would have to sign in again after each update. userData survives.
+    // Saved Azure (SmartCOMM Interactive) sign-in cookies are genuinely per-person - each QA signs into their
+    // own Microsoft account - so this stays in userData (survives updates; the install dir doesn't).
     process.env.SMARTCOMM_AZURE_SESSION_FILE = path.join(userDataDir, 'smartcomm-azure-session.json');
-    process.env.SMARTCOMM_OKTA_SESSION_FILE = path.join(userDataDir, 'smartcomm-okta-session.json');
+    // S3 (Okta) sign-in is SHARED across the team, not per-person. Not everyone has S3/Okta access, and we
+    // don't want anyone depending on the owner's machine being on - so the owner signs in ONCE ("Establish S3
+    // Session"), which writes the cookies to a shared file on the team drive, and every installed copy just
+    // READS them from there (SMARTCOMM_OKTA_SESSION_READONLY: automated runs never sign in or overwrite it -
+    // see helpers/s3Download/s3AdminService.js). When the shared session lapses, only the owner re-runs that
+    // one step; nobody else is blocked meanwhile beyond a clear "ask the owner to refresh" message. The path
+    // is overridable with a real SMARTCOMM_OKTA_SESSION_FILE env var if a machine maps the share elsewhere.
+    process.env.SMARTCOMM_OKTA_SESSION_FILE = process.env.SMARTCOMM_OKTA_SESSION_FILE
+      || path.join('V:', 'Amit Int', 'SmartComm', 'smartcomm-okta-session.json');
+    process.env.SMARTCOMM_OKTA_SESSION_READONLY = '1';
+    process.env.SMARTCOMM_OKTA_SESSION_OWNER = 'Amit Mishra (amitmishra@donegalgroup.com)';
     // Bundled copy of the BA/QA-maintained SmartCOMM template spreadsheet + .docx files (see
     // stage-resources.js) - works out of the box with no per-user folder to track down. server.js's own
     // settings-loading (runner-settings.json, written by the Settings tab) still overrides this afterwards

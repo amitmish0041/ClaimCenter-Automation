@@ -33,7 +33,17 @@
 const oktaSessionStore = require('./oktaSessionStore');
 
 const S3_ADMIN_URL = 'https://intadmin-develop-donegal-dngldev-gwjutro.beta5-andromeda.guidewire.net/s3';
-const LOGIN_EMAIL = 'amitmishra@donegalgroup.com';
+// The corporate email typed into Okta on the email-only sign-in fallback. Env-overridable so it isn't a
+// single person's address baked into every machine — in the packaged build the automated path never runs
+// this anyway (see READONLY_SESSION below), but on a dev machine it fills whoever's own Okta account.
+const LOGIN_EMAIL = process.env.SMARTCOMM_OKTA_LOGIN_EMAIL || 'amitmishra@donegalgroup.com';
+// Shared-session mode (set by the packaged app - electron-app/main.js): the ONE Okta sign-in lives in a
+// shared file on the team drive and is established just once, by the owner. No other machine ever signs in
+// to Okta itself - it only loads those cookies. So an automated run here NEVER types an email into Okta and
+// NEVER overwrites the shared file; if the loaded session didn't land, it fails with a clear "ask the owner
+// to refresh it" message instead. SESSION_OWNER just names who that is in that message.
+const READONLY_SESSION = process.env.SMARTCOMM_OKTA_SESSION_READONLY === '1';
+const SESSION_OWNER = process.env.SMARTCOMM_OKTA_SESSION_OWNER || 'the tool owner';
 // ClaimCenter > Inbound Pending > smartcomm > output > output (generated PDFs — CONFIRMED live 2026-09-30
 // this is TWO "output" levels deep, not one: the first "output" is itself a parent of two children, "logs"
 // (895 items) and a second, identically-named "output" (104 items, the real PDFs) — its own item count
@@ -63,7 +73,20 @@ async function loginAndEnsureTestPlanet(page, { log = console.log } = {}) {
   await page.goto(S3_ADMIN_URL, { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForTimeout(1200);
 
-  if (!page.url().startsWith('https://intadmin-')) {
+  const landed = page.url().startsWith('https://intadmin-');
+
+  // Shared-session mode: this machine must not sign in to Okta itself. A session that didn't land is either
+  // missing, expired, or the team drive holding it isn't reachable - fail fast with an actionable message
+  // instead of attempting the (now-dead, see below) email-only flow or writing to the shared file.
+  if (!landed && READONLY_SESSION) {
+    throw new Error(
+      `S3_SHARED_SESSION_EXPIRED: the shared S3 sign-in session (${oktaSessionStore.SESSION_FILE}) is missing, ` +
+      `expired, or the team drive holding it isn't reachable. Ask ${SESSION_OWNER} to open the SmartCOMM tab ` +
+      `and run "Establish S3 Session" once to refresh it (and check your team drive is connected), then retry.`
+    );
+  }
+
+  if (!landed) {
     if (hadSavedSession) {
       log('[S3] Saved Okta session did not land on the admin tool (likely expired) — falling back to a fresh sign-in attempt.');
     }
@@ -111,7 +134,12 @@ async function loginAndEnsureTestPlanet(page, { log = console.log } = {}) {
     log('[S3] Saved Okta session landed directly on the admin tool — skipped sign-in entirely.');
   }
 
-  await oktaSessionStore.saveFromContext(page.context(), { log });
+  // Never re-save from an automated run in shared-session mode: concurrent QA downloads would otherwise race
+  // each other writing the one shared file on the network drive. Only the explicit "Establish S3 Session"
+  // flow (establishS3Session.js, run by the owner) writes it, via oktaSessionStore directly.
+  if (!READONLY_SESSION) {
+    await oktaSessionStore.saveFromContext(page.context(), { log });
+  }
 
   await page.locator('[data-testid], text=Integration Files').first().waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
 

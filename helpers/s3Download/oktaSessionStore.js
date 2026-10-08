@@ -31,7 +31,13 @@ async function saveFromContext(context, { log = console.log } = {}) {
     const all = await context.cookies();
     const relevant = all.filter((c) => RELEVANT_DOMAIN_RE.test(c.domain || ''));
     if (!relevant.length) { log('[OktaSession] No Okta/S3-admin cookies found to save — nothing persisted.'); return; }
-    fs.writeFileSync(SESSION_FILE, JSON.stringify({ savedAt: new Date().toISOString(), cookies: relevant }, null, 1));
+    // Write-then-rename so a reader on the shared team drive (the packaged build points SESSION_FILE there)
+    // never catches a half-written file: readers see either the old complete file or the new one, never a
+    // truncated middle. Same-volume rename is atomic/replace on Windows.
+    fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
+    const tmp = `${SESSION_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ savedAt: new Date().toISOString(), cookies: relevant }, null, 1));
+    fs.renameSync(tmp, SESSION_FILE);
     log(`[OktaSession] Saved ${relevant.length} cookie(s) to ${SESSION_FILE} for reuse by later runs.`);
   } catch (e) {
     log(`[OktaSession] Could not save session: ${e.message}`);

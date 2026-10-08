@@ -108,6 +108,29 @@ Defaults baked into the packaged build (non-secret): Donegal's internal SMTP rel
 
 The one thing you control centrally is `electron-app/entitlements/entitlements.json`, above.
 
+## S3 (SmartCOMM) shared sign-in
+
+The S3 Integration Files admin tool is a real Okta corporate login that **not everyone has access to**, and we don't
+want anyone's runs depending on the owner's machine being on. So the Okta sign-in is **shared across the team via a
+file on a network drive**, not established per-machine:
+
+- Every installed copy reads its S3 session from `V:\Amit Int\SmartComm\smartcomm-okta-session.json` (set in
+  `main.js`; override with a real `SMARTCOMM_OKTA_SESSION_FILE` env var if a machine maps that share to a different
+  letter). Azure/Microsoft sign-in for SmartCOMM Interactive stays per-person in `userData` — only S3 is shared.
+- Automated runs are **read-only** (`SMARTCOMM_OKTA_SESSION_READONLY=1`): they load the shared cookies and, if they
+  land, proceed; they never type anyone's email into Okta and never overwrite the shared file (so simultaneous QA
+  downloads can't corrupt it — `oktaSessionStore.js` also writes via a temp-file rename for the same reason).
+- **To establish/refresh it (owner only):** on a machine that *has* S3 access and maps the `V:` share, open the
+  SmartCOMM tab → "Establish S3 Session", complete the Okta sign-in by hand. That writes the shared file everyone
+  else reads. Do this once, and again whenever a run reports `S3_SHARED_SESSION_EXPIRED`.
+- When the shared session lapses, other people aren't silently broken — their run fails with a clear "ask the owner
+  to refresh it" message naming `SMARTCOMM_OKTA_SESSION_OWNER`. Nobody else has to sign in, reinstall, or wait on
+  the owner's machine being on.
+- **Note:** whoever established the session is who Guidewire logs every shared lookup under. This is a deliberate
+  short-term bridge (per 2026-10-07 decision; S3 downloads are being replaced within a few weeks). The clean
+  long-term fix is per-person read access to the Test admin tool, after which each user's own "Establish S3 Session"
+  works and no shared file is needed.
+
 **Known gaps (Policy/Jira tabs only):** the Policy tab's report email needs a recipient (`TO_EMAIL`) that isn't
 wired up in a packaged build yet, and the Jira Sprint Report tab needs `JIRA_SITE`/`JIRA_EMAIL`/`JIRA_API_TOKEN`,
 which have no Settings fields yet. SmartCOMM's optional per-scenario test users (`SMARTCOMM_TEST_USER_1..3`) also
