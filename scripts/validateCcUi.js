@@ -69,7 +69,10 @@ async function claimAccessDenied(page, claimNumber) {
   const specData = spec.loadSpec();
   console.log(`[CC-UI] spec: ${specData.file} (${specData.uiFields.length} UI field rows, ${Object.keys(specData.typelists).length} typelists)`);
 
-  const browser = await chromium.launch({ headless: !arg('headed', false) });
+  // channel:'chromium' runs the full bundled Chromium even when headless, so the packaged app doesn't ship the
+  // separate ~270MB chromium-headless-shell build (see electron-app/scripts/stage-resources.js). No behavior
+  // change: this stays headless by default, just on the full browser instead of the shell.
+  const browser = await chromium.launch({ headless: !arg('headed', false), channel: 'chromium' });
   const page = await browser.newPage({ viewport: { width: 1700, height: 1300 } });
   page.setDefaultTimeout(30000);
   let loginName = username || 'admin';

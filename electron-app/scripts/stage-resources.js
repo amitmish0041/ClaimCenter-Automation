@@ -132,6 +132,20 @@ for (const cwd of [POLICY_SRC, CLAIMS_SRC]) {
   }
 }
 
+// Drop the headless-shell builds. `playwright install chromium` fetches BOTH the full Chromium and a separate
+// chromium-headless-shell (~270MB) that's used only for headless launches. Every shipped flow either runs
+// headed (the test runner + establish-session, on the full Chromium) or launches headless via
+// channel:'chromium' (the download/bulk/cc-ui scripts - see their chromium.launch calls), which ALSO uses the
+// full Chromium - so the shell binary is never actually used. Removing it keeps the installer ~270MB smaller
+// with no runtime effect. If a future flow needs true headless-shell, drop channel:'chromium' there and delete
+// this block so the shell ships again.
+for (const name of fs.readdirSync(BROWSERS_DEST)) {
+  if (name.startsWith('chromium_headless_shell')) {
+    fs.rmSync(path.join(BROWSERS_DEST, name), { recursive: true, force: true, maxRetries: 10, retryDelay: 3000 });
+    console.log(`  dropped ${name} (headless-shell not bundled - flows use the full Chromium via channel:'chromium')`);
+  }
+}
+
 console.log('── Staging complete ──');
 console.log(`  ${POLICY_DEST}`);
 console.log(`  ${CLAIMS_DEST}`);

@@ -63,7 +63,10 @@ async function main() {
   const singleScenario = /^(1|true|yes)$/i.test(process.env.SMARTCOMM_SINGLE_SCENARIO || '');
 
   console.log(`[Bulk] Validating ${digList.length} templates: ${digList.join(', ')}${interactive ? ' (Interactive templates enabled — a browser window may need your sign-in)' : ''}`);
-  const browser = await chromium.launch({ headless: !interactive });
+  // channel:'chromium' runs the full bundled Chromium even when headless, so the packaged app doesn't ship the
+  // separate ~270MB chromium-headless-shell build (see electron-app/scripts/stage-resources.js). No behavior
+  // change: non-interactive bulk runs stay headless/unattended, just on the full browser instead of the shell.
+  const browser = await chromium.launch({ headless: !interactive, channel: 'chromium' });
   const page = await browser.newPage();
   page.setDefaultTimeout(30000);
 

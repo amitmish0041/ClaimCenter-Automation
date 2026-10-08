@@ -58,7 +58,10 @@ async function emailResults(key, downloaded, to) {
   const manifestPath = path.join(outDir, 'manifest.json');
   const writeManifest = (data) => fs.writeFileSync(manifestPath, JSON.stringify({ key, to, ...data }, null, 1));
 
-  const browser = await chromium.launch({ headless: !arg('headed', false) });
+  // channel:'chromium' runs the full bundled Chromium even when headless, so the packaged app doesn't ship the
+  // separate ~270MB chromium-headless-shell build (see electron-app/scripts/stage-resources.js). No behavior
+  // change: this stays headless by default, just on the full browser instead of the shell.
+  const browser = await chromium.launch({ headless: !arg('headed', false), channel: 'chromium' });
   const page = await browser.newPage({ viewport: { width: 1600, height: 1200 }, acceptDownloads: true });
   page.setDefaultTimeout(30000);
   try {
