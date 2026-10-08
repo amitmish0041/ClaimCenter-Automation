@@ -106,10 +106,10 @@ async function clickInteractiveAndWaitForEditor(page, context, { log = console.l
   const popupPromise = context.waitForEvent('page', { timeout: 20000 });
   await page.getByRole('button', { name: 'Interactive', exact: true }).click();
   const popup = await popupPromise.catch(() => null);
-  // Lets a caller (validationService.js's live-preview screenshot loop) point itself at this popup instead of
-  // the main page for as long as it's open — this is where the actual Microsoft email/password/MFA fields
-  // render during the sign-in wait, not the main page (which just shows "Authenticating..."). Fired once,
-  // here, rather than on every poll below, since the popup reference itself never changes after this.
+  // Optional hook: lets a caller learn about the Microsoft sign-in popup as soon as it opens (this is where the
+  // actual email/password/MFA fields render during the sign-in wait, not the main page, which just shows
+  // "Authenticating..."). Fired once, here, since the popup reference never changes after this. Currently no
+  // caller passes onPopup; kept as a no-cost extension point.
   if (popup && !popup.isClosed() && onPopup) onPopup(popup);
   if (popup && !popup.isClosed()) {
     await popup.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});

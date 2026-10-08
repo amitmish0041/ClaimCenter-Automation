@@ -22,7 +22,6 @@ const fraudLanguageService = require('./fraudLanguageService');
 const dataDictionaryService = require('./dataDictionaryService');
 const payloadXpathService = require('./payloadXpathService');
 const interactiveEditService = require('./interactiveEditService');
-const livePreviewService = require('./livePreviewService');
 const s3AdminService = require('../s3Download/s3AdminService');
 const { createS3SessionManager } = require('../s3Download/s3SessionManager');
 const { loginAsAdmin, loginAsUser, openExistingClaim } = require('../claimCenterBase');
@@ -821,17 +820,13 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   const log = (m) => console.log(`[SmartComm] ${scenario.scenarioId}: ${m}`);
 
   // Live preview for the Runner UI (Commercial Line Performance test/runner) — a read-only, auto-refreshing
-  // screenshot a person watching that UI can poll, independent of whether they have desktop access to
-  // whichever machine is actually running this headed browser. `activePage` starts as the main page and
-  // swings over to the Azure sign-in popup for as long as one is open (see onPopup below and
-  // livePreviewService.js's own header for why that redirect matters) — stopped unconditionally in `finally`
-  // so a thrown error from anywhere below still cleans up its screenshot file.
-  let activePage = page;
-  const stopLivePreview = livePreviewService.startLivePreview(page, scenario.scenarioId, { getActivePage: () => activePage });
+  // The live browser preview (per-scenario screenshots the Runner UI used to poll) was removed: the
+  // Interactive browser is now visible on the user's own machine, so a thumbnail is redundant. Kept as a
+  // no-op so the unconditional cleanup in the `finally` below stays unchanged.
+  const stopLivePreview = () => {};
   try {
     await interactiveEditService.clickInteractiveAndWaitForEditor(page, page.context(), {
       log, scenarioId: scenario.scenarioId,
-      onPopup: (popup) => { activePage = popup; popup.once('close', () => { activePage = page; }); },
     });
     const frame = await interactiveEditService.getEditorFrame(page);
 

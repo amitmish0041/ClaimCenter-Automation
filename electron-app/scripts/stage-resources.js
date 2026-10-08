@@ -110,6 +110,13 @@ if (fs.existsSync(SMARTCOMM_DATA_SRC)) {
 }
 
 console.log('── Installing pinned Playwright Chromium for both repos into a shared bundle ──');
+// Start from a clean browser bundle every build. Playwright's install SKIPS a revision that's already
+// present, so a revision left over from an earlier build (e.g. a different pinned Playwright version) would
+// otherwise linger here and get bundled too - exactly the duplication (two full Chromium sets, ~650MB) that
+// bloated the installer before both repos were aligned on one Playwright version. Wiping guarantees the
+// bundle holds only what the current repos actually resolve to, at the cost of one browser re-download per
+// build (acceptable - builds are occasional, the installer size and first-install time are what matter).
+fs.rmSync(BROWSERS_DEST, { recursive: true, force: true, maxRetries: 10, retryDelay: 3000 });
 fs.mkdirSync(BROWSERS_DEST, { recursive: true });
 const installEnv = { ...process.env, PLAYWRIGHT_BROWSERS_PATH: BROWSERS_DEST };
 for (const cwd of [POLICY_SRC, CLAIMS_SRC]) {
