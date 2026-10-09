@@ -62,13 +62,18 @@ function configureEnvAndStartServer() {
     // Team-wide usage log for the Stats tab - one shared file on the team drive that every installed copy
     // appends its runs to (see runner/server.js recordUsage/readUsage). Same V: dependency as the shared session.
     process.env.RUNNER_USAGE_LOG = path.join('V:', 'Amit Int', 'SmartComm', 'usage.jsonl');
-    // Bundled copy of the BA/QA-maintained SmartCOMM template spreadsheet + .docx files (see
-    // stage-resources.js) - works out of the box with no per-user folder to track down. server.js's own
-    // settings-loading (runner-settings.json, written by the Settings tab) still overrides this afterwards
-    // if a user explicitly points at a different/newer copy, since that only runs when a value was actually
-    // saved there.
+    // SmartCOMM data (templates + the Requirement workbooks + Claims_Documents_Index) can live on the TEAM
+    // DRIVE so updates are instant: edit a file on V: and the next run picks it up - no rebuild, no release.
+    // Prefer the V: copy when it's present and looks complete (sentinel: its Requirement subfolder); otherwise
+    // fall back to the BUNDLED copy so the app still works with no V: mapped, offline, or before the V: folder
+    // is populated. server.js's Settings "SmartCOMM data folder" field still overrides either at runtime.
     const bundledSmartCommData = path.join(process.resourcesPath, 'smartcomm-data');
-    if (fs.existsSync(bundledSmartCommData)) process.env.SMARTCOMM_DATA_DIR = bundledSmartCommData;
+    const sharedSmartCommData = path.join('V:', 'Amit Int', 'SmartComm', 'data');
+    if (fs.existsSync(path.join(sharedSmartCommData, 'Requirement'))) {
+      process.env.SMARTCOMM_DATA_DIR = sharedSmartCommData;
+    } else if (fs.existsSync(bundledSmartCommData)) {
+      process.env.SMARTCOMM_DATA_DIR = bundledSmartCommData;
+    }
     // Donegal's internal mail relay. Not secrets (unauthenticated relay, already in ClaimCenter-Automation's
     // committed .env.example) - but that .env is never bundled, and without these every SmartCOMM report
     // silently skips emailing (reportService.js no-ops when EMAIL_SMTP_HOST is unset). Recipient (EMAIL_TO)
