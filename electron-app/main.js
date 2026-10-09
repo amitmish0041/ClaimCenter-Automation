@@ -38,6 +38,7 @@ fs.mkdirSync(userDataDir, { recursive: true });
 
 function configureEnvAndStartServer() {
   process.env.RUNNER_PORT = String(PORT);
+  process.env.RUNNER_APP_VERSION = app.getVersion(); // shown in the UI so users/support know which build they're on
   if (isPackaged) {
     process.env.RUNNER_PACKAGED = '1';
     process.env.RUNNER_NODE_EXEC = process.execPath;
@@ -58,6 +59,9 @@ function configureEnvAndStartServer() {
       || path.join('V:', 'Amit Int', 'SmartComm', 'smartcomm-okta-session.json');
     process.env.SMARTCOMM_OKTA_SESSION_READONLY = '1';
     process.env.SMARTCOMM_OKTA_SESSION_OWNER = 'Amit Mishra (amitmishra@donegalgroup.com)';
+    // Team-wide usage log for the Stats tab - one shared file on the team drive that every installed copy
+    // appends its runs to (see runner/server.js recordUsage/readUsage). Same V: dependency as the shared session.
+    process.env.RUNNER_USAGE_LOG = path.join('V:', 'Amit Int', 'SmartComm', 'usage.jsonl');
     // Bundled copy of the BA/QA-maintained SmartCOMM template spreadsheet + .docx files (see
     // stage-resources.js) - works out of the box with no per-user folder to track down. server.js's own
     // settings-loading (runner-settings.json, written by the Settings tab) still overrides this afterwards

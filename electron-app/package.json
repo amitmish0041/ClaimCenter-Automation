@@ -1,7 +1,7 @@
 {
   "name": "claimcenter-runner",
   "productName": "ClaimCenter Runner",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Self-contained Windows app for the Playwright Test Runner UI (SmartCOMM Validator and related tools)",
   "private": true,
   "main": "main.js",
