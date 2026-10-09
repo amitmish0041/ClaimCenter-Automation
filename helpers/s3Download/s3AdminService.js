@@ -32,7 +32,10 @@
 'use strict';
 const oktaSessionStore = require('./oktaSessionStore');
 
-const S3_ADMIN_URL = 'https://intadmin-develop-donegal-dngldev-gwjutro.beta5-andromeda.guidewire.net/s3';
+// Env-overridable so an admin can point at a different S3 Integration Files admin URL from the Admin tab
+// (runner/server.js applies admin-config.s3.adminUrl -> SMARTCOMM_S3_ADMIN_URL) without a rebuild.
+const S3_ADMIN_URL = process.env.SMARTCOMM_S3_ADMIN_URL
+  || 'https://intadmin-develop-donegal-dngldev-gwjutro.beta5-andromeda.guidewire.net/s3';
 // The corporate email typed into Okta on the email-only sign-in fallback. Env-overridable so it isn't a
 // single person's address baked into every machine — in the packaged build the automated path never runs
 // this anyway (see READONLY_SESSION below), but on a dev machine it fills whoever's own Okta account.

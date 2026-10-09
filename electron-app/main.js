@@ -62,6 +62,10 @@ function configureEnvAndStartServer() {
     // Team-wide usage log for the Stats tab - one shared file on the team drive that every installed copy
     // appends its runs to (see runner/server.js recordUsage/readUsage). Same V: dependency as the shared session.
     process.env.RUNNER_USAGE_LOG = path.join('V:', 'Amit Int', 'SmartComm', 'usage.jsonl');
+    // Shared admin config (access grants, environment URLs, admin emails, SMTP, S3) that the Admin tab edits
+    // in-app and every copy reads - one file on the team drive, no token (see runner/server.js). Optional:
+    // if it's absent/unreachable the app falls back to the GitHub entitlements + the built-in defaults.
+    process.env.RUNNER_ADMIN_CONFIG = path.join('V:', 'Amit Int', 'SmartComm', 'admin-config.json');
     // SmartCOMM data (templates + the Requirement workbooks + Claims_Documents_Index) can live on the TEAM
     // DRIVE so updates are instant: edit a file on V: and the next run picks it up - no rebuild, no release.
     // Prefer the V: copy when it's present and looks complete (sentinel: its Requirement subfolder); otherwise
