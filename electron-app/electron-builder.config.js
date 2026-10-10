@@ -24,6 +24,11 @@ if (fs.existsSync(smartCommDataStaged)) {
 module.exports = {
   appId: 'com.donegalgroup.claimcenter-runner',
   productName: 'ClaimCenter Runner',
+  // Output file name with NO spaces. GitHub rewrites spaces in uploaded asset names to dots, which then don't
+  // match the (spaced) name electron-builder writes into latest.yml - breaking electron-updater's download.
+  // A hyphenated artifactName makes the emitted .exe, its .blockmap, and latest.yml all agree, with no manual
+  // post-build rename. ${version}/${ext} are electron-builder placeholders (single-quoted so JS leaves them be).
+  artifactName: 'ClaimCenter-Runner-Setup-${version}.${ext}',
   directories: {
     output: 'dist',
   },
