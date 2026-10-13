@@ -1352,6 +1352,23 @@ function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
   // (QA-EDIT-5/8/9/12/...) was found; only the two that happened to wrap were reported "missing". A
   // whitespace-stripped copy of the page lets the wrap-tolerant fallback below still find them.
   const haystackNoWs = haystack.replace(/\s+/g, '');
+  const foundInPdf = (marker) => {
+    const needle = pdfValidationService.normalizeWs(marker || '').toLowerCase();
+    return !!needle && (haystack.includes(needle) || haystackNoWs.includes(needle.replace(/\s+/g, '')));
+  };
+  // One SmartCOMM field whose placeholder wraps across lines renders as MULTIPLE editable spans sharing the
+  // SAME technical name (CONFIRMED live 2026-10-13, DIG108: editableField3 split into INT10 "--" + INT11
+  // "<<Editable Field>>--" — same aria-label, same paragraph). Each span gets edited to its own marker, but
+  // only ONE survives into the single rendered field — so a sibling fragment whose own marker didn't make it is
+  // NOT a lost edit, as long as some span of that same field (same technical name) IS present in the PDF.
+  // Collect those technical names first. (Safe because SmartCOMM numbers editable fields uniquely — the same
+  // editableFieldN appearing on more than one span means they're pieces of ONE field, not two distinct ones.)
+  const fieldFoundByTechName = new Set();
+  for (const c of interactiveChecks) {
+    if (c.observedChanged === true && c.expectedEditable === true && c.technicalName && foundInPdf(c.committedMarker || c.after)) {
+      fieldFoundByTechName.add(c.technicalName);
+    }
+  }
   for (const c of interactiveChecks) {
     // Checks the raw observed fact (an edit genuinely took), not `result` — which, since the Data
     // Dictionary reclassification above, no longer means "this field was successfully edited" for an
@@ -1363,11 +1380,17 @@ function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
     // already-bracketed value in its own UI decoration — "[[QA-EDIT-2]]" — that never actually appears in
     // the rendered PDF and would false-FAIL every real, successful edit). See interactiveEditService.js's
     // inspectAndMaybeEdit for the full explanation.
-    const needle = pdfValidationService.normalizeWs(c.committedMarker || c.after || '').toLowerCase();
     // Match either as-is OR with ALL whitespace removed from both sides, so a PDF line-wrap inside the marker
     // (e.g. "QA- EDIT-10") can't false-FAIL an edit that really is in the document.
-    const found = !!needle && (haystack.includes(needle) || haystackNoWs.includes(needle.replace(/\s+/g, '')));
-    c.verifiedInPdf = found;
+    const found = foundInPdf(c.committedMarker || c.after);
+    // Split-line sibling: this exact marker isn't in the PDF, but another span of the SAME field (same technical
+    // name) is — the field WAS edited; this fragment just lost the merge into the single rendered field.
+    const siblingVerified = !found && c.technicalName && fieldFoundByTechName.has(c.technicalName);
+    c.verifiedInPdf = found || siblingVerified;
+    if (siblingVerified) {
+      c.reason = `${c.reason ? `${c.reason} ` : ''}(Field placeholder split across lines into multiple editable spans sharing technical name "${c.technicalName}"; another span's edit is present in the completed PDF, so this fragment's own marker not appearing is expected — the field was edited.)`;
+      continue;
+    }
     if (!found) {
       const looksLikeDate = DATE_SHAPED_RE.test(c.before || '');
       const note = `Edit was accepted in the interactive editor (showed "${c.after}") but this text was NOT found anywhere in the downloaded, completed PDF — the edit did not survive into the final document.` +
