@@ -47,13 +47,20 @@ const LOGIN_EMAIL = process.env.SMARTCOMM_OKTA_LOGIN_EMAIL || 'amitmishra@donega
 // to refresh it" message instead. SESSION_OWNER just names who that is in that message.
 const READONLY_SESSION = process.env.SMARTCOMM_OKTA_SESSION_READONLY === '1';
 const SESSION_OWNER = process.env.SMARTCOMM_OKTA_SESSION_OWNER || 'the tool owner';
-// ClaimCenter > Inbound Pending > smartcomm > output > output (generated PDFs — CONFIRMED live 2026-09-30
+// ClaimCenter > Outbound > smartcomm > output > archive (the completed/generated PDFs). CHANGED 2026-10-13
+// (per user — the S3 bucket layout moved): the generated documents used to live under ClaimCenter Inbound
+// Pending > smartcomm > output > output (full key cc/inbound-files/pending/smartcomm/output/output); they are
+// now delivered to Outbound > smartcomm > output > archive (full key cc/outbound-files/smartcomm/output/
+// archive). The data-testids follow the UI's own `chevron-<key path>` / `label-<key path>` convention — note
+// the "Outbound > smartcomm" parent chevron below is the SAME one INPUT_NODE already uses, which confirms the
+// convention holds for this branch. Prior-location notes kept for reference:
+// CONFIRMED live 2026-09-30
 // this is TWO "output" levels deep, not one: the first "output" is itself a parent of two children, "logs"
 // (895 items) and a second, identically-named "output" (104 items, the real PDFs) — its own item count
 // exactly equals the parent's, 895+104=999, which is what made the shallower node look plausible at first)
 // and Outbound > smartcomm > input (the original payload) — each entry is the full CHAIN of chevrons to
 // expand every intermediate parent, plus the label of the final child to select.
-const OUTPUT_NODE = { chevrons: ['chevron-cc/inbound-files/pending/smartcomm', 'chevron-cc/inbound-files/pending/smartcomm/output'], label: 'label-cc/inbound-files/pending/smartcomm/output/output' };
+const OUTPUT_NODE = { chevrons: ['chevron-cc/outbound-files/smartcomm', 'chevron-cc/outbound-files/smartcomm/output'], label: 'label-cc/outbound-files/smartcomm/output/archive' };
 const INPUT_NODE = { chevrons: ['chevron-cc/outbound-files/smartcomm'], label: 'label-cc/outbound-files/smartcomm/input' };
 const MAX_MATCHES = 10; // a too-broad key could otherwise bulk-download/email an unbounded number of files
 
@@ -281,9 +288,9 @@ async function searchNode(page, node, key, { log = console.log, folderDescriptio
   return out;
 }
 
-// The generated PDF — ClaimCenter Inbound Pending > smartcomm > output > output.
+// The generated PDF — ClaimCenter Outbound > smartcomm > output > archive (moved here 2026-10-13, see OUTPUT_NODE).
 async function searchSmartComm(page, key, { log = console.log } = {}) {
-  return searchNode(page, OUTPUT_NODE, key, { log, folderDescription: 'ClaimCenter Inbound Pending > smartcomm > output > output' });
+  return searchNode(page, OUTPUT_NODE, key, { log, folderDescription: 'ClaimCenter Outbound > smartcomm > output > archive' });
 }
 
 // The ORIGINAL payload ClaimCenter sent to SmartCOMM for this same transaction — ClaimCenter Outbound >
