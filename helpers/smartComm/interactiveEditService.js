@@ -528,25 +528,66 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, log = console
   } catch (e) {
     return { attempted: false, changed: null, technicalName: null, before, after: before, note: `Could not double-click: ${e.message.split('\n')[0]}` };
   }
-  await page.waitForTimeout(300);
-
-  let popupInput = frame.locator('.th-dataItemInlineEditor input, .th-dataItemInlineEditor select, .th-dataItemInlineEditor textarea').first();
-  let popupVisible = await popupInput.isVisible().catch(() => false);
-  if (!popupVisible) {
-    // CONFIRMED live 2026-09-29 (DIG166's date-component fields, e.g. the "20__" year field in "day of __,
-    // 20__") — a user double-clicking these gets a plain <input> that replaces the field IN PLACE, directly
-    // in the document flow, with no `.th-dataItemInlineEditor` wrapper popup at all — a real user confirmed
-    // this edits and completes fine manually. Falls back to a NEWLY-appeared visible input/select/textarea
-    // (excluding anything tagged as already-present above) rather than ANY visible one anywhere in the frame
-    // — CONFIRMED live this matters: DIG52 has an always-present "Show Choices" control elsewhere on the
-    // page that an unscoped fallback matched for every field regardless of which one was actually clicked.
-    const fallback = frame.locator('input:visible:not([data-th-preexisting-input]), select:visible:not([data-th-preexisting-input]), textarea:visible:not([data-th-preexisting-input])').first();
-    if (await fallback.isVisible().catch(() => false)) {
-      popupInput = fallback;
-      popupVisible = true;
+  // Finding the inline editor is POLLED and the double-click RE-ISSUED, not checked once: CONFIRMED live
+  // 2026-10-13 (DIG108) the `.th-dataItemInlineEditor` opens with its string textbox still `display:none`
+  // (class "hide") for a short moment after the double-click, and the old `.first()` match grabbed that hidden
+  // input (or the single ~300ms check saw nothing visible) and gave up with "no recognized editor UI" — yet a
+  // later re-double-click (the outer retry pass) edited the very same field fine. ~6 of 14 editable fields hit
+  // this per DIG108 scenario; whenever the outer passes didn't happen to recover a REQUIRED one, Complete
+  // Document failed with "Content is not allowed in prolog" and reverted the whole draft. Polling for a
+  // VISIBLE editor control — and re-issuing the double-click if none shows — makes the first pass reliable.
+  const findEditor = async () => {
+    for (const sel of [
+      // `:visible` so the momentarily-hidden string sub-editor is skipped until it actually un-hides (or this
+      // field's real, different sub-editor is picked instead) — the old `.first()` grabbed the hidden one.
+      '.th-dataItemInlineEditor input:visible, .th-dataItemInlineEditor select:visible, .th-dataItemInlineEditor textarea:visible',
+      // A field type that edits via a bare inline <input> in the document flow with NO `.th-dataItemInlineEditor`
+      // wrapper (CONFIRMED live 2026-09-29, DIG166's "20__" year field). NEWLY-appeared controls only — excludes
+      // always-present ones (e.g. DIG52's "Show Choices") tagged just before the click above.
+      'input:visible:not([data-th-preexisting-input]), select:visible:not([data-th-preexisting-input]), textarea:visible:not([data-th-preexisting-input])',
+    ]) {
+      const cand = frame.locator(sel).first();
+      if (await cand.isVisible().catch(() => false)) return cand;
     }
+    return null;
+  };
+  // Editable fields: up to 3 double-click attempts, each polling ~3s for the editor to show. A locked field is
+  // SUPPOSED to open nothing, so it gets one short check — keeps it fast and still correctly "resisted".
+  let popupInput = null;
+  const openAttempts = field.editable ? 3 : 1;
+  const pollMs = field.editable ? 3000 : 400;
+  for (let attempt = 1; attempt <= openAttempts && !popupInput; attempt++) {
+    if (attempt > 1) {
+      await field.locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+      await field.locator.dblclick({ timeout: 5000, force: true }).catch(() => {});
+    }
+    const deadline = Date.now() + pollMs;
+    do {
+      popupInput = await findEditor();
+      if (!popupInput) await page.waitForTimeout(200);
+    } while (!popupInput && Date.now() < deadline);
   }
+  let popupVisible = !!popupInput;
   if (!popupVisible) {
+    // DIAGNOSTIC (gated by DEBUG_STUCK_FIELD_HTML): for an EDITABLE field whose double-click produced no
+    // recognized text editor, capture what it DID open + the field's own static markup, so the non-text widget
+    // type can be identified and handled generically. Off by default.
+    if (field.editable && process.env.DEBUG_STUCK_FIELD_HTML) {
+      const fieldHtml = await field.locator.evaluate((el) => {
+        const container = el.closest('p, div, li, td, th') || el.parentElement || el;
+        return { spanClass: el.className, spanAttrs: Array.from(el.attributes).map((a) => `${a.name}=${a.value}`).join(' '), container: (container.outerHTML || '').replace(/\s+/g, ' ').slice(0, 700) };
+      }).catch((e) => ({ err: e.message }));
+      const opened = await frame.evaluate(() => {
+        const vis = (el) => el && el.offsetParent !== null;
+        const brief = (el) => ({ tag: el.tagName, type: el.getAttribute('type'), role: el.getAttribute('role'), aria: el.getAttribute('aria-label'), cls: el.className });
+        return {
+          newControls: Array.from(document.querySelectorAll('input:not([data-th-preexisting-input]), select, textarea, [contenteditable="true"]')).filter(vis).map(brief),
+          inlineEditors: Array.from(document.querySelectorAll('.th-dataItemInlineEditor, [class*="InlineEditor"]')).filter(vis).map((el) => (el.outerHTML || '').replace(/\s+/g, ' ').slice(0, 500)),
+          widgets: Array.from(document.querySelectorAll('[class*="calendar" i], [class*="datepicker" i], [class*="DatePicker"], [role="dialog"], [role="listbox"], [role="menu"], [class*="dropdown" i]')).filter(vis).map(brief),
+        };
+      }).catch((e) => ({ err: e.message }));
+      log(`[DIAG stuck-field] "${String(before).slice(0, 70)}" | field=${JSON.stringify(fieldHtml)} | opened=${JSON.stringify(opened).slice(0, 1600)}`);
+    }
     // Locked fields land here too (CONFIRMED live: dblclick dispatches fine, no popup ever appears).
     return { attempted: false, changed: false, technicalName: null, before, after: before, note: field.editable ? 'Double-click did not open a recognized editor UI (may be a non-text field type not yet supported).' : 'No edit popup appeared (expected for a locked field).' };
   }
@@ -554,6 +595,10 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, log = console
   const ariaLabel = await popupInput.getAttribute('aria-label').catch(() => null);
   const technicalName = ariaLabel ? ariaLabel.replace(/\s+\S+$/, '') : null; // "insuredName string" -> "insuredName"
   const inputTag = await popupInput.evaluate((el) => el.tagName).catch(() => null);
+  if (field.editable && process.env.DEBUG_STUCK_FIELD_HTML) {
+    const det = await popupInput.evaluate((el) => ({ tag: el.tagName, type: el.getAttribute('type'), pattern: el.getAttribute('pattern'), placeholder: el.getAttribute('placeholder'), maxlength: el.getAttribute('maxlength'), aria: el.getAttribute('aria-label'), cls: el.className, optionCount: el.tagName === 'SELECT' ? el.options.length : undefined, options: el.tagName === 'SELECT' ? Array.from(el.options).slice(0, 12).map((o) => o.text) : undefined })).catch((e) => ({ err: e.message }));
+    log(`[DIAG input-editor] "${String(before).slice(0, 70)}" | input=${JSON.stringify(det)}`);
+  }
 
   if (newValue === undefined) {
     // Identify only — cancel without committing (CONFIRMED live safe: Escape leaves the field unchanged).
