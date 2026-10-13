@@ -1346,6 +1346,12 @@ const DATE_SHAPED_RE = /\d{1,2}\/\d{1,2}\/\d{2,4}|(?:January|February|March|Apri
 function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
   if (!interactiveChecks || !interactiveChecks.length) return;
   const haystack = pdfValidationService.normalizeWs(pdfText).toLowerCase();
+  // PDF text extraction line-wraps long tokens, inserting a space at the break (CONFIRMED live 2026-10-13,
+  // DIG108: the edit "[QA-EDIT-10]" rendered in the completed PDF as "[QA- EDIT-10]"), which a plain substring
+  // search misses even though the edit DID survive into the document — every other marker on the same page
+  // (QA-EDIT-5/8/9/12/...) was found; only the two that happened to wrap were reported "missing". A
+  // whitespace-stripped copy of the page lets the wrap-tolerant fallback below still find them.
+  const haystackNoWs = haystack.replace(/\s+/g, '');
   for (const c of interactiveChecks) {
     // Checks the raw observed fact (an edit genuinely took), not `result` — which, since the Data
     // Dictionary reclassification above, no longer means "this field was successfully edited" for an
@@ -1358,7 +1364,9 @@ function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
     // the rendered PDF and would false-FAIL every real, successful edit). See interactiveEditService.js's
     // inspectAndMaybeEdit for the full explanation.
     const needle = pdfValidationService.normalizeWs(c.committedMarker || c.after || '').toLowerCase();
-    const found = !!needle && haystack.includes(needle);
+    // Match either as-is OR with ALL whitespace removed from both sides, so a PDF line-wrap inside the marker
+    // (e.g. "QA- EDIT-10") can't false-FAIL an edit that really is in the document.
+    const found = !!needle && (haystack.includes(needle) || haystackNoWs.includes(needle.replace(/\s+/g, '')));
     c.verifiedInPdf = found;
     if (!found) {
       const looksLikeDate = DATE_SHAPED_RE.test(c.before || '');
