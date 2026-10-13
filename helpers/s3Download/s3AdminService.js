@@ -301,22 +301,80 @@ async function searchSmartCommPayload(page, key, { log = console.log } = {}) {
   return searchNode(page, INPUT_NODE, key, { log, folderDescription: 'ClaimCenter Outbound > smartcomm > input' });
 }
 
+// Since 057b382 every launcher runs the FULL Chromium (channel:'chromium') instead of chromium-headless-shell.
+// Unlike the shell, full Chromium has its built-in PDF viewer, so a PDF served inline (no "Content-Disposition:
+// attachment") is RENDERED in a tab instead of firing a download event — the .json siblings still downloaded
+// fine, but the PDF's own click just timed out. Forces every top-level PDF navigation in this context to be an
+// attachment so Chromium downloads it instead. Only 'document' requests are touched; everything else passes
+// straight through. Installed once per context.
+const pdfAttachmentContexts = new WeakSet();
+async function forcePdfDownloads(context) {
+  if (pdfAttachmentContexts.has(context)) return;
+  pdfAttachmentContexts.add(context);
+  await context.route('**/*', async (route) => {
+    const req = route.request();
+    if (req.resourceType() !== 'document') return route.continue();
+    let response;
+    try { response = await route.fetch(); } catch (_) { return route.continue(); }
+    const headers = response.headers();
+    const isPdf = /application\/pdf/i.test(headers['content-type'] || '') || /\.pdf(\?|$)/i.test(req.url());
+    if (isPdf && !/attachment/i.test(headers['content-disposition'] || '')) {
+      const name = decodeURIComponent((new URL(req.url()).pathname.split('/').pop()) || 'document.pdf');
+      headers['content-disposition'] = `attachment; filename="${name.replace(/"/g, '')}"`;
+    }
+    return route.fulfill({ response, headers });
+  });
+}
+
+// Resolves with the first download fired by ANY page in the context — the admin UI may open the file in a new
+// tab/popup, whose download event never reaches the original page's own waitForEvent('download').
+function waitForAnyDownload(context, timeout) {
+  return new Promise((resolve, reject) => {
+    const pages = new Set();
+    const onDownload = (d) => { cleanup(); resolve(d); };
+    const watch = (p) => { if (!pages.has(p)) { pages.add(p); p.on('download', onDownload); } };
+    const onPage = (p) => watch(p);
+    const timer = setTimeout(() => { cleanup(); reject(new Error(`no download started within ${timeout}ms`)); }, timeout);
+    function cleanup() {
+      clearTimeout(timer);
+      context.off('page', onPage);
+      for (const p of pages) p.off('download', onDownload);
+    }
+    context.pages().forEach(watch);
+    context.on('page', onPage);
+  });
+}
+
 // Downloads each match into outDir, returns [{ text, fileName, localPath }].
 async function downloadMatches(page, matches, outDir, { log = console.log } = {}) {
   const fs = require('fs');
   const path = require('path');
   fs.mkdirSync(outDir, { recursive: true });
+  const context = page.context();
+  await forcePdfDownloads(context);
   const results = [];
   for (const m of matches) {
     const downloadBtn = m.row.getByRole('button', { name: 'Download' })
       .or(m.row.locator('[aria-label="Download"], [title="Download"]')).first();
+    const pagesBefore = new Set(context.pages());
     const [download] = await Promise.all([
-      page.waitForEvent('download', { timeout: 20000 }),
+      waitForAnyDownload(context, 20000),
       downloadBtn.click(),
     ]);
-    const fileName = download.suggestedFilename();
-    const localPath = path.join(outDir, fileName);
+    let fileName = download.suggestedFilename();
+    let localPath = path.join(outDir, fileName);
     await download.saveAs(localPath);
+    // Close any popup tab the download came through, so it doesn't linger on the shared S3 page's context.
+    for (const p of context.pages()) if (!pagesBefore.has(p)) await p.close().catch(() => {});
+    // Name by content, not by whatever the server suggested: a real PDF always gets a .pdf extension.
+    const head = Buffer.alloc(5);
+    const fd = fs.openSync(localPath, 'r'); fs.readSync(fd, head, 0, 5, 0); fs.closeSync(fd);
+    if (head.toString('latin1') === '%PDF-' && !/\.pdf$/i.test(fileName)) {
+      const renamed = `${fileName.replace(/\.[^.]*$/, '')}.pdf`;
+      fs.renameSync(localPath, path.join(outDir, renamed));
+      fileName = renamed;
+      localPath = path.join(outDir, renamed);
+    }
     log(`[S3] downloaded ${fileName} (${fs.statSync(localPath).size} bytes)`);
     results.push({ text: m.text, fileName, localPath });
   }

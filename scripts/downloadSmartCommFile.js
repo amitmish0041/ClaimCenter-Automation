@@ -82,11 +82,26 @@ async function emailResults(key, downloaded, to, foundIn) {
       return;
     }
     console.log(`[S3] "${key}" → ${matches.length} file(s) under ${foundIn}`);
-    const downloaded = await svc.downloadMatches(page, matches, outDir);
+    // One file at a time, so a single failed download (e.g. the PDF) is reported instead of silently leaving
+    // only the files that happened to download before it.
+    const downloaded = [];
+    const failed = [];
+    for (const m of matches) {
+      try {
+        downloaded.push(...await svc.downloadMatches(page, [m], outDir));
+      } catch (err) {
+        console.log(`[S3] FAILED to download "${m.text}": ${err.message}`);
+        failed.push({ text: m.text, error: err.message });
+      }
+    }
+    if (!downloaded.some((d) => /\.pdf$/i.test(d.fileName))) {
+      console.log(`[S3] WARNING: none of the downloaded files is a PDF for "${key}".`);
+    }
+    if (!downloaded.length) throw new Error(`all ${matches.length} matched file(s) failed to download`);
     const emailResult = await emailResults(key, downloaded, to, foundIn);
     writeManifest({
       matches: downloaded.map((d) => ({ text: d.text, fileName: d.fileName })),
-      foundIn, emailed: emailResult.sent, emailReason: emailResult.reason || null, error: null,
+      failed, foundIn, emailed: emailResult.sent, emailReason: emailResult.reason || null, error: null,
     });
     console.log(`[S3] Done — ${downloaded.length} file(s) downloaded to ${outDir}`);
   } catch (e) {
