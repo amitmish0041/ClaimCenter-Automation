@@ -497,7 +497,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
       }
     }
 
-    let pdfPath, payload, interactiveChecks;
+    let pdfPath, payload, interactiveChecks, metadataChecks = [];
     let choicesApplied = [];
     base.creationMode = template.interactiveOrOnDemand;
     if (template.interactiveOrOnDemand === 'Interactive') {
@@ -519,11 +519,12 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
       const result = await runInteractiveGeneration(page, {
         template, scenario, effectiveTestData, recipient, additionalRecipient,
         fileNamePrefix: `${template.digNumber}_${scenario.testData.claimNumber}_${scenario.scenarioId}`,
-        s3Session,
+        s3Session, claimNumber: base.claimNumber,
         commentFieldNames: scenarioRequirements.map((r) => r.fieldName).filter(Boolean),
       });
       pdfPath = result.pdfPath;
       interactiveChecks = result.interactiveChecks;
+      metadataChecks = result.metadataChecks || [];
       base.dictionaryReference = result.dictionaryReference;
       base.trackedDictionaryFields = result.trackedFields;
       base.unmatchedTrackedDictionaryFields = result.unmatchedTrackedFields;
@@ -607,6 +608,9 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     const validations = pdfValidationService.evaluateRequirements([...reportableRequirements, ...fraudRequirements, ...xpathRequirements], text, context);
     explainFraudLanguageFailures(validations, text, fraudDetails);
     annotateInteractiveEditFailures(validations, interactiveChecks);
+    // Append the archive .json filing-metadata checks (META*) so they count toward the scenario result and
+    // render in their own report table (see reportService). A wrong claim #/template here is a real failure.
+    if (metadataChecks && metadataChecks.length) validations.push(...metadataChecks);
     // "Data capture" cross-check (Insured / Claimant / Loss Date / Policy Number / Underwriting Company) compares
     // this tool's own Summary-screen scrape with the payload ClaimCenter sent to SmartCOMM. It says nothing about
     // the template, so it is NOT reported or counted — a mismatch (capture drift) is only logged for whoever is
@@ -851,7 +855,7 @@ function assignByKnownValue(interactiveChecks, digNumber, knownValues) {
 // Document Properties Identifier (see helpers/s3Download/s3AdminService.js — CONFIRMED live that this
 // Identifier is exactly the S3 object's filename). See interactiveEditService.js's own header for what in
 // here is still a first-draft guess vs. actually confirmed live.
-async function runInteractiveGeneration(page, { template, scenario, effectiveTestData, recipient, additionalRecipient, fileNamePrefix, s3Session, commentFieldNames }) {
+async function runInteractiveGeneration(page, { template, scenario, effectiveTestData, recipient, additionalRecipient, fileNamePrefix, s3Session, commentFieldNames, claimNumber }) {
   const log = (m) => console.log(`[SmartComm] ${scenario.scenarioId}: ${m}`);
 
   // Live preview for the Runner UI (Commercial Line Performance test/runner) — a read-only, auto-refreshing
@@ -1179,6 +1183,26 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     const finalPath = path.join(path.dirname(pdfResult.downloaded.localPath), `${fileNamePrefix}_interactive.pdf`);
     fs.renameSync(pdfResult.downloaded.localPath, finalPath);
 
+    // Co-located filing metadata (<identifier>.json, the SAME archive folder as the PDF) — per user direction
+    // 2026-10-13. Unlike the input review-case payload fetched below (only sometimes present — ~2/7 of recent
+    // docs in a live spot-check), this .json is ALWAYS alongside the PDF, so it's a reliable confirm of the
+    // fetched document's template identity (Description carries the DIG) and claim # (FileNumber). See
+    // s3AdminService.downloadArchiveMetadataJson + buildMetadataChecks.
+    let metadataChecks = [];
+    try {
+      const metaResult = await s3AdminService.downloadArchiveMetadataJson(s3Page, identifier, documentService.DOWNLOAD_DIR, { log });
+      if (metaResult.error) {
+        log(`archive filing metadata: ${metaResult.error}`);
+        metadataChecks = [{ id: 'META1', description: 'ClaimCenter filing metadata (.json)', result: 'SKIPPED', expected: '', actual: '', reason: metaResult.error }];
+      } else {
+        log(`archive filing metadata: ${JSON.stringify(metaResult.metadata)}`);
+        metadataChecks = buildMetadataChecks(metaResult.metadata, { template, claimNumber });
+      }
+    } catch (err) {
+      log(`archive filing metadata fetch failed (${err.message}) — skipping metadata checks for this scenario.`);
+      metadataChecks = [{ id: 'META1', description: 'ClaimCenter filing metadata (.json)', result: 'SKIPPED', expected: '', actual: '', reason: err.message }];
+    }
+
     // CONFIRMED live 2026-09-30: the SAME identifier that finds the PDF above also resolves the ORIGINAL
     // payload ClaimCenter sent to SmartCOMM, under a different branch (Outbound > smartcomm > input) — this
     // replaces the Create tab's own "Download Payload" button for the Interactive flow, which is frequently
@@ -1283,7 +1307,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
         unmatchedTrackedFields.map((t) => `${t.row.attributeName} (dictionary=${t.row.editable ? 'Yes' : 'No'})`).join('; '));
     }
 
-    return { pdfPath: finalPath, interactiveChecks, dictionaryReference, payload, rawPayloadRoot, choicesApplied, trackedFields, unmatchedTrackedFields };
+    return { pdfPath: finalPath, interactiveChecks, metadataChecks, dictionaryReference, payload, rawPayloadRoot, choicesApplied, trackedFields, unmatchedTrackedFields };
   });
   } finally {
     stopLivePreview();
@@ -1615,4 +1639,44 @@ function blockedTemplateResult(dig, reason, template) {
   };
 }
 
-module.exports = { validateTemplate, _test: { recipientRoleFromTechnicalName, knownValueRole } };
+// Builds PASS/FAIL checks from the completed document's co-located filing metadata (<identifier>.json in the
+// S3 archive — see s3AdminService.downloadArchiveMetadataJson). META1 confirms the fetched document is for the
+// right template (its Description carries the DIG number); META2 confirms the right claim (FileNumber == the
+// claim under test); META3 records the remaining filing fields for the record. Reliable even when the input
+// review-case payload is absent, since this .json is always alongside the PDF.
+function buildMetadataChecks(meta, { template, claimNumber }) {
+  const norm = (s) => String(s == null ? '' : s).trim().toUpperCase().replace(/\s+/g, ' ');
+  const checks = [];
+  const dig = String(template.digNumber || '');
+  const digOk = !!dig && new RegExp(`\\b${dig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(meta.Description || '');
+  checks.push({
+    id: 'META1',
+    description: 'Archive .json Description identifies this template (DIG number present)',
+    result: digOk ? 'PASS' : 'FAIL',
+    expected: dig || '(template DIG)',
+    actual: meta.Description || '(none)',
+    reason: digOk ? '' : `Filing Description "${meta.Description || ''}" does not contain ${dig || 'the template DIG'} — the fetched document may be for a different template.`,
+  });
+  if (claimNumber) {
+    const claimOk = norm(meta.FileNumber) === norm(claimNumber);
+    checks.push({
+      id: 'META2',
+      description: 'Archive .json FileNumber matches the claim under test',
+      result: claimOk ? 'PASS' : 'FAIL',
+      expected: claimNumber,
+      actual: meta.FileNumber || '(none)',
+      reason: claimOk ? '' : `Filing claim # "${meta.FileNumber || ''}" != claim under test "${claimNumber}".`,
+    });
+  }
+  checks.push({
+    id: 'META3',
+    description: 'Archive .json filing details captured (Drawer / Folder / DocType / DocumentDate)',
+    result: 'PASS',
+    expected: '—',
+    actual: `Drawer=${meta.Drawer || ''}, Folder=${meta.Folder || ''}, DocType=${meta.DocType || ''}, DocumentDate=${meta.DocumentDate || ''}`,
+    reason: '',
+  });
+  return checks;
+}
+
+module.exports = { validateTemplate, _test: { recipientRoleFromTechnicalName, knownValueRole, buildMetadataChecks } };

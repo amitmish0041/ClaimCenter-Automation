@@ -345,7 +345,7 @@ async function downloadFirstValidPdf(page, key, outDir, { log = console.log, max
     const matches = await searchSmartComm(page, key, { log });
     if (!matches.length) {
       if (attempt === maxSearchAttempts) {
-        return { error: `no S3 object matched Identifier "${key}" under ClaimCenter Inbound Pending > smartcomm > output > output.` };
+        return { error: `no S3 object matched Identifier "${key}" under ClaimCenter Outbound > smartcomm > output > archive.` };
       }
       await page.waitForTimeout(3000);
       continue;
@@ -360,11 +360,31 @@ async function downloadFirstValidPdf(page, key, outDir, { log = console.log, max
       fs.unlinkSync(downloaded.localPath);
     }
     if (attempt === maxSearchAttempts) {
-      return { error: `"${key}" matched ${matches.length} S3 object(s) under ClaimCenter Inbound Pending > smartcomm > output > output, but NONE of them were a real PDF (all looked like ClaimCenter's own document-indexing metadata) after ${maxSearchAttempts} attempt(s) — the actual generated document likely hasn't finished uploading to S3 yet.` };
+      return { error: `"${key}" matched ${matches.length} S3 object(s) under ClaimCenter Outbound > smartcomm > output > archive, but NONE of them were a real PDF (all looked like ClaimCenter's own document-indexing metadata) after ${maxSearchAttempts} attempt(s) — the actual generated document likely hasn't finished uploading to S3 yet.` };
     }
     log(`[S3] none of the ${matches.length} current match(es) for "${key}" were a real PDF yet — waiting in case the actual document is still uploading, then re-searching (attempt ${attempt}/${maxSearchAttempts})...`);
     await page.waitForTimeout(3000);
   }
 }
 
-module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, ensureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches, downloadFirstValidPdf };
+// The completed document's co-located ClaimCenter filing metadata — "<identifier>.json" in the SAME archive
+// folder as the PDF: { Drawer, FileNumber (the claim #), Folder, DocType, Description (DIG number + name),
+// DocumentDate }. It's small and, unlike the input review-case payload (only sometimes present), it's ALWAYS
+// there alongside the PDF — so it's a reliable source for confirming the fetched document's claim # and
+// template identity (see validationService's metadata checks). Returns { metadata } parsed, or { error }.
+async function downloadArchiveMetadataJson(page, identifier, outDir, { log = console.log } = {}) {
+  const fs = require('fs');
+  const matches = await searchSmartComm(page, identifier, { log });
+  // Exactly "<identifier>.json" — NOT "<identifier>_Email.json" (the email sibling), NOT the ".pdf".
+  const want = `${String(identifier).toLowerCase()}.json`;
+  const hit = matches.find((m) => (String(m.text).trim().split(/\s+/)[0] || '').toLowerCase() === want);
+  if (!hit) return { error: `no "${identifier}.json" filing-metadata object found in the archive for Identifier "${identifier}".` };
+  const [dl] = await downloadMatches(page, [hit], outDir, { log });
+  try {
+    return { metadata: JSON.parse(fs.readFileSync(dl.localPath, 'utf8')), fileName: dl.fileName, localPath: dl.localPath };
+  } catch (e) {
+    return { error: `downloaded "${dl.fileName}" but could not parse it as JSON: ${e.message}` };
+  }
+}
+
+module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, ensureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches, downloadFirstValidPdf, downloadArchiveMetadataJson };

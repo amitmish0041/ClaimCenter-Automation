@@ -28,7 +28,7 @@ function arg(name, fallback) {
   return next && !next.startsWith('--') ? next : true;
 }
 
-async function emailResults(key, downloaded, to) {
+async function emailResults(key, downloaded, to, foundIn) {
   const host = process.env.EMAIL_SMTP_HOST;
   if (!host) { console.log('[S3] EMAIL_SMTP_HOST not set — skipping email'); return { sent: false, reason: 'EMAIL_SMTP_HOST not set' }; }
   if (!nodemailer) { console.log('[S3] nodemailer not installed — skipping email'); return { sent: false, reason: 'nodemailer not installed' }; }
@@ -39,7 +39,7 @@ async function emailResults(key, downloaded, to) {
     tls: { rejectUnauthorized: false },
   });
   const subject = `SmartCOMM S3 file(s) for key "${key}" (${downloaded.length})`;
-  const text = `Found and downloaded ${downloaded.length} file(s) under ClaimCenter Inbound Pending > smartcomm > output > output for key "${key}" (Planet: Test):\n\n` +
+  const text = `Found and downloaded ${downloaded.length} file(s) under ${foundIn || 'the S3 bucket'} for key "${key}" (Planet: Test):\n\n` +
     downloaded.map((d) => `- ${d.text}`).join('\n');
   await transporter.sendMail({
     from, to, subject, text,
@@ -66,17 +66,27 @@ async function emailResults(key, downloaded, to) {
   page.setDefaultTimeout(30000);
   try {
     await svc.loginAndEnsureTestPlanet(page);
-    const matches = await svc.searchSmartComm(page, key);
+    // Completed documents (PDF + .json + email) now live in the archive (output) folder; the original request
+    // payloads live in input. Check the archive FIRST — that's where a finished document's files are — and fall
+    // back to the input folder so a payload key still resolves. Downloads whatever matched, from whichever one.
+    let foundIn = 'ClaimCenter Outbound > smartcomm > output > archive';
+    let matches = await svc.searchSmartComm(page, key);
     if (!matches.length) {
-      console.log(`[S3] No files matched "${key}" — nothing downloaded, nothing emailed.`);
+      console.log(`[S3] No match for "${key}" in the archive — checking the input (payload) folder...`);
+      foundIn = 'ClaimCenter Outbound > smartcomm > input';
+      matches = await svc.searchSmartCommPayload(page, key);
+    }
+    if (!matches.length) {
+      console.log(`[S3] No files matched "${key}" in the archive or input folders — nothing downloaded, nothing emailed.`);
       writeManifest({ matches: [], emailed: false, error: `No files matched "${key}"` });
       return;
     }
+    console.log(`[S3] "${key}" → ${matches.length} file(s) under ${foundIn}`);
     const downloaded = await svc.downloadMatches(page, matches, outDir);
-    const emailResult = await emailResults(key, downloaded, to);
+    const emailResult = await emailResults(key, downloaded, to, foundIn);
     writeManifest({
       matches: downloaded.map((d) => ({ text: d.text, fileName: d.fileName })),
-      emailed: emailResult.sent, emailReason: emailResult.reason || null, error: null,
+      foundIn, emailed: emailResult.sent, emailReason: emailResult.reason || null, error: null,
     });
     console.log(`[S3] Done — ${downloaded.length} file(s) downloaded to ${outDir}`);
   } catch (e) {

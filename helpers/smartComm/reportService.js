@@ -240,8 +240,9 @@ function writeScenarioSheet(ws, s) {
   }
 
   const allValidations = s.validations || [];
+  const metaRows = allValidations.filter((v) => /^META/i.test(v.id || ''));
   const payloadRows = allValidations.filter((v) => /^XP/i.test(v.id || ''));
-  const contentRows = allValidations.filter((v) => !/^XP/i.test(v.id || ''));
+  const contentRows = allValidations.filter((v) => !/^XP/i.test(v.id || '') && !/^META/i.test(v.id || ''));
 
   const addValidationTable = (title, list) => {
     ws.addRow([title]).font = { bold: true };
@@ -254,6 +255,7 @@ function writeScenarioSheet(ws, s) {
     for (const v of list) styleResultRow(ws.addRow([v.id || '', v.description || '', v.result, v.expected, v.actual, v.reason || '']), v.result);
     ws.addRow([]);
   };
+  if (metaRows.length) addValidationTable('Document Metadata — ClaimCenter filing .json (S3 archive, co-located with the PDF)', metaRows);
   addValidationTable('Template Content Validation (from the template\'s own Word-doc requirements)', contentRows);
   if (payloadRows.length) addValidationTable('Payload Validation (Data Dictionary Xpath vs. SmartCOMM Payload)', payloadRows);
 }
