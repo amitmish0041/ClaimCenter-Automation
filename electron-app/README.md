@@ -98,6 +98,8 @@ needs comes from its own **Settings** tab, entered once per machine on first lau
 - **ClaimCenter username/password + admin username/password** — required for the SmartCOMM and Claims tabs
   (SmartCOMM needs the admin login for closing exposures/claims and some activities).
 - **WriteBiz username/password per state (DE/PA/MI/WI)** — required for the Policy tab.
+- **Jira email + API token** (+ optional site, default `donegalgroup.atlassian.net`) — required for the Jira
+  Report tab; each person's own Atlassian API token (id.atlassian.com → Security), not their password.
 - **SmartCOMM data folder** — optional; leave blank to use the copy bundled with the app.
 
 These are written to `%APPDATA%/claimcenter-runner/settings.json` (plaintext, local to that user profile — the
@@ -131,11 +133,10 @@ file on a network drive**, not established per-machine:
   long-term fix is per-person read access to the Test admin tool, after which each user's own "Establish S3 Session"
   works and no shared file is needed.
 
-**Known gaps (Policy/Jira tabs only):** the Policy tab's report email needs a recipient (`TO_EMAIL`) that isn't
-wired up in a packaged build yet, and the Jira Sprint Report tab needs `JIRA_SITE`/`JIRA_EMAIL`/`JIRA_API_TOKEN`,
-which have no Settings fields yet. SmartCOMM's optional per-scenario test users (`SMARTCOMM_TEST_USER_1..3`) also
+**Known gaps (Policy tab only):** the Policy tab's report email needs a recipient (`TO_EMAIL`) that isn't
+wired up in a packaged build yet. SmartCOMM's optional per-scenario test users (`SMARTCOMM_TEST_USER_1..3`) also
 aren't in Settings — every scenario falls back to the admin login, which is supported but differs from a dev
-machine that has them set.
+machine that has them set. (The Jira Report's email uses the same built-in SMTP relay as SmartCOMM.)
 
 ## Testing the packaged .exe on a clean machine
 
