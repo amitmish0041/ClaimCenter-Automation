@@ -8,8 +8,9 @@
   "scripts": {
     "dev": "electron .",
     "stage": "node scripts/stage-resources.js",
-    "build": "npm run stage && electron-builder --win --config electron-builder.config.js",
-    "release": "npm run stage && electron-builder --win --config electron-builder.config.js --publish=always"
+    "copy-to-share": "node scripts/copy-to-share.js",
+    "build": "npm run stage && electron-builder --win --config electron-builder.config.js && npm run copy-to-share",
+    "release": "npm run stage && electron-builder --win --config electron-builder.config.js --publish=always && npm run copy-to-share"
   },
   "dependencies": {
     "electron-updater": "^6.3.9"
