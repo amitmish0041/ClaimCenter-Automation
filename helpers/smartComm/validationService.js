@@ -937,10 +937,19 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // human-readable label AND lets a genuine BA-intent-vs-observed-behavior disagreement (dictionary says
   // Yes, editor renders it locked, or vice versa) surface as its own signal instead of staying invisible.
   const interactiveChecks = [];
-  let n = 0;
   let skippedUnselectedChoiceCount = 0;
-  for (const field of fields) {
-    n += 1;
+  // Edit fields LAST-to-FIRST: committing an edit makes Thunderhead re-split/merge the spans at and after that
+  // field, shifting every LATER field's position — so with the old first-to-last order a later field's
+  // pre-captured positional locator (base.nth(idx)) drifted onto the wrong element (CONFIRMED live 2026-10-13,
+  // DIG108: field #13's locator landed on the LOCKED "Benjamin Smith, BDSP" signature span after the earlier
+  // fields were edited), and the label-based retry couldn't recover it because the "--<<Editable Field>>--"
+  // placeholders all share the same text/label. Going high-index-first means no edit ever disturbs a field we
+  // haven't reached yet (an edit only moves elements at/after its own position, which are already done).
+  // interactiveChecks is re-sorted back into field order right after the loop, so everything downstream (the
+  // known-value passes, the report, the retry loop) sees the exact same ordered array as the old order did.
+  for (let fi = fields.length - 1; fi >= 0; fi--) {
+    const field = fields[fi];
+    const n = field.idx + 1;
     // This field is a duplicate copy living inside a Choices-panel option that ISN'T the one we selected (see
     // readMergeFields' own `inUnselectedChoice` — CONFIRMED live 2026-10-06, DIG36: SmartCOMM previews every
     // option's paragraph simultaneously). It can never survive into the actual generated document, so editing
@@ -990,6 +999,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     const dictRow = match && match.row;
     interactiveChecks.push({
       id: `INT${n}`,
+      idx: field.idx,
       label: pickFieldLabel(n, field, outcome, dictRow),
       labelContext: field.labelContext || null, technicalName: outcome.technicalName || null,
       expectedEditable: field.editable, observedChanged: outcome.changed, result,
@@ -1000,6 +1010,9 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       dictionaryAgrees: dictRow && dictRow.editable !== null ? dictRow.editable === field.editable : null,
     });
   }
+  // Built last-to-first above (to beat Thunderhead's span drift) — restore natural field order so the
+  // known-value passes' "first match wins" logic, the report, and the retry loop all see fields in order.
+  interactiveChecks.sort((a, b) => a.idx - b.idx);
   // Known-value matching: several dictionary-tracked fields render with NO preceding label at all, so no
   // amount of label-text matching above can ever connect them — CONFIRMED by user direction 2026-10-05 (real
   // Data Dictionary rows read directly): To Name/To Street Address/To City-State-Zip come straight from
