@@ -774,6 +774,33 @@ function buildEditValue(field, n, digNumber) {
 // single known value wrongly tagged every one of those as the SAME dictionary row ("To Name" matched 4
 // different fields in one scenario), reporting false "editability disagrees" findings that were really just
 // over-eager matching, not real defects.
+// A merge field's OWN technical name already says which recipient block it belongs to — e.g.
+// "current_additionalRecipients_ext.primaryAddress.city" is unambiguously the ADDITIONAL ("Copy") recipient,
+// never the primary ("To") one. Matching purely on VALUE (below) can't see that, so when the additional and
+// primary recipients happen to share a value (same city/state/ZIP, or the same name), a Copy field would be
+// claimed by the earlier-listed "To ..." known value instead — mislabeling it and flipping its editable
+// expectation. CONFIRMED live: INT18 ("current_additionalRecipients_ext.primaryAddress...") matched "To City,
+// State, Zip" (editable=No -> false FAIL) in a scenario where the two addresses coincided, but "Copy City,
+// State, ZIP" (editable=Yes -> PASS) in one where they differed — same field, same dictionary, inconsistent
+// result. Deriving the role here lets assignByKnownValue refuse a known value whose role contradicts the
+// field's own name, so the match is driven by identity, not by a value coincidence.
+function recipientRoleFromTechnicalName(technicalName) {
+  const s = String(technicalName || '').toLowerCase();
+  if (s.includes('additionalrecipient')) return 'copy';                               // ...additionalRecipients... -> "Copy" block
+  if (/\bfrom\b/.test(s) || /from(name|phone|email|title)/.test(s)) return 'from';     // signature block
+  if (s.includes('primaryrecipient') || /(^|[^a-z])recipient([^a-z]|$)/.test(s)) return 'to';
+  return null; // no role signal in the name -> don't restrict (unchanged behavior)
+}
+// The role a known value's dictionary Column-A name implies. Role-less concepts (Claimant Name, Underwriting
+// Company, Date of Loss) return null and are never restricted by a field's role.
+function knownValueRole(attributeName) {
+  const s = String(attributeName || '').toLowerCase();
+  if (s.startsWith('copy')) return 'copy';
+  if (s.startsWith('to ')) return 'to';
+  if (s.startsWith('from ')) return 'from';
+  return null;
+}
+
 function assignByKnownValue(interactiveChecks, digNumber, knownValues) {
   if (!knownValues.length) return;
   const claimed = new Set();
@@ -781,6 +808,9 @@ function assignByKnownValue(interactiveChecks, digNumber, knownValues) {
     if (c.dictionaryField) continue; // already matched (label-based pass runs first)
     const beforeNorm = normForKnownValueMatch(c.before);
     if (!beforeNorm) continue;
+    // What recipient block this field's OWN technical name says it is (see recipientRoleFromTechnicalName) —
+    // used just below to refuse a known value from a different block even when the values coincide.
+    const fieldRole = recipientRoleFromTechnicalName(c.technicalName);
     // CONFIRMED live 2026-10-06 (DIG162): finding the first NOT-YET-CLAIMED match (the original approach) lets
     // a field whose text equally matches an EARLIER-priority, ALREADY-claimed value (e.g. "To Name" — already
     // claimed by the address block) fall through and settle for a LATER, lower-priority value that happens to
@@ -790,6 +820,11 @@ function assignByKnownValue(interactiveChecks, digNumber, knownValues) {
     // is genuinely ambiguous between two coincidentally-same-valued concepts, so it's safer to leave it
     // unmatched (flagged for manual review) than to guess a worse-priority concept just because it's unclaimed.
     const best = knownValues.find((kv) => {
+      // Never claim a value from a different recipient block than this field's own technical name says it
+      // belongs to — this is what stops a "Copy" (additional-recipient) field from grabbing the identically-
+      // valued "To ..." row (and vice versa). Role-less known values (Claimant Name, etc.) are never filtered.
+      const kvRole = knownValueRole(kv.attributeName);
+      if (fieldRole && kvRole && kvRole !== fieldRole) return false;
       const vNorm = normForKnownValueMatch(kv.value);
       return vNorm.length >= 3 && (beforeNorm === vNorm || beforeNorm.includes(vNorm) || vNorm.includes(beforeNorm));
     });
@@ -1580,4 +1615,4 @@ function blockedTemplateResult(dig, reason, template) {
   };
 }
 
-module.exports = { validateTemplate };
+module.exports = { validateTemplate, _test: { recipientRoleFromTechnicalName, knownValueRole } };
