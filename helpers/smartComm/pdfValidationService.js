@@ -31,12 +31,34 @@ function buildLabelSynonymGroups() {
   return byPath;
 }
 const LABEL_SYNONYM_GROUPS = buildLabelSynonymGroups();
+// CONFIRMED live 2026-10-13 (DIG108): a requirement's expected text can carry a short lead-in fused onto the
+// label itself — the Word source's "RE: <tab> Claim No.:" line becomes the single requirement "RE:Claim No.:",
+// while the rendered letter reads "RE:Our Claim No.:" ("CLAIM NO" / "OUR CLAIM NO" are already the same field
+// in the table). An exact-label-only lookup missed that and reported reworded content as missing. So the label
+// is matched on its words (punctuation/case ignored — "Claim No.:" vs the table's "CLAIM NO") either as the
+// whole expected text or as its trailing words after a lead-in of at most MAX_LABEL_LEAD_IN_WORDS (longest
+// label wins), and the lead-in is carried onto each synonym. Returns { label, phrase } per synonym: `label` for
+// the report, `phrase` (lead-in + synonym) to search for — findPunctuationRelaxedMatch reduces it to words too.
+const MAX_LABEL_LEAD_IN_WORDS = 2;
 function findLabelSynonyms(expectedValue) {
-  const key = String(expectedValue || '').trim().toUpperCase().replace(/:$/, '');
+  const words = reduceToWordsWithMap(String(expectedValue || '').replace(/[‘’]/g, "'")).reduced;
+  if (!words) return [];
+  let best = null;
   for (const labels of LABEL_SYNONYM_GROUPS.values()) {
-    if (labels.includes(key)) return labels.filter((l) => l !== key);
+    for (const label of labels) {
+      const labelWords = reduceToWordsWithMap(label).reduced;
+      let leadIn;
+      if (words === labelWords) leadIn = '';
+      else if (words.endsWith(` ${labelWords}`)) leadIn = words.slice(0, -labelWords.length - 1);
+      else continue;
+      if (leadIn && leadIn.split(' ').length > MAX_LABEL_LEAD_IN_WORDS) continue;
+      if (!best || labelWords.length > best.labelWords.length) best = { labels, label, labelWords, leadIn };
+    }
   }
-  return [];
+  if (!best) return [];
+  return best.labels
+    .filter((l) => l !== best.label)
+    .map((l) => ({ label: l, phrase: best.leadIn ? `${best.leadIn} ${reduceToWordsWithMap(l).reduced}` : l }));
 }
 
 async function extractPdfText(pdfPath) {
@@ -175,11 +197,11 @@ function evaluateOne(req, haystack, context) {
       // they both mean, so check each one before giving up, rather than treating a reworded-but-correct
       // label as missing content.
       for (const synonym of findLabelSynonyms(req.expectedValue)) {
-        const synMatch = findPunctuationRelaxedMatch(haystack, synonym);
+        const synMatch = findPunctuationRelaxedMatch(haystack, synonym.phrase);
         if (synMatch) {
           return {
             expected: req.expectedValue, actual: synMatch, result: 'PASS',
-            reason: `The template's own label "${req.expectedValue}" wasn't found verbatim, but its known synonym "${synonym}" was found as "${synMatch}" — same field, worded differently in the rendered document. Treated as a match.`,
+            reason: `The template's own label "${req.expectedValue}" wasn't found verbatim, but its known synonym "${synonym.label}" was found as "${synMatch}" — same field, worded differently in the rendered document. Treated as a match.`,
           };
         }
       }
