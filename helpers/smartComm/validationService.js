@@ -636,6 +636,11 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     const status = (failed > 0 || fieldsFailed > 0) ? 'FAIL' : blocked > 0 ? 'BLOCKED' : 'PASS';
 
     console.log(`[SmartComm] ${scenario.scenarioId}: ${status} (${passed} passed, ${failed} failed, ${blocked} blocked, ${skipped} skipped)`);
+    // The report is an in-memory buffer, so log each failed check's detail too — otherwise a FAIL count in the
+    // console can't be traced back to WHICH check failed without re-running and opening the report.
+    for (const v of validations.filter((x) => x.result === 'FAIL')) {
+      console.log(`[SmartComm] ${scenario.scenarioId}: FAILED CHECK ${v.id || ''} "${v.description || ''}" | expected=${JSON.stringify(v.expected)} actual=${JSON.stringify(v.actual)} | ${v.reason || ''}`);
+    }
     // Which of this template's own CONDITIONAL print paths actually got exercised this scenario — surfaced
     // in the report (reportService.js/bulkReportService.js) so a reviewer can see at a glance whether, say,
     // the additional-recipient/CC block or the Medical Letterhead content was genuinely tested here, rather
