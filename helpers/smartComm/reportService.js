@@ -187,7 +187,8 @@ function writeScenarioSheet(ws, s) {
   }
   if (s.variant) {
     ws.addRow(['Login', s.variant.user || 'admin', 'Document Type', s.variant.documentType, 'Status', s.variant.status,
-      'Security Type', s.variant.securityType, 'Return Envelope', s.variant.returnEnvelope ? 'Yes' : 'No', 'Certified Mail', s.variant.certifiedMail ? 'Yes' : 'No']);
+      'Security Type', s.variant.securityType, 'Return Envelope', s.variant.returnEnvelope ? 'Yes' : 'No', 'Certified Mail', s.variant.certifiedMail ? 'Yes' : 'No',
+      ...(s.variant.relatedTo ? ['Related To', s.variant.relatedTo] : [])]);
   }
   if (s.creationMode) ws.addRow(['Creation mode', s.creationMode]);
   if (s.pdfPath) ws.addRow(['PDF', s.pdfPath]);

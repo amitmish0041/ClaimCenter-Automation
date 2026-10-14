@@ -46,6 +46,10 @@ const SmartCommLocators = {
     // Additional Data tab — treat as optional/best-effort, not required.
     languageDropdown: '[id*="Language"], [aria-label*="Language" i]',
     documentTypeDropdown: '[id*="DocumentType"], [aria-label*="Document Type" i]',
+    // Form fields are <div class="gw-InputWidget"> with a .gw-label and a .gw-value holding the <select>
+    // (ccUiValidation/uiReader.js) — the label text is the reliable handle for "Related To".
+    inputWidget: '.gw-InputWidget',
+    inputLabel: '.gw-label',
   },
   create: {
     tab: 'Create',

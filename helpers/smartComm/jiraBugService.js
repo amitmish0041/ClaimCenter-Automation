@@ -148,7 +148,10 @@ async function annotateTemplateResults(templateResults, { log = () => {} } = {})
 // "SMART-1424 (Re-Open)" / "NEW — no matching bug" for a report cell; '' for anything that isn't a failure.
 function jiraCell(item) {
   if (!item) return '';
-  if (item.knownBug) return `${item.knownBug.key} (${item.knownBug.status})`;
+  if (item.knownBug) {
+    return item.knownBug.open ? `${item.knownBug.key} (${item.knownBug.status})`
+      : `${item.knownBug.key} (${item.knownBug.status}) — closed but still occurs: possible regression, re-open or log new`;
+  }
   if (item.knownBug !== null) return '';
   return item.similarBug
     ? `NEW for this template — similar open ${item.similarBug.key} (${item.similarBug.status}) on another template`

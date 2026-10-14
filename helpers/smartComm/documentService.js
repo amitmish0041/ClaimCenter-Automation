@@ -705,7 +705,7 @@ async function setEmail(page, email, recipientName) {
 // value set, or null when the field isn't on this template's screen / the
 // select failed) so the report never claims a dropdown value that was never
 // set — e.g. DIG52 on Cloud Test has no Security Type or Language field.
-async function setAdditionalData(page, { language = 'English (US)', documentType = 'Other', status, securityType, relatedToName } = {}) {
+async function setAdditionalData(page, { language = 'English (US)', documentType = 'Other', status, securityType, relatedToName, insuredName } = {}) {
   const applied = { documentType: null, status: null, securityType: null, relatedTo: null };
   await page.getByRole('tab', { name: L.additionalData.tab, exact: true }).click();
 
@@ -714,20 +714,39 @@ async function setAdditionalData(page, { language = 'English (US)', documentType
   // SMART-1349's own steps: "select Exposure in the Related To field when the Loss Type is not WC"); related to
   // the claim, the Claimant line prints blank (CONFIRMED live 2026-10-14, DIG62/DIG66 on a claim whose
   // claimant isn't the insured). When the caller names the claimant, pick the exposure option naming them.
-  // Only acts when the screen has the field — DIG66's Additional Data screen didn't (2026-10-14), so a blank
-  // Claimant line there is still reported as-is.
+  // The tab's fields render after a server round trip, and isVisible() doesn't wait — checked straight after
+  // the click, Related To read as "not present" on DIG66 (2026-10-14) although the CC UI check reads 10 options
+  // there ("Claim", contacts, then exposures as "(1) 1st Party Vehicle - MARTHA ANTOLICK"). So wait for
+  // Document Type (on every template) first, and find Related To by its label as well as by role.
+  await page.getByRole('combobox', { name: /Document Type/i }).first().waitFor({ state: 'visible', timeout: 8000 }).catch(() => {});
   if (relatedToName) {
-    const relatedField = page.getByRole('combobox', { name: /Related To/i }).first();
+    let relatedField = page.getByRole('combobox', { name: /Related To/i }).first();
+    if (!(await relatedField.isVisible().catch(() => false))) {
+      relatedField = page.locator(L.additionalData.inputWidget)
+        .filter({ has: page.locator(L.additionalData.inputLabel, { hasText: /^\s*Related To\s*$/i }) })
+        .locator('select').first();
+    }
     if (await relatedField.isVisible().catch(() => false)) {
       const options = await relatedField.locator('option').allInnerTexts().catch(() => []);
       const want = String(relatedToName).trim().toLowerCase();
-      const pick = options.find((o) => o.toLowerCase().includes(want) && !/^\s*claim\s*$/i.test(o));
+      // Exposures read "(n) <coverage> - <claimant>"; a bare name is the contact, which isn't what the letter's
+      // "claimant for the exposure" fills from — so only an exposure option counts.
+      const exposures = options.filter((o) => /^\s*\(\d+\)/.test(o));
+      const claimantOf = (o) => (o.match(/\s-\s(.+)$/) || [])[1];
+      // The claim's "claimant" party may be a contact with no exposure of its own (CONFIRMED live 2026-10-14,
+      // DIG66: "Jessi Claimant" listed, exposures only for JESSICA MILLER / Gary Moore) — then relate to an
+      // exposure whose claimant isn't the insured, and the caller expects THAT name (applied.relatedToClaimant).
+      const notInsured = (o) => { const c = claimantOf(o); return c && (!insuredName || c.trim().toLowerCase() !== String(insuredName).trim().toLowerCase()); };
+      const pick = exposures.find((o) => o.toLowerCase().includes(want)) || exposures.find(notInsured);
+      if (pick) applied.relatedToClaimant = (claimantOf(pick) || '').trim() || null;
       if (pick) {
-        await relatedField.selectOption({ label: pick })
+        await relatedField.selectOption({ label: pick.trim() })
           .then(() => { applied.relatedTo = pick.trim(); })
           .catch((e) => console.log(`setAdditionalData: could not set Related To "${pick}" — ${e.message}`));
+        // Changing it can re-render the tab — let that settle before the selects below.
+        if (applied.relatedTo) await page.waitForTimeout(1500);
       } else {
-        console.log(`setAdditionalData: no Related To option names "${relatedToName}" (options: ${options.map((o) => o.trim()).join(' | ').slice(0, 300)}) — left as the claim`);
+        console.log(`setAdditionalData: no Related To exposure names "${relatedToName}" (options: ${options.map((o) => o.trim()).join(' | ').slice(0, 300)}) — left as the claim`);
       }
     } else {
       console.log('setAdditionalData: Related To field not present on this screen — skipping');

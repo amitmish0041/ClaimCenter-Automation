@@ -507,14 +507,23 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     const applied = await documentService.setAdditionalData(page, {
       language: 'English (US)', documentType: variant.documentType, status: variant.status, securityType: variant.securityType,
       relatedToName: printsClaimant ? effectiveTestData.claimantName : undefined,
+      insuredName: effectiveTestData.insuredName,
     });
-    if (applied.relatedTo) console.log(`[SmartComm] ${scenario.scenarioId}: Related To set to "${applied.relatedTo}" (the claimant's exposure)`);
+    if (applied.relatedTo) {
+      console.log(`[SmartComm] ${scenario.scenarioId}: Related To set to "${applied.relatedTo}" (the claimant's exposure)`);
+      // The letter's Claimant line fills from that exposure — expect its claimant.
+      if (applied.relatedToClaimant && applied.relatedToClaimant.toLowerCase() !== String(effectiveTestData.claimantName || '').toLowerCase()) {
+        console.log(`[SmartComm] ${scenario.scenarioId}: expected claimant now "${applied.relatedToClaimant}" (was "${effectiveTestData.claimantName}", which has no exposure on this claim)`);
+        effectiveTestData.claimantName = applied.relatedToClaimant;
+      }
+    }
     // Report what was really set, not what was requested (a field can be
     // absent from a template's Additional Data screen).
     const notSet = '(field not on screen)';
     base.variant.documentType = applied.documentType || notSet;
     base.variant.status = applied.status || notSet;
     base.variant.securityType = applied.securityType || notSet;
+    if (printsClaimant) base.variant.relatedTo = applied.relatedTo || 'Claim';
 
     // ClaimCenter's own "Download Payload" button (Create tab, Development section) — see the long
     // comment this replaced, still true for both branches below, EXCEPT that for Interactive it must be
@@ -895,6 +904,10 @@ function assignByKnownValue(interactiveChecks, digNumber, knownValues) {
       // valued "To ..." row (and vice versa). Role-less known values (Claimant Name, etc.) are never filtered.
       const kvRole = knownValueRole(kv.attributeName);
       if (fieldRole && kvRole && kvRole !== fieldRole) return false;
+      // Same for a field whose own name says claimant — CONFIRMED live 2026-10-14 (DIG89): "climantName"
+      // (Injured Party's Name) held the same company as the To recipient and was judged against "To Name"
+      // (locked) instead of "Claimant Name" — a false "should be locked" FAIL.
+      if (/cl(a)?imant|injured/i.test(String(c.technicalName || '')) && kv.attributeName !== 'Claimant Name') return false;
       // A "City, State, Zip" field holds a ZIP — CONFIRMED live 2026-10-14 (DIG6-WC-AL): a street line
       // ("105 S CLINTON ST") was claimed for "To City, State, Zip" by loose containment against the recipient's
       // address text, then reported as a mismatch against the payload's real city/state/zip.
