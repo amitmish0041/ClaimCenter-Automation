@@ -12,15 +12,26 @@ const path = require('path');
 const fs = require('fs');
 const { app, BrowserWindow, shell, Menu, dialog } = require('electron');
 
+const codeUpdater = require('./code-updater.js');
+
 const isPackaged = app.isPackaged;
+
+// ── Per-install data dir (settings + entitlements cache + downloaded code survive updates) ────
+const userDataDir = app.getPath('userData');
+fs.mkdirSync(userDataDir, { recursive: true });
 
 // ── Resource roots ───────────────────────────────────────────────────────────
 // Dev: the live repos, two levels up from this file (ClaimCenter-Automation/electron-app/ -> Playwright Projects/).
-// Packaged: electron-builder's extraResources land directly under process.resourcesPath (see package.json).
+// Packaged: electron-builder's extraResources land directly under process.resourcesPath (see package.json) —
+// or, when a newer code-only update has been downloaded (code-updater.js), that build's folder, which has the
+// same policy-repo/ + ClaimCenter-Automation/ layout with node_modules linked to the install's own.
 const DEV_POLICY_DIR = path.join(__dirname, '..', '..', 'Commercial Line Performance test');
 const DEV_CLAIMS_DIR = path.join(__dirname, '..');
-const POLICY_DIR = isPackaged ? path.join(process.resourcesPath, 'policy-repo') : DEV_POLICY_DIR;
-const CLAIMS_DIR_RESOURCE = isPackaged ? path.join(process.resourcesPath, 'ClaimCenter-Automation') : DEV_CLAIMS_DIR;
+const CODE = isPackaged
+  ? codeUpdater.activeCodeRoot({ resourcesPath: process.resourcesPath, userDataDir, appVersion: app.getVersion() })
+  : null;
+const POLICY_DIR = isPackaged ? path.join(CODE.root, 'policy-repo') : DEV_POLICY_DIR;
+const CLAIMS_DIR_RESOURCE = isPackaged ? path.join(CODE.root, 'ClaimCenter-Automation') : DEV_CLAIMS_DIR;
 const BROWSERS_DIR = isPackaged ? path.join(process.resourcesPath, 'playwright-browsers') : null;
 
 // server.js resolves CLAIMS_DIR itself as path.join(__dirname, '..', '..', 'ClaimCenter-Automation') (two
@@ -30,15 +41,14 @@ const BROWSERS_DIR = isPackaged ? path.join(process.resourcesPath, 'playwright-b
 // future layout change has one place to fix instead of re-deriving the relationship by hand.
 void CLAIMS_DIR_RESOURCE;
 
-const PORT = 3100; // fixed, not RUNNER_PORT - this is a packaged single-purpose app, not a shared dev server
-
-// ── Per-install data dir (settings + entitlements cache survive updates) ────
-const userDataDir = app.getPath('userData');
-fs.mkdirSync(userDataDir, { recursive: true });
+// Fixed, not RUNNER_PORT - this is a packaged single-purpose app, not a shared dev server. RUNNER_APP_TEST_PORT lets
+// a test copy run beside an installed, running one (which holds 3100).
+const PORT = Number(process.env.RUNNER_APP_TEST_PORT) || 3100;
 
 function configureEnvAndStartServer() {
   process.env.RUNNER_PORT = String(PORT);
-  process.env.RUNNER_APP_VERSION = app.getVersion(); // shown in the UI so users/support know which build they're on
+  // Shown in the UI so users/support know which build they're on — plus the code build when it's an update.
+  process.env.RUNNER_APP_VERSION = app.getVersion() + (CODE && CODE.source === 'update' ? ` (code ${CODE.build})` : '');
   if (isPackaged) {
     process.env.RUNNER_PACKAGED = '1';
     process.env.RUNNER_NODE_EXEC = process.execPath;
@@ -148,6 +158,26 @@ function setupAutoUpdate(win) {
 
   autoUpdater.checkForUpdates().catch((err) => {
     console.error('Auto-update check failed (continuing on current version):', err.message);
+  });
+
+  // Code-only updates: a few MB, no reinstall — just a restart (see code-updater.js / scripts/release-code.js).
+  codeUpdater.checkForCodeUpdate({
+    resourcesPath: process.resourcesPath, userDataDir, appVersion: app.getVersion(), log: (m) => console.log(m),
+  }).then((r) => {
+    if (!r.ready || win.isDestroyed()) return;
+    dialog.showMessageBox(win, {
+      type: 'info',
+      buttons: ['Restart now', 'Later'],
+      defaultId: 0,
+      title: r.rollback ? 'Code update withdrawn' : 'Code update ready',
+      message: r.rollback ? 'The code update in use was withdrawn.' : `A code update (build ${r.build}) has been downloaded.`,
+      detail: 'Restart now to use it (takes a few seconds), or it will be used the next time you open the app. ' +
+        'Any run in progress stops when the app restarts.',
+    }).then((result) => {
+      if (result.response === 0) { app.relaunch(); app.exit(0); }
+    });
+  }).catch((err) => {
+    console.error('Code update check failed (continuing on current code):', err.message);
   });
 }
 

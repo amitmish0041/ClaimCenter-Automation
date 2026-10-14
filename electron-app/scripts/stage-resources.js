@@ -49,47 +49,8 @@ if (!fs.existsSync(POLICY_SRC)) {
 const DIST_DIR = path.join(ELECTRON_APP_DIR, 'dist');
 fs.rmSync(DIST_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 3000 });
 
-// Names matched at ANY depth (not just top-level) so e.g. a nested
-// tools/pdf-compare/__pycache__ is excluded too, not just a root-level one.
-// CONFIRMED LIVE BUG (fixed here): this used to also list bare 'playwright' (intending some repo's own
-// playwright/.cache-style dir), but shouldSkip() below only ever checks path.basename() with no path
-// context - that single entry silently deleted the entire node_modules/playwright PACKAGE (the actual npm
-// dependency @playwright/test's cli.js requires at runtime: 'playwright/lib/program') from every staged
-// build, so every packaged SmartCOMM/Policy/Claims run failed with "Cannot find module 'playwright/lib/
-// program'" the instant it tried to actually run a test (not caught by the earlier `--version` smoke test,
-// which exits before cli.js needs that module). Never match a bare name that could also be a real
-// node_modules package without a path check.
-const EXCLUDE_NAMES = new Set([
-  '.git', '.gitignore', 'electron-app', // electron-app excluded from the CLAIMS copy to avoid copying this very staging step into itself
-  'test-results', 'playwright-report',
-  'results', 'runtime-data', 'reports',
-  '__pycache__', '.backup-2026-07-07',
-  '.smartcomm-azure-session.json', '.smartcomm-okta-session.json', // per-person SSO session cache - never ship someone else's
-  '.env', // real secrets - packaged app gets its own config via the Settings tab, not this repo's dev .env
-]);
-const EXCLUDE_EXT = new Set(['.log']);
-
-function shouldSkip(srcPath, name) {
-  if (EXCLUDE_NAMES.has(name)) return true;
-  if (EXCLUDE_EXT.has(path.extname(name))) return true;
-  if (name.startsWith('~$')) return true; // transient Office lock files (e.g. ~$Claims_Documents_Index.xlsx) - not real content
-  return false;
-}
-
-// A NESTED project's node_modules holding only its devDependencies (2026-10-14: policy-repo/address-helper —
-// jest/typescript/ts-jest, 116MB and ~15,000 of the installer's ~25,000 files; the Runner only loads its built
-// dist/index.js, which needs none of them). File count is what makes building, uploading, downloading and
-// installing slow. Only nested ones — a repo root's own node_modules always ships, even if its packages are
-// listed as devDependencies (Playwright is).
-function isDevOnlyNestedNodeModules(srcPath, root) {
-  if (path.basename(srcPath) !== 'node_modules') return false;
-  const owner = path.dirname(srcPath);
-  if (path.resolve(owner) === path.resolve(root)) return false;
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(owner, 'package.json'), 'utf8'));
-    return !pkg.dependencies || !Object.keys(pkg.dependencies).length;
-  } catch (_) { return false; }
-}
+// What ships (and what a code-only release contains) is decided in stage-filter.js, shared with release-code.js.
+const { ships, depsFingerprint, buildId } = require('./stage-filter.js');
 
 function copyTree(src, dest) {
   // maxRetries/retryDelay: confirmed live - deleting a just-rebuilt staging tree can transiently EPERM/
@@ -100,7 +61,7 @@ function copyTree(src, dest) {
   fs.rmSync(dest, { recursive: true, force: true, maxRetries: 10, retryDelay: 3000 });
   fs.cpSync(src, dest, {
     recursive: true,
-    filter: (source) => !shouldSkip(source, path.basename(source)) && !isDevOnlyNestedNodeModules(source, src),
+    filter: (source) => ships(source, src),
   });
 }
 
@@ -178,6 +139,14 @@ for (const name of fs.readdirSync(BROWSERS_DEST)) {
     console.log(`  dropped ${name} (headless-shell not bundled - flows use the full Chromium via channel:'chromium')`);
   }
 }
+
+// The code build this installer carries + the fingerprint of its packages (see stage-filter.js). The installed
+// app compares code-only releases against this: it only takes a newer build with the SAME packages
+// (main.js / code-updater.js). Also uploaded next to the installer on its GitHub release (upload-shell-info.js)
+// so release-code.js can refuse a code-only release that needs new packages.
+const codeBase = { build: buildId(), depsFingerprint: depsFingerprint([POLICY_SRC, CLAIMS_SRC]), shellVersion: require('../package.json').version };
+fs.writeFileSync(path.join(STAGING, 'code-base.json'), JSON.stringify(codeBase, null, 2));
+console.log(`  code base: build ${codeBase.build}, packages ${codeBase.depsFingerprint.slice(0, 12)}`);
 
 console.log('── Staging complete ──');
 console.log(`  ${POLICY_DEST}`);

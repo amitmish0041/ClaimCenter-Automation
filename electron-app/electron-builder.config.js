@@ -13,6 +13,8 @@ const extraResources = [
   { from: path.join(STAGING, 'policy-repo'), to: 'policy-repo' },
   { from: path.join(STAGING, 'ClaimCenter-Automation'), to: 'ClaimCenter-Automation' },
   { from: path.join(STAGING, 'playwright-browsers'), to: 'playwright-browsers' },
+  // Code build + package fingerprint this installer carries (code-only updates, see code-updater.js).
+  { from: path.join(STAGING, 'code-base.json'), to: 'code-base.json' },
 ];
 // Conditional: stage-resources.js only creates this when it actually found a source folder to copy (see its
 // own warning there) - electron-builder errors outright on an extraResources.from path that doesn't exist.
