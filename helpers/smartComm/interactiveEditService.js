@@ -158,6 +158,16 @@ async function clickInteractiveAndWaitForEditor(page, context, { log = console.l
       await azureSessionStore.saveFromContext(context, { log });
       return;
     }
+    // ClaimCenter's own error banner instead of an editor — CONFIRMED live 2026-10-14 (DIG149): "Read timed out
+    // executing POST .../igsmartcomm.../api/document/createDraftDocument" — SmartCOMM never created the draft,
+    // so no editor (and no sign-in) was ever coming; waiting out the full timeout only to report "sign-in"
+    // hid the real cause. Fail at once with ClaimCenter's own text.
+    const errorBanner = page.getByRole('group', { name: /^Errors/i }).first();
+    if (await errorBanner.isVisible().catch(() => false)) {
+      const msg = (await errorBanner.innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+      const diagPath = await saveDiagnostic(page, `${scenarioId}_interactiveError`);
+      throw new Error(`INTERACTIVE_SMARTCOMM_ERROR: ClaimCenter reported an error instead of opening the SmartCOMM editor — ${msg || '(error text unavailable)'}${diagPath ? ` (diagnostic: ${diagPath}.png)` : ''}`);
+    }
     if (Date.now() - lastNudge > 30000) {
       log(`[Interactive] Still waiting for sign-in… (${Math.round((deadline - Date.now()) / 1000)}s left)`);
       lastNudge = Date.now();
@@ -753,7 +763,10 @@ async function readUnlockedContent(frame) {
         clone.querySelectorAll('.th-data-value, .th-data-value-editable, .th-control-code-off').forEach((n) => n.remove());
         return (clone.textContent || '').replace(/\s+/g, ' ').trim();
       })
-      .filter((t) => t.replace(/[^A-Za-z0-9]/g, '').length >= 3);
+      .filter((t) => t.replace(/[^A-Za-z0-9]/g, '').length >= 3)
+      // The editor's own non-printing markers ("Page Break - all", CONFIRMED live 2026-10-14 on DIG200) aren't
+      // template wording a user could change.
+      .filter((t) => !/^(?:page|section|column) break\b/i.test(t));
     return { total: paras.length, unlocked };
   });
 }

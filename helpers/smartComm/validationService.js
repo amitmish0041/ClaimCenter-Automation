@@ -419,18 +419,21 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // SMART-1349: "Claimant field populated with the Insured Name") on a claim where they're the same person —
     // common in this test data. Try the scenario's same-LOB/State backup claims for one where they differ.
     const samePerson = (c) => Boolean(c.claimantName && c.insuredName && c.claimantName.trim().toLowerCase() === c.insuredName.trim().toLowerCase());
-    const needsDistinctParties = (requirements || []).some((r) => r.expectedSource === 'testData.claimantName')
-      && (requirements || []).some((r) => r.expectedSource === 'testData.insuredName');
+    const printsClaimantName = (requirements || []).some((r) => r.expectedSource === 'testData.claimantName');
+    const needsDistinctParties = printsClaimantName && (requirements || []).some((r) => r.expectedSource === 'testData.insuredName');
+    // Also a claim with NO claimant party at all — a template printing the claimant has nothing to check there
+    // (CONFIRMED live 2026-10-14, DIG86 on a Michigan claim: BLOCKED "no claimantName for this claim").
+    const unsuitable = (c) => (printsClaimantName && !c.claimantName) || (needsDistinctParties && samePerson(c));
     // (A manual Claim # override scenario carries no backup claims, so it's never switched away from.)
-    if (needsDistinctParties && samePerson(captured)) {
+    if (unsuitable(captured)) {
       const original = { testData: scenario.testData, captured };
       let switched = false;
       for (const alt of scenario.alternates || []) {
         await openExistingClaim(page, alt.claimNumber);
         if (await claimAccessDenied(page, alt.claimNumber)) continue;
         const altCaptured = await claimSummaryService.captureClaimSummary(page);
-        if (altCaptured.claimantName && !samePerson(altCaptured)) {
-          console.log(`[SmartComm] ${scenario.scenarioId}: claim ${original.testData.claimNumber} has the same person as claimant and insured ("${captured.insuredName}") — switched to ${alt.claimNumber} (claimant "${altCaptured.claimantName}", insured "${altCaptured.insuredName}") so a claimant/insured swap would show.`);
+        if (!unsuitable(altCaptured)) {
+          console.log(`[SmartComm] ${scenario.scenarioId}: claim ${original.testData.claimNumber} ${captured.claimantName ? `has the same person as claimant and insured ("${captured.insuredName}")` : 'has no claimant party'} — switched to ${alt.claimNumber} (claimant "${altCaptured.claimantName}", insured "${altCaptured.insuredName}") so the claimant can be checked.`);
           scenario.testData = alt;
           base.claimNumber = alt.claimNumber;
           captured = altCaptured;
@@ -440,7 +443,9 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
       }
       if (!switched) {
         if ((scenario.alternates || []).length) await openExistingClaim(page, original.testData.claimNumber);
-        base.partiesNote = `Claimant and insured are the same person ("${captured.insuredName}") on ${original.testData.claimNumber}${(scenario.alternates || []).length ? ` and on its ${(scenario.alternates || []).length} backup claim(s)` : ''} — a claimant/insured swap couldn't be detected on this scenario.`;
+        base.partiesNote = captured.claimantName
+          ? `Claimant and insured are the same person ("${captured.insuredName}") on ${original.testData.claimNumber}${(scenario.alternates || []).length ? ` and on its ${(scenario.alternates || []).length} backup claim(s)` : ''} — a claimant/insured swap couldn't be detected on this scenario.`
+          : `No claimant party on ${original.testData.claimNumber}${(scenario.alternates || []).length ? ` or a usable one among its ${(scenario.alternates || []).length} backup claim(s)` : ''} — the claimant couldn't be checked on this scenario.`;
         console.log(`[SmartComm] ${scenario.scenarioId}: ${base.partiesNote}`);
       }
     }
@@ -496,9 +501,14 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
         upgradeRecipientDependentRequirements(scenarioRequirements, ADDITIONAL_RECIPIENT_CONDITION_RE, additionalRecipient);
       }
     }
+    // A template that prints the claimant gets the document related to the claimant's own exposure, as a real
+    // claimant letter is (see setAdditionalData) — otherwise its Claimant line prints blank.
+    const printsClaimant = (requirements || []).some((r) => r.expectedSource === 'testData.claimantName');
     const applied = await documentService.setAdditionalData(page, {
       language: 'English (US)', documentType: variant.documentType, status: variant.status, securityType: variant.securityType,
+      relatedToName: printsClaimant ? effectiveTestData.claimantName : undefined,
     });
+    if (applied.relatedTo) console.log(`[SmartComm] ${scenario.scenarioId}: Related To set to "${applied.relatedTo}" (the claimant's exposure)`);
     // Report what was really set, not what was requested (a field can be
     // absent from a template's Additional Data screen).
     const notSet = '(field not on screen)';

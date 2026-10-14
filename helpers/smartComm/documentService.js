@@ -705,9 +705,34 @@ async function setEmail(page, email, recipientName) {
 // value set, or null when the field isn't on this template's screen / the
 // select failed) so the report never claims a dropdown value that was never
 // set — e.g. DIG52 on Cloud Test has no Security Type or Language field.
-async function setAdditionalData(page, { language = 'English (US)', documentType = 'Other', status, securityType } = {}) {
-  const applied = { documentType: null, status: null, securityType: null };
+async function setAdditionalData(page, { language = 'English (US)', documentType = 'Other', status, securityType, relatedToName } = {}) {
+  const applied = { documentType: null, status: null, securityType: null, relatedTo: null };
   await page.getByRole('tab', { name: L.additionalData.tab, exact: true }).click();
+
+  // "Related To" — the claim by default, or one of its exposures/contacts. A claimant letter is created from
+  // the claimant's EXPOSURE in real use, and that's where the letter's Claimant field fills from (Jira
+  // SMART-1349's own steps: "select Exposure in the Related To field when the Loss Type is not WC"); related to
+  // the claim, the Claimant line prints blank (CONFIRMED live 2026-10-14, DIG62/DIG66 on a claim whose
+  // claimant isn't the insured). When the caller names the claimant, pick the exposure option naming them.
+  // Only acts when the screen has the field — DIG66's Additional Data screen didn't (2026-10-14), so a blank
+  // Claimant line there is still reported as-is.
+  if (relatedToName) {
+    const relatedField = page.getByRole('combobox', { name: /Related To/i }).first();
+    if (await relatedField.isVisible().catch(() => false)) {
+      const options = await relatedField.locator('option').allInnerTexts().catch(() => []);
+      const want = String(relatedToName).trim().toLowerCase();
+      const pick = options.find((o) => o.toLowerCase().includes(want) && !/^\s*claim\s*$/i.test(o));
+      if (pick) {
+        await relatedField.selectOption({ label: pick })
+          .then(() => { applied.relatedTo = pick.trim(); })
+          .catch((e) => console.log(`setAdditionalData: could not set Related To "${pick}" — ${e.message}`));
+      } else {
+        console.log(`setAdditionalData: no Related To option names "${relatedToName}" (options: ${options.map((o) => o.trim()).join(' | ').slice(0, 300)}) — left as the claim`);
+      }
+    } else {
+      console.log('setAdditionalData: Related To field not present on this screen — skipping');
+    }
+  }
 
   const langField = page.locator(L.additionalData.languageDropdown).first();
   if (await langField.isVisible().catch(() => false)) {

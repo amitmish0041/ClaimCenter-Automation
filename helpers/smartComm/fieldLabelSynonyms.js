@@ -154,13 +154,33 @@ const FAIL_IF_PAYLOAD_MISSING = new Set([
 // GROUP" line is the live template's "underco" (Underwriting Company) merge field — it printed "SOUTHERN
 // INSURANCE COMPANY OF VIRGINIA" on a TN auto claim — yet sits un-commented in 44 of the 51 templates checked,
 // so it was asserted as fixed text and FAILed whenever the company wasn't literally "Donegal Insurance Group".
+// Same for the Michigan mock-ups' sample company — CONFIRMED live 2026-10-14 (DIG96): "Michigan Insurance
+// Company is Company's automobile insurance carrier..." printed as "<the claim's own company> is ...", the
+// company being the editable Underwriting Company field ("Atlantic States Insurance Company" on that claim).
 const SAMPLE_VALUE_TO_FIELD_LABEL = {
   'DONEGAL INSURANCE GROUP': 'Underwriting Company',
+  'MICHIGAN INSURANCE': 'Underwriting Company',
+  'MICHIGAN INSURANCE COMPANY': 'Underwriting Company',
 };
 
 function sampleValueField(text) {
   const key = String(text || '').replace(/\s+/g, ' ').trim().toUpperCase();
   return Object.prototype.hasOwnProperty.call(SAMPLE_VALUE_TO_FIELD_LABEL, key) ? SAMPLE_VALUE_TO_FIELD_LABEL[key] : undefined;
+}
+
+// A sentence that BEGINS with one of those sample values ("Michigan Insurance Company is your company's
+// automobile insurance carrier...", DIG97): { sample, field, rest } so the company part can be checked as the
+// field and the rest as fixed wording. Longest sample first; null when the line doesn't start with one.
+function sampleValuePrefix(text) {
+  const line = String(text || '').replace(/\s+/g, ' ').trim();
+  const upper = line.toUpperCase();
+  const samples = Object.keys(SAMPLE_VALUE_TO_FIELD_LABEL).sort((a, b) => b.length - a.length);
+  for (const s of samples) {
+    if (upper.startsWith(`${s} `) && line.length > s.length + 3) {
+      return { sample: line.slice(0, s.length), field: SAMPLE_VALUE_TO_FIELD_LABEL[s], rest: line.slice(s.length).trim() };
+    }
+  }
+  return null;
 }
 
 function lookup(label) {
@@ -196,4 +216,4 @@ const UNANCHORED_PATTERNS = Object.fromEntries(
   Object.entries(PATTERN_SOURCES).map(([k, src]) => [k, new RegExp(src, 'i')])
 );
 
-module.exports = { LABEL_TO_TESTDATA_FIELD, lookup, sampleValueField, PATTERNS, UNANCHORED_PATTERNS, FAIL_IF_PAYLOAD_MISSING };
+module.exports = { LABEL_TO_TESTDATA_FIELD, lookup, sampleValueField, sampleValuePrefix, PATTERNS, UNANCHORED_PATTERNS, FAIL_IF_PAYLOAD_MISSING };

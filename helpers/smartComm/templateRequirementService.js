@@ -178,6 +178,10 @@ const RECIPIENT_DEPENDENT_RE = /\badditional recipient\b|\bcc\b.*\b(?:name|addre
 // What's left of a "Dear <To Name>:" line once the name field is cut out — with or without the mock-up's sample
 // honorific. Checked as a salutation (see makeSalutationRequirement), never as literal text.
 const SALUTATION_RE = /^Dear(?:\s+(?:Mr|Mrs|Ms|Miss)\.?)?:?$/i;
+
+// A mock-up's SAMPLE date left as a plain fragment — "October 06," (its year taken by a comment, DIG183) or a
+// whole date typed with a stray full stop ("May 03. 2018", DIG226) — checked as a date shape, never verbatim.
+const SAMPLE_DATE_RE = /^(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}[.,]?(?:\s*\d{4})?$/i;
 function makeSalutationRequirement(docOrder) {
   return {
     id: 'R0', type: 'salutation', expectedValue: 'Dear', docOrder,
@@ -255,6 +259,11 @@ function buildRequirementsHeuristic(paragraphs) {
   for (let i = 0; i < paragraphs.length; i++) {
     const line = paragraphs[i];
     if (isBlankField(line) || isNoiseLine(line)) continue;
+    // Same exclusions the comment-driven path makes (see classifyResidualFragment), which this path lacked —
+    // CONFIRMED live 2026-10-14 (DIG175, a legacy .doc with no BA comments): the BA's "*See Fraud Language sheet
+    // for details..." note and bare placeholder words ("address", "city") were asserted as printed text.
+    if (/fraud\s+language/i.test(line)) continue;
+    if (/^(?:address|city|state|zip|name|date)$/.test(line.trim())) continue;
 
     const sampleField = synonyms.sampleValueField(line);
     if (sampleField) {
@@ -428,11 +437,29 @@ function classifyResidualFragment(fragment, docOrder, { sampleNames = [] } = {})
   // this sentence itself as "static content must appear" always failed, since it's instructional text never
   // meant to print — excluded here the same way blank/noise lines are, not turned into a requirement at all.
   if (/fraud\s+language/i.test(line)) return [];
+  // ", CPCU" — the SAMPLE sender's credentials left behind once the From Name comment took the name ("Bill
+  // Folmar, CPCU"); the real sender's own designation prints there ("Benjamin Smith, BDSP"). CONFIRMED live
+  // 2026-10-14 (DIG179). Not template wording, so not asserted.
+  if (/^,\s*[A-Z]{2,6}(?:\s*,\s*[A-Z]{2,6})*$/.test(line)) return [];
+  // "October 06," — what's left of a SAMPLE date once a comment took its year (CONFIRMED live 2026-10-14,
+  // DIG183) — or a whole sample date typed with a stray full stop ("May 03. 2018", DIG226) that the regular
+  // date shape doesn't recognise; the real letter prints its own date there. Checked as a date-shaped value.
+  if (SAMPLE_DATE_RE.test(line)) {
+    return [{ id: 'R0', description: 'A date-shaped value must appear', type: 'dynamicShape', shape: 'date', docOrder }];
+  }
 
   // The mock-up's own sample VALUE for a merge field its BA comments never anchored (e.g. the signature
   // block's "DONEGAL INSURANCE GROUP" = Underwriting Company) — check the claim's real value instead.
   const sampleField = synonyms.sampleValueField(line);
   if (sampleField) return [{ ...makeDynamicRequirement(0, sampleField, line), docOrder }];
+  // ...or a sentence starting with that sample value: the value as the field, the rest as fixed wording.
+  const samplePrefix = synonyms.sampleValuePrefix(line);
+  if (samplePrefix) {
+    return [
+      { ...makeDynamicRequirement(0, samplePrefix.field, samplePrefix.sample), docOrder },
+      ...classifyResidualFragment(samplePrefix.rest, docOrder, { sampleNames }),
+    ];
+  }
 
   // The salutation in front of the To Name field: "Dear", or "Dear Mrs." when that comment anchored only the
   // SAMPLE recipient's name ("Dear Mrs. DONNA BRANDT:" -> "DONNA BRANDT"; DIG59/DIG62). Not asserted verbatim:
@@ -488,7 +515,10 @@ function classifyResidualFragment(fragment, docOrder, { sampleNames = [] } = {})
     // just one piece) is what must be asserted — never the original gap-containing string.
     const pieces = rawPieces.map((p) => p.trim()).filter((p) => p && !isNoiseLine(p));
     if (pieces.length) {
-      return pieces.map((p) => ({ id: 'R0', description: staticContentDescription(p), type: 'requiredText', expectedValue: p, docOrder }));
+      // A piece that's a sample date ("Date of Injury:<tab>May 03. 2018", DIG226) is checked as a date shape.
+      return pieces.map((p) => (SAMPLE_DATE_RE.test(p)
+        ? { id: 'R0', description: 'A date-shaped value must appear', type: 'dynamicShape', shape: 'date', docOrder }
+        : { id: 'R0', description: staticContentDescription(p), type: 'requiredText', expectedValue: p, docOrder }));
     }
     return [];
   }
