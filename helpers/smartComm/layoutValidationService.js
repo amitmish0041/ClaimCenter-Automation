@@ -61,15 +61,18 @@ async function readPdfSegments(pdfPath) {
     const lefts = {};
     for (const s of p.segments) { const k = Math.round(s.xStart); lefts[k] = (lefts[k] || 0) + 1; }
     p.left = Number(Object.entries(lefts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 54);
-    const wide = p.segments.filter((s) => s.xEnd - s.xStart > p.width * 0.45).map((s) => s.xEnd).sort((a, b) => a - b);
-    p.right = wide.length ? wide[Math.floor(wide.length * 0.9)] : p.width - p.left;
+    // The right margin is where right-aligned text (letterhead, date) ends — the rightmost real text, not where
+    // justified body lines happen to stop (CONFIRMED live 2026-10-14, DIG44: body lines put it at 544 while the
+    // right-aligned date ended at 558, so a correctly right-aligned date read as "indented").
+    const ends = p.segments.filter((s) => s.xEnd - s.xStart >= 30).map((s) => s.xEnd).sort((a, b) => a - b);
+    p.right = ends.length ? ends[Math.floor((ends.length - 1) * 0.97)] : p.width - p.left;
   }
   return pages;
 }
 
 function alignmentOf(seg, page) {
   const span = page.right - page.left;
-  if (Math.abs(seg.xEnd - page.right) <= 14 && seg.xStart > page.left + span * 0.3) return 'right';
+  if (Math.abs(seg.xEnd - page.right) <= 18 && seg.xStart > page.left + span * 0.3) return 'right';
   if (Math.abs((seg.xStart + seg.xEnd) / 2 - (page.left + page.right) / 2) <= 16 && seg.xStart > page.left + 20) return 'center';
   if (Math.abs(seg.xStart - page.left) <= 14) return 'left';
   return 'indented';

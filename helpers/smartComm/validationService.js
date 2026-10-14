@@ -874,6 +874,10 @@ function assignByKnownValue(interactiveChecks, digNumber, knownValues) {
       // valued "To ..." row (and vice versa). Role-less known values (Claimant Name, etc.) are never filtered.
       const kvRole = knownValueRole(kv.attributeName);
       if (fieldRole && kvRole && kvRole !== fieldRole) return false;
+      // A "City, State, Zip" field holds a ZIP — CONFIRMED live 2026-10-14 (DIG6-WC-AL): a street line
+      // ("105 S CLINTON ST") was claimed for "To City, State, Zip" by loose containment against the recipient's
+      // address text, then reported as a mismatch against the payload's real city/state/zip.
+      if (/city.*state.*zip/i.test(kv.attributeName) && !/\b\d{5}(?:-\d{4})?\b/.test(String(c.before || ''))) return false;
       const vNorm = normForKnownValueMatch(kv.value);
       return vNorm.length >= 3 && (beforeNorm === vNorm || beforeNorm.includes(vNorm) || vNorm.includes(beforeNorm));
     });

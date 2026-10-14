@@ -394,8 +394,14 @@ function normalizeWs(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
 // Returns an ARRAY (zero or more requirements) rather than one-or-null —
 // see the inline-label-pairs case below, which can emit several from a
 // single fragment.
-function classifyResidualFragment(fragment, docOrder) {
+function classifyResidualFragment(fragment, docOrder, { sampleNames = [] } = {}) {
   const line = fragment.trim();
+  // "Dear Mrs. DONNA BRANDT:" — the salutation repeating the mock-up's SAMPLE recipient (the text its own "To
+  // Name" comment anchors elsewhere), not fixed wording; CONFIRMED live 2026-10-14 (DIG34: "Dear  DONNA BRANDT:"
+  // was split into a "Dear" check plus a "DONNA BRANDT:" check that can never match a real claim). Checked as a
+  // salutation instead. A salutation to anything else ("Dear Provider:") stays literal below.
+  const dear = line.replace(/\s+/g, ' ').match(/^Dear (?:(?:Mr|Mrs|Ms|Miss|Dr)\.? )?(.+?):?$/i);
+  if (dear && sampleNames.includes(dear[1].trim().toLowerCase())) return [makeSalutationRequirement(docOrder)];
   if (!line || isBlankField(line) || isNoiseLine(line)) return [];
   // CONFIRMED live 2026-09-30 (DIG52's own "See Fraud Language sheet for details..."): a plain BODY
   // paragraph (not a tracked comment, so makeDynamicRequirement's own CONDITIONAL_RE never sees it) can
@@ -578,9 +584,15 @@ function buildRequirementsFromComments(paragraphs, anchors, comments) {
   // anchors' docOrder was recorded in — an array index here would put every
   // static fragment before every dynamic field regardless of where either
   // actually falls in the document.
+  // The sample recipient name(s) under the template's own "To Name" comments, honorific dropped — so a
+  // salutation repeating that sample name is recognised as one (see classifyResidualFragment).
+  const sampleNames = anchors
+    .filter((a) => a.text && comments[a.id] && /\bto name\b/i.test(comments[a.id].fullText || ''))
+    .map((a) => normalizeWs(a.text).replace(/^(?:Mr|Mrs|Ms|Miss|Dr)\.?\s+/i, '').replace(/:$/, '').toLowerCase())
+    .filter(Boolean);
   let offset = 0;
   for (const frag of residual.split('\n')) {
-    for (const req of classifyResidualFragment(frag, offset)) {
+    for (const req of classifyResidualFragment(frag, offset, { sampleNames })) {
       req.id = `R${++n}`;
       requirements.push(req);
     }
