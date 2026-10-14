@@ -37,11 +37,30 @@ const MAX_SCENARIOS_PER_TEMPLATE = Number(process.env.SMARTCOMM_MAX_SCENARIOS_PE
 // rare no-permission fallback.
 const MAX_ALTERNATE_CLAIMS = 6;
 
+// The catalog is hand-kept and doesn't always use the inventory's codes (2026-10-14: DIG238's LOB "PROPERTY"
+// matched no claim, so it only ever got the single FALLBACK scenario below even when 3 were asked for).
+const LOB_ALIASES = { PROPERTY: 'PR', 'PERSONAL AUTO': 'AUTO', 'COMMERCIAL AUTO': 'AUTO', 'GENERAL LIABILITY': 'GL', 'WORKERS COMP': 'WC', "WORKERS' COMPENSATION": 'WC', 'WORKERS COMPENSATION': 'WC' };
+const lobCode = (l) => LOB_ALIASES[String(l || '').trim().toUpperCase()] || l;
+
+function stateMatches(states, recordState) {
+  const st = norm(recordState);
+  return states.some((s) => {
+    const v = String(s || '').trim().toUpperCase();
+    if (v === 'ALL') return true;
+    // "ALL (EXCEPT MI)" — every state but the listed ones.
+    const except = v.match(/^ALL\s*\(\s*EXCEPT\s+([A-Z ,]+)\)$/);
+    if (except) return !except[1].split(/[\s,]+/).filter(Boolean).map(norm).includes(st);
+    // Not a state code at all (DIG174's catalog says "3") — no real restriction to apply, so any state.
+    if (!/^[A-Z]{2}$/.test(v)) return true;
+    return norm(v) === st;
+  });
+}
+
 function appliesToTemplate(template, record) {
   const states = template.states; // array of codes, or ['ALL']
   const lobs = template.lob;      // array of codes, or ['ALL']
-  const stateOk = states.includes('ALL') || states.some(s => norm(s) === norm(record.state));
-  const lobOk = lobs.includes('ALL') || lobs.some(l => norm(l) === norm(record.lob));
+  const stateOk = stateMatches(states, record.state);
+  const lobOk = lobs.includes('ALL') || lobs.some(l => norm(lobCode(l)) === norm(record.lob));
   return stateOk && lobOk;
 }
 
@@ -60,6 +79,24 @@ function getScenariosForTemplate(template, testDataRecords) {
       testData: r,
     });
     if (scenarios.length >= MAX_SCENARIOS_PER_TEMPLATE) break;
+  }
+  // Fewer distinct (LOB, State) pairs than scenarios asked for (2026-10-14: a single-state/LOB template such as
+  // an MI-only WC letter ran ONE scenario although the team picked 3) — fill up with other matching claims,
+  // so each extra scenario is a different real claim of the same kind (different parties, addresses, dates).
+  if (scenarios.length && scenarios.length < MAX_SCENARIOS_PER_TEMPLATE) {
+    const used = new Set(scenarios.map((sc) => sc.testData.claimNumber));
+    for (const r of testDataRecords) {
+      if (scenarios.length >= MAX_SCENARIOS_PER_TEMPLATE) break;
+      if (used.has(r.claimNumber) || !appliesToTemplate(template, r)) continue;
+      used.add(r.claimNumber);
+      const n = scenarios.filter((sc) => sc.lob === r.lob && sc.state === r.state).length + 1;
+      scenarios.push({
+        scenarioId: `${template.digNumber}-${r.lob}-${r.state}-${n}`.replace(/\s+/g, ''),
+        lob: r.lob,
+        state: r.state,
+        testData: r,
+      });
+    }
   }
   // Same-LOB/State backups, used only if the scenario's own claim can't be
   // opened even as admin ("you do not have permission to view this claim").
