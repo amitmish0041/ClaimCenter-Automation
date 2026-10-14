@@ -210,6 +210,19 @@ function evaluateOne(req, haystack, context) {
       if (alt) return { expected: req.expectedValue, actual: alt, result: 'PASS', reason: req.alsoAcceptNote || `Accepted alternative value "${alt}".` };
       const fuzzy = findPunctuationRelaxedMatch(haystack, req.expectedValue);
       if (fuzzy) {
+        // Per user direction 2026-10-14: spacing/punctuation-only differences pass — EXCEPT a missing fill-in
+        // line. When the template has a blank to write on ("____"), the printed text must still have one right
+        // where the wording ends (the relaxed match ignores underscores, so look at the text that follows it).
+        if (/_{3,}/.test(req.expectedValue)) {
+          const at = haystack.indexOf(fuzzy);
+          const span = at >= 0 ? haystack.slice(at, at + fuzzy.length + 12) : '';
+          if (!/_{3,}/.test(span)) {
+            return {
+              expected: req.expectedValue, actual: fuzzy, result: 'FAIL',
+              reason: 'Same wording is printed, but the fill-in line ("____") the template has here is missing — the recipient has nowhere to write.',
+            };
+          }
+        }
         // CONFIRMED live 2026-09-30 (user direction): the SAME words are genuinely present, just punctuated/
         // spaced differently than the reference — a template choosing its own punctuation for a value
         // (comma placement, line-wrap, etc.) is a legitimate rendering choice, not a defect. Reporting this
