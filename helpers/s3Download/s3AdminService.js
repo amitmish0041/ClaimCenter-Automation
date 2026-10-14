@@ -456,13 +456,13 @@ async function downloadFirstValidPdf(page, key, outDir, { log = console.log, max
   if (holder.authorization) {
     let lastCount = 0;
     for (let attempt = 1; ; attempt++) {
-      const objs = (await apiList(page, ARCHIVE_PREFIX, { log }).catch(() => [])).filter((o) => String(o.key).includes(key));
+      const objs = await listForKey(page, key, { log });
       lastCount = objs.length;
       const pdf = objs.find((o) => /\.pdf$/i.test(o.key));
       if (pdf) {
         try {
           const d = await apiDownload(page, pdf.key, outDir, { log });
-          if (fs.readFileSync(d.localPath).slice(0, 5).toString('latin1') === '%PDF-') { log(`[S3] downloaded ${d.fileName} via the admin API`); return { downloaded: d }; }
+          if (fs.readFileSync(d.localPath).slice(0, 5).toString('latin1') === '%PDF-') { log(`[S3] downloaded ${d.fileName} via the admin API (${pdf.where})`); return { downloaded: d }; }
           fs.rmSync(d.localPath, { force: true });
         } catch (e) { log(`[S3] ${pdf.key.split('/').pop()} listed but its download failed (${e.message})`); }
       }
@@ -472,8 +472,8 @@ async function downloadFirstValidPdf(page, key, outDir, { log = console.log, max
     }
     const waited = `${Math.round(maxWaitMs / 60000)} min`;
     return lastCount
-      ? { error: `"${key}" matched ${lastCount} S3 object(s) under ClaimCenter Outbound > smartcomm > output > archive, but NONE of them were a real PDF within ${waited}.` }
-      : { error: `no S3 object matched Identifier "${key}" under ClaimCenter Outbound > smartcomm > output > archive within ${waited}.` };
+      ? { error: `"${key}" matched ${lastCount} S3 object(s) under the archive or the processing folder, but NONE of them were a real PDF within ${waited}.` }
+      : { error: `no S3 object matched Identifier "${key}" in the archive (cc/outbound-files/smartcomm/output/archive) or the processing folder (${PROCESSING_PREFIX}) within ${waited}.` };
   }
   let lastMatchCount = 0;
   for (let attempt = 1; ; attempt++) {
@@ -511,8 +511,9 @@ async function downloadArchiveMetadataJson(page, identifier, outDir, { log = con
   const holder = await ensureApiAuth(page, { log }).catch(() => ({}));
   if (holder.authorization) {
     const want = `${String(identifier).toLowerCase()}.json`;
-    const obj = (await apiList(page, ARCHIVE_PREFIX, { log }).catch(() => [])).find((o) => String(o.key).split('/').pop().toLowerCase() === want);
-    if (!obj) return { error: `no "${identifier}.json" filing-metadata object found in the archive for Identifier "${identifier}".` };
+    const obj = (await listForKey(page, String(identifier), { log })).find((o) => String(o.key).split('/').pop().toLowerCase() === want);
+    if (!obj) return { error: `no "${identifier}.json" filing-metadata object found in the archive or the processing folder for Identifier "${identifier}".` };
+    if (obj.where !== 'archive') log(`[S3] filing metadata ${want} taken from the ${obj.where} folder`);
     const d = await apiDownload(page, obj.key, outDir, { log });
     try {
       return { metadata: JSON.parse(fs.readFileSync(d.localPath, 'utf8')), fileName: d.fileName, localPath: d.localPath };
@@ -615,6 +616,19 @@ async function apiDownload(page, key, outDir, opts) {
 }
 
 const ARCHIVE_PREFIX = 'cc/outbound-files/smartcomm/output/archive';
+// Fallback: where the filing job keeps each PDF + .json pair after collecting it from the archive. CONFIRMED live
+// 2026-10-14 (user direction): unlike the archive (emptied within seconds), this folder held 48 documents going
+// back hours, and its PDF is byte-identical to the one caught in the archive (DIG238, 2d359bb1-...). So a document
+// the archive watch missed is still found here instead of waiting minutes for something that already left.
+const PROCESSING_PREFIX = 'cc/inbound-files/pending/smartcomm/output/output/archive/processing';
+
+// Objects whose key contains `key`, from the archive first, then the processing fallback.
+async function listForKey(page, key, { log } = {}) {
+  const [archive, processing] = await Promise.all([ARCHIVE_PREFIX, PROCESSING_PREFIX]
+    .map((p) => apiList(page, p, { log }).catch(() => [])));
+  const pick = (objs, where) => objs.filter((o) => String(o.key).includes(key)).map((o) => ({ ...o, where }));
+  return [...pick(archive, 'archive'), ...pick(processing, 'processing (fallback)')];
+}
 
 // Watches output/archive while a document is being completed, and downloads its <identifier>.pdf/.json the
 // moment they land. CONFIRMED live 2026-10-13 (watched every ~1s while one DIG108 document completed): the pair
@@ -739,4 +753,4 @@ async function watchArchiveForIdentifier(page, identifierPromise, outDir, { log 
   return finish();
 }
 
-module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, ensureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches, downloadFirstValidPdf, downloadArchiveMetadataJson, watchArchiveForIdentifier };
+module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, ensureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches, downloadFirstValidPdf, downloadArchiveMetadataJson, watchArchiveForIdentifier, _api: { apiList, apiDownload, ensureApiAuth } };
