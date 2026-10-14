@@ -126,6 +126,9 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
   // it still gets this reuse scoped to just its own scenarios, same as always.
   const ownsS3Session = !s3Session;
   if (ownsS3Session) s3Session = createS3SessionManager(page.context().browser(), { log: (m) => console.log(`[SmartComm] ${dig}: ${m}`) });
+  // Interactive documents are fetched from S3's transient archive — sign in now, in parallel with the
+  // ClaimCenter steps, so the watch is live before Complete Document (see s3SessionManager.warmUp).
+  if (/interactive/i.test(template.interactiveOrOnDemand || '') && s3Session.warmUp) s3Session.warmUp();
 
   const extraPages = [];
   try {

@@ -50,13 +50,23 @@ function createS3SessionManager(browser, { log = console.log } = {}) {
     return run;
   }
 
+  // Signs in to S3 in the background NOW, so the archive watch is already live when the document completes.
+  // CONFIRMED 2026-10-14 (DIG238, single-template run from the app): the session was only created at Complete
+  // Document; sign-in + switching Planet to Test took ~1 min, the filing job had collected the PDF within
+  // seconds, so the watch never saw it and the run then polled an empty archive for minutes. Failures are
+  // logged and left for the real call to retry.
+  function warmUp() {
+    withPage(async () => { log('[S3] signed in ahead of time — the archive watch will start instantly'); })
+      .catch((err) => log(`[S3] early sign-in failed (${err.message.split('\n')[0]}) — will retry when the document completes`));
+  }
+
   async function close() {
     if (ctx) await ctx.close().catch(() => {});
     page = null;
     ctx = null;
   }
 
-  return { withPage, close };
+  return { withPage, warmUp, close };
 }
 
 module.exports = { createS3SessionManager };
