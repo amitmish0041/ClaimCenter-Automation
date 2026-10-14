@@ -22,6 +22,7 @@ const fraudLanguageService = require('./fraudLanguageService');
 const dataDictionaryService = require('./dataDictionaryService');
 const payloadXpathService = require('./payloadXpathService');
 const interactiveEditService = require('./interactiveEditService');
+const layoutValidationService = require('./layoutValidationService');
 const s3AdminService = require('../s3Download/s3AdminService');
 const { createS3SessionManager } = require('../s3Download/s3SessionManager');
 const { loginAsAdmin, loginAsUser, openExistingClaim } = require('../claimCenterBase');
@@ -146,7 +147,7 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
         const i = next++;
         if (i >= scenarios.length) return;
         const variant = scenarioVariants.getVariantForIndex(i);
-        scenarioResults[i] = await runScenario(workerPage, { template, scenario: scenarios[i], requirements, recipientEmail, variant, mentionsFraudLanguage, interactive, s3Session });
+        scenarioResults[i] = await runScenario(workerPage, { template, scenario: scenarios[i], requirements, recipientEmail, variant, mentionsFraudLanguage, interactive, s3Session, sourceFile });
       }
     }
     await Promise.all(pages.map(worker));
@@ -330,7 +331,7 @@ function upgradeRecipientDependentRequirements(reqs, re, additionalRecipient) {
   }
 }
 
-async function runScenario(page, { template, scenario, requirements, recipientEmail, variant, mentionsFraudLanguage, interactive, s3Session }) {
+async function runScenario(page, { template, scenario, requirements, recipientEmail, variant, mentionsFraudLanguage, interactive, s3Session, sourceFile }) {
   scenario = { ...scenario };
   const base = {
     scenarioId: scenario.scenarioId,
@@ -413,7 +414,36 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // from the Runner UI's manual override or a Test Data inventory match.
     // The seeded record's value is only a fallback for whatever live
     // capture couldn't find (e.g. a claim with no separate claimant party).
-    const captured = await claimSummaryService.captureClaimSummary(page);
+    let captured = await claimSummaryService.captureClaimSummary(page);
+    // A template that prints BOTH the claimant and the insured can't catch a claimant/insured swap (Jira
+    // SMART-1349: "Claimant field populated with the Insured Name") on a claim where they're the same person —
+    // common in this test data. Try the scenario's same-LOB/State backup claims for one where they differ.
+    const samePerson = (c) => Boolean(c.claimantName && c.insuredName && c.claimantName.trim().toLowerCase() === c.insuredName.trim().toLowerCase());
+    const needsDistinctParties = (requirements || []).some((r) => r.expectedSource === 'testData.claimantName')
+      && (requirements || []).some((r) => r.expectedSource === 'testData.insuredName');
+    // (A manual Claim # override scenario carries no backup claims, so it's never switched away from.)
+    if (needsDistinctParties && samePerson(captured)) {
+      const original = { testData: scenario.testData, captured };
+      let switched = false;
+      for (const alt of scenario.alternates || []) {
+        await openExistingClaim(page, alt.claimNumber);
+        if (await claimAccessDenied(page, alt.claimNumber)) continue;
+        const altCaptured = await claimSummaryService.captureClaimSummary(page);
+        if (altCaptured.claimantName && !samePerson(altCaptured)) {
+          console.log(`[SmartComm] ${scenario.scenarioId}: claim ${original.testData.claimNumber} has the same person as claimant and insured ("${captured.insuredName}") — switched to ${alt.claimNumber} (claimant "${altCaptured.claimantName}", insured "${altCaptured.insuredName}") so a claimant/insured swap would show.`);
+          scenario.testData = alt;
+          base.claimNumber = alt.claimNumber;
+          captured = altCaptured;
+          switched = true;
+          break;
+        }
+      }
+      if (!switched) {
+        if ((scenario.alternates || []).length) await openExistingClaim(page, original.testData.claimNumber);
+        base.partiesNote = `Claimant and insured are the same person ("${captured.insuredName}") on ${original.testData.claimNumber}${(scenario.alternates || []).length ? ` and on its ${(scenario.alternates || []).length} backup claim(s)` : ''} — a claimant/insured swap couldn't be detected on this scenario.`;
+        console.log(`[SmartComm] ${scenario.scenarioId}: ${base.partiesNote}`);
+      }
+    }
     const effectiveTestData = { ...scenario.testData, ...Object.fromEntries(Object.entries(captured).filter(([, v]) => v !== undefined)) };
     // Every party's own roles (e.g. "Mark Antolick" -> ["Driver", "Covered Party", ...]) — captured once,
     // here, while still on the Summary screen (same table captureClaimSummary just read), for
@@ -521,10 +551,11 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
         fileNamePrefix: `${template.digNumber}_${scenario.testData.claimNumber}_${scenario.scenarioId}`,
         s3Session, claimNumber: base.claimNumber,
         commentFieldNames: scenarioRequirements.map((r) => r.fieldName).filter(Boolean),
+        freeFormSamples: scenarioRequirements.filter((r) => /free\s*form/i.test(r.fieldName || '') && r.sampleValue).map((r) => r.sampleValue),
       });
       pdfPath = result.pdfPath;
       interactiveChecks = result.interactiveChecks;
-      metadataChecks = result.metadataChecks || [];
+      metadataChecks = [...(result.lockChecks || []), ...(result.metadataChecks || [])];
       base.dictionaryReference = result.dictionaryReference;
       base.trackedDictionaryFields = result.trackedFields;
       base.unmatchedTrackedDictionaryFields = result.unmatchedTrackedFields;
@@ -611,6 +642,15 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // Append the archive .json filing-metadata checks (META*) so they count toward the scenario result and
     // render in their own report table (see reportService). A wrong claim #/template here is a real failure.
     if (metadataChecks && metadataChecks.length) validations.push(...metadataChecks);
+    if (base.partiesNote) {
+      validations.push({ id: 'DATA1', description: 'Claimant and insured are different people on the test claim (so a claimant/insured swap would be caught)', expected: 'Different claimant and insured', actual: 'Same person', result: 'SKIPPED', reason: base.partiesNote });
+    }
+    // Layout against the Word mapping doc — alignment, paragraph breaks, header order (layoutValidationService).
+    try {
+      validations.push(...await layoutValidationService.checkLayout({ docxPath: sourceFile, pdfPath, requirements: reportableRequirements, validations }));
+    } catch (err) {
+      console.log(`[SmartComm] ${scenario.scenarioId}: layout checks skipped (${err.message.split('\n')[0]})`);
+    }
     // "Data capture" cross-check (Insured / Claimant / Loss Date / Policy Number / Underwriting Company) compares
     // this tool's own Summary-screen scrape with the payload ClaimCenter sent to SmartCOMM. It says nothing about
     // the template, so it is NOT reported or counted — a mismatch (capture drift) is only logged for whoever is
@@ -860,7 +900,7 @@ function assignByKnownValue(interactiveChecks, digNumber, knownValues) {
 // Document Properties Identifier (see helpers/s3Download/s3AdminService.js — CONFIRMED live that this
 // Identifier is exactly the S3 object's filename). See interactiveEditService.js's own header for what in
 // here is still a first-draft guess vs. actually confirmed live.
-async function runInteractiveGeneration(page, { template, scenario, effectiveTestData, recipient, additionalRecipient, fileNamePrefix, s3Session, commentFieldNames, claimNumber }) {
+async function runInteractiveGeneration(page, { template, scenario, effectiveTestData, recipient, additionalRecipient, fileNamePrefix, s3Session, commentFieldNames, claimNumber, freeFormSamples = [] }) {
   const log = (m) => console.log(`[SmartComm] ${scenario.scenarioId}: ${m}`);
 
   // Live preview for the Runner UI (Commercial Line Performance test/runner) — a read-only, auto-refreshing
@@ -913,6 +953,39 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     fields = await interactiveEditService.readMergeFields(frame);
   }
   log(`interactive editor: ${fields.length} merge field(s) found (${fields.filter((f) => f.editable).length} editable, ${fields.filter((f) => !f.editable).length} locked)`);
+
+  // Template text a user could edit or delete (outside a locked fragment — see readUnlockedContent). Wording the
+  // BA marked "Free Form Editable" is meant to be editable, so it's excluded; anything else is a defect (Jira
+  // SMART-1313 fraud language editable, SMART-1339 paragraphs deletable). Read before any field is edited.
+  const lockChecks = [];
+  try {
+    const { total, unlocked } = await interactiveEditService.readUnlockedContent(frame);
+    const squash = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const intended = (t) => freeFormSamples.some((s) => squash(s).length >= 8 && (squash(s).includes(squash(t)) || squash(t).includes(squash(s))));
+    const offending = unlocked.filter((t) => !intended(t));
+    lockChecks.push(offending.length
+      ? {
+        id: 'LOCK1', description: 'Template text is locked (users can\'t edit or delete it)', expected: 'All template paragraphs locked',
+        actual: offending.map((t) => `"${t.length > 90 ? `${t.slice(0, 89)}…` : t}"`).join(' | '), result: 'FAIL',
+        reason: `${offending.length} of ${total} template paragraph(s) sit outside a locked fragment in the SmartCOMM editor, so a user can edit or delete them${offending.some((t) => fraudLanguageService.findFraudLanguageInText(t).length || /fraud notice/i.test(t)) ? ' — including fraud language' : ''} (same defect as Jira SMART-1313 / SMART-1339).`,
+      }
+      : { id: 'LOCK1', description: 'Template text is locked (users can\'t edit or delete it)', expected: 'All template paragraphs locked', actual: `${total} paragraphs, all locked${unlocked.length ? ` (plus ${unlocked.length} intended free-form area(s))` : ''}`, result: 'PASS' });
+    if (offending.length) log(`LOCK1: ${offending.length} unlocked template paragraph(s): ${offending.map((t) => t.slice(0, 60)).join(' | ')}`);
+  } catch (err) {
+    log(`LOCK1: couldn't read the editor's fragment locks (${err.message.split('\n')[0]}) — skipped.`);
+  }
+  if (process.env.DEBUG_EDITOR_DOM) {
+    const dump = await frame.evaluate(() => {
+      const classes = {};
+      document.querySelectorAll('*').forEach((e) => { String(e.className || '').split(/\s+/).filter(Boolean).forEach((c) => { classes[c] = (classes[c] || 0) + 1; }); });
+      const editableEls = Array.from(document.querySelectorAll('[contenteditable], [data-editable], [aria-readonly], [readonly]'))
+        .slice(0, 80).map((e) => ({ tag: e.tagName, attrs: Array.from(e.attributes).map((a) => `${a.name}=${String(a.value).slice(0, 60)}`), text: (e.textContent || '').replace(/\s+/g, ' ').slice(0, 100) }));
+      return { designMode: document.designMode, bodyIsContentEditable: document.body.isContentEditable, classes, editableEls, html: document.body.outerHTML.slice(0, 800000) };
+    }).catch((e) => ({ error: e.message }));
+    const dumpPath = require('path').join(__dirname, '..', '..', 'results', 'smartComm', 'interactive-diagnostics', `${scenario.scenarioId}_editorDom.json`);
+    require('fs').writeFileSync(dumpPath, JSON.stringify(dump, null, 1));
+    log(`DEBUG_EDITOR_DOM: dumped the editor DOM to ${dumpPath}`);
+  }
 
   // A successfully-loaded editor (Complete Document visible, "Authenticating..." gone) that STILL shows 0
   // merge fields after the retry above is ambiguous on its own — could be a genuinely field-free document,
@@ -1359,7 +1432,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
         unmatchedTrackedFields.map((t) => `${t.row.attributeName} (dictionary=${t.row.editable ? 'Yes' : 'No'})`).join('; '));
     }
 
-    return { pdfPath: finalPath, interactiveChecks, metadataChecks, dictionaryReference, payload, rawPayloadRoot, choicesApplied, trackedFields, unmatchedTrackedFields };
+    return { pdfPath: finalPath, interactiveChecks, metadataChecks, lockChecks, dictionaryReference, payload, rawPayloadRoot, choicesApplied, trackedFields, unmatchedTrackedFields };
   });
   } finally {
     stopLivePreview();

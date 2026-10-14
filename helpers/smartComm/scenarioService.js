@@ -32,7 +32,10 @@ function norm(s) { return String(s || '').trim().toLowerCase(); }
 // still be valid/testable in a dev environment than an old one.
 const MAX_SCENARIOS_PER_TEMPLATE = Number(process.env.SMARTCOMM_MAX_SCENARIOS_PER_TEMPLATE) || 3;
 
-const MAX_ALTERNATE_CLAIMS = 3;
+// Backups also serve validationService's search for a claim whose claimant and insured are different people
+// (a template printing both can't catch a claimant/insured swap otherwise) — hence 6, not just enough for the
+// rare no-permission fallback.
+const MAX_ALTERNATE_CLAIMS = 6;
 
 function appliesToTemplate(template, record) {
   const states = template.states; // array of codes, or ['ALL']

@@ -724,6 +724,27 @@ async function completeDocument(page, { log = console.log, scenarioId = 'scenari
   throw new Error(`INTERACTIVE_COMPLETE_TIMEOUT: neither "Document Properties" nor an error banner appeared within 60s of clicking Complete Document.${diagPath ? ` Diagnostic saved: ${diagPath}.png / .json` : ''}`);
 }
 
+// ── 4b. Template text a user could edit or delete ───────────────────────────────────────────────────
+// The editor groups template content into fragments; a locked one carries .th-frag-locked, and anything outside
+// one can be typed over or deleted. CONFIRMED live 2026-10-13: DIG122A's 44 and DIG108's 47 regular paragraphs
+// all sit inside .th-frag-locked — DIG108's Pennsylvania fraud notice was the exception (an unlocked .th-frag),
+// i.e. editable: the defect in Jira SMART-1313 (fraud language editable) / SMART-1339 (paragraphs deletable).
+// Returns { total, unlocked: [paragraph text] } — merge fields (checked separately) excluded from the text.
+async function readUnlockedContent(frame) {
+  return frame.evaluate(() => {
+    const paras = Array.from(document.querySelectorAll('.th-contentEditorBody .th-paragraph'));
+    const unlocked = paras
+      .filter((el) => !el.closest('.th-frag-locked'))
+      .map((el) => {
+        const clone = el.cloneNode(true);
+        clone.querySelectorAll('.th-data-value, .th-data-value-editable, .th-control-code-off').forEach((n) => n.remove());
+        return (clone.textContent || '').replace(/\s+/g, ' ').trim();
+      })
+      .filter((t) => t.replace(/[^A-Za-z0-9]/g, '').length >= 3);
+    return { total: paras.length, unlocked };
+  });
+}
+
 // ── 5. Read the Identifier off Document Properties — the S3 lookup key ─────────────────────────────
 async function readDocumentPropertiesIdentifier(page) {
   const row = page.locator('div, tr').filter({ hasText: /^Identifier$/ }).last();
@@ -736,5 +757,5 @@ async function readDocumentPropertiesIdentifier(page) {
 module.exports = {
   clickInteractiveAndWaitForEditor, getEditorFrame, readMergeFields, inspectAndMaybeEdit,
   saveChanges, completeDocument, dismissAnyPopups, readDocumentPropertiesIdentifier, saveDiagnostic,
-  installDialogAutoAccept, selectAllYesNoChoices,
+  installDialogAutoAccept, selectAllYesNoChoices, readUnlockedContent,
 };

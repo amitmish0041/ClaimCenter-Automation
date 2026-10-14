@@ -221,6 +221,7 @@ function makeDynamicRequirement(n, fieldName, value, { conditional = false, cond
     ...(useLiteralText ? { expectedValue: value.trim() } : {}),
     shape,
     fieldName, // raw BA-comment/label text — lets tooling audit field-name coverage across the whole catalog without re-parsing descriptions
+    sampleValue: value, // the mock-up's own text under this comment (e.g. a "Free Form Editable" area's sample wording)
   };
   if (conditional) {
     req.enabled = false;
