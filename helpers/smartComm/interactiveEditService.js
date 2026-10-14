@@ -140,14 +140,19 @@ async function clickInteractiveAndWaitForEditor(page, context, { log = console.l
   // signal, and the "Authenticating..." text lives in that iframe, invisible to a page-level text search —
   // check every frame, not just the main one.
   const completeBtn = page.getByRole('button', { name: 'Complete Document', exact: true });
+  // A template/user that needs sign-off shows "Request Approval" in that same slot instead — CONFIRMED live
+  // 2026-10-14 (DIG52, all three users): the editor was loaded and signed in, but with no "Complete Document"
+  // this loop waited out its full 6 minutes per scenario and blamed sign-in. Either button means "loaded".
+  const approvalBtn = page.getByRole('button', { name: 'Request Approval', exact: true });
   const deadline = Date.now() + timeoutMs;
   let lastNudge = Date.now();
   while (Date.now() < deadline) {
     const stillAuthenticating = (await Promise.all(
       page.frames().map((f) => f.evaluate(() => /Authenticating/i.test(document.body ? document.body.innerText || '' : '')).catch(() => false))
     )).some(Boolean);
-    if (!stillAuthenticating && await completeBtn.isVisible().catch(() => false)) {
-      log('[Interactive] Editor loaded (Complete Document visible, "Authenticating..." gone) — continuing.');
+    const ready = !stillAuthenticating && (await completeBtn.isVisible().catch(() => false) || await approvalBtn.isVisible().catch(() => false));
+    if (ready) {
+      log(`[Interactive] Editor loaded (${await completeBtn.isVisible().catch(() => false) ? 'Complete Document' : 'Request Approval'} visible, "Authenticating..." gone) — continuing.`);
       // Capture whatever cookies just got this scenario in, so the NEXT scenario/template/run can skip
       // the login prompt entirely if Azure's session is still valid by then.
       await azureSessionStore.saveFromContext(context, { log });
@@ -702,7 +707,15 @@ async function saveChanges(page, { log = console.log } = {}) {
 }
 
 async function completeDocument(page, { log = console.log, scenarioId = 'scenario' } = {}) {
-  await page.getByRole('button', { name: 'Complete Document', exact: true }).click();
+  // Approval-workflow documents (see clickInteractiveAndWaitForEditor) can't be completed by this user at all —
+  // there's no completed PDF to fetch until an approver signs off, so say so plainly (reported BLOCKED, with the
+  // editor checks already done kept) instead of a 30s timeout on a button that isn't there.
+  const completeBtn = page.getByRole('button', { name: 'Complete Document', exact: true });
+  if (!(await completeBtn.isVisible().catch(() => false))
+    && await page.getByRole('button', { name: 'Request Approval', exact: true }).isVisible().catch(() => false)) {
+    throw new Error('INTERACTIVE_NEEDS_APPROVAL: this document needs approval for the signed-in user ("Request Approval" instead of "Complete Document"), so no completed PDF exists to validate until an approver signs off — the editor checks (editable fields, locked text) above still ran.');
+  }
+  await completeBtn.click();
   await dismissAnyPopups(page, { log });
 
   // Case-insensitive substring, not exact — the same drift risk (wording/casing changing under a heading)

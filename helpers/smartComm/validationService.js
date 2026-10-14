@@ -706,9 +706,20 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // precondition failure too. GENERATE_TIMEOUT (neither a result nor an
     // error ever showed up) stays an ERROR — that's an unexplained hang, not
     // a confirmed CC-side "can't run this" response.
-    if (err.message.startsWith('TEMPLATE_NOT_FOUND') || err.message.startsWith('GENERATE_FAILED') || err.message.startsWith('INTERACTIVE_NOT_ENABLED')) {
+    if (err.message.startsWith('TEMPLATE_NOT_FOUND') || err.message.startsWith('GENERATE_FAILED') || err.message.startsWith('INTERACTIVE_NOT_ENABLED') || err.message.startsWith('INTERACTIVE_NEEDS_APPROVAL')) {
       console.log(`[SmartComm] BLOCKED ${scenario.scenarioId}: ${err.message}`);
-      return { ...base, status: 'BLOCKED', reason: err.message, passed: 0, failed: 0, blocked: 1, skipped: 0 };
+      // An approval-gated document still had its editor checked (fields, locked text) before the block — keep
+      // those results; a failure among them is a real finding even without a completed PDF.
+      // (Field results here haven't been through the Data Dictionary pass yet — that runs after completion — so
+      // only the locked-text check decides FAIL; the field list is kept for reference.)
+      const lockFails = (err.lockChecks || []).filter((v) => v.result === 'FAIL').length;
+      return {
+        ...base, status: lockFails ? 'FAIL' : 'BLOCKED', reason: err.message,
+        passed: (err.lockChecks || []).filter((v) => v.result === 'PASS').length, failed: lockFails, blocked: 1, skipped: 0,
+        ...(err.lockChecks ? { validations: err.lockChecks } : {}),
+        ...(err.interactiveChecks ? { interactiveChecks: err.interactiveChecks } : {}),
+        ...(err.choicesApplied ? { conditionalSummary: { choicesAnswered: err.choicesApplied } } : {}),
+      };
     }
     console.log(`[SmartComm] ERROR ${scenario.scenarioId}: ${err.message}`);
     // err.interactiveChecks/choicesApplied (see runInteractiveGeneration's own completeDocument try/catch)
@@ -1267,6 +1278,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     // carry them through to the saved report, instead of this scenario's whole edit history vanishing.
     err.interactiveChecks = interactiveChecks;
     err.choicesApplied = choicesApplied;
+    err.lockChecks = lockChecks;
     throw err;
   }
   resolveIdentifier(identifier);
