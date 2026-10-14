@@ -103,6 +103,27 @@ function normalizeTypography(s) {
 // otherwise word-for-word identical sentence.
 function normalizeWs(s) { return normalizeTypography(String(s || '').replace(PUA_GLYPH_RE, ' ')).replace(/\s+/g, ' ').trim(); }
 
+// Whitespace-blind containment: every letter must match in order, only spacing may differ.
+const compact = (s) => normalizeWs(s).replace(/\s+/g, '').toLowerCase();
+function compactIncludes(haystack, needle) {
+  const n = compact(needle);
+  return n.length >= 8 && compact(haystack).includes(n);
+}
+
+// Other ways the same calendar date can print: "August 06, 2026" <-> "08/06/2026", "8/6/2026", "August 6, 2026".
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function dateVariants(value) {
+  const s = String(value || '').trim();
+  let y; let m; let d;
+  let r = s.match(/^([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (r) { m = MONTHS.findIndex((x) => x.toLowerCase().startsWith(r[1].toLowerCase().slice(0, 3))) + 1; d = +r[2]; y = r[3]; }
+  r = r || s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (r && !m) { m = +r[1]; d = +r[2]; y = r[3]; }
+  if (!m || !d || !y || m > 12 || d > 31) return [];
+  const p = (n) => String(n).padStart(2, '0');
+  return [...new Set([`${p(m)}/${p(d)}/${y}`, `${m}/${d}/${y}`, `${p(m)}-${p(d)}-${y}`, `${MONTHS[m - 1]} ${p(d)}, ${y}`, `${MONTHS[m - 1]} ${d}, ${y}`])].filter((v) => v !== s);
+}
+
 function shapeRegex(shape) {
   return UNANCHORED_PATTERNS[shape] || /\S+/;
 }
@@ -208,6 +229,12 @@ function evaluateOne(req, haystack, context) {
       // passed with its own note so the difference stays visible in the report.
       const alt = (req.alsoAccept || []).find((a) => normHaystack.includes(normalizeWs(a).toLowerCase()));
       if (alt) return { expected: req.expectedValue, actual: alt, result: 'PASS', reason: req.alsoAcceptNote || `Accepted alternative value "${alt}".` };
+      // Some PDFs' text layer splits words at certain glyphs (CONFIRMED 2026-10-14, DIG47B: "benef its",
+      // "f ormer", "SALARY  YES") — the printed page reads correctly. Ignoring all whitespace is still an exact
+      // letter-for-letter match, so it counts (spacing-only differences pass, per user direction).
+      if (compactIncludes(haystack, req.expectedValue) && !/_{3,}/.test(req.expectedValue)) {
+        return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Same text; only spacing differs in the PDF text.' };
+      }
       const fuzzy = findPunctuationRelaxedMatch(haystack, req.expectedValue);
       if (fuzzy) {
         // Per user direction 2026-10-14: spacing/punctuation-only differences pass — EXCEPT a missing fill-in
@@ -309,6 +336,8 @@ function evaluateOne(req, haystack, context) {
       if ((req.alsoAccept || []).some((a) => normField && normField.includes(normalizeWs(a).toLowerCase()))) {
         return { expected: req.expectedValue, actual: req.fieldValue, result: 'PASS', reason: req.alsoAcceptNote || 'Accepted alternative value.' };
       }
+      const fieldDate = dateVariants(req.expectedValue).find((d) => String(req.fieldValue || '').includes(d));
+      if (fieldDate) return { expected: req.expectedValue, actual: req.fieldValue, result: 'PASS', reason: `Same date, printed in the template's format ("${fieldDate}").` };
       const fuzzy = findPunctuationRelaxedMatch(req.fieldValue, req.expectedValue) || findPunctuationRelaxedMatch(req.expectedValue, req.fieldValue);
       if (fuzzy) {
         return {
@@ -385,6 +414,11 @@ function evaluateOne(req, haystack, context) {
       }
       const found = normHaystack.includes(normalizeWs(expected).toLowerCase());
       if (found) return { expected, actual: expected, result: 'PASS' };
+      // The same date in the template's own format (DIG47B prints the loss date as 08/06/2026; the claim data
+      // reads "August 06, 2026") — per user direction 2026-10-14 that's a match, not a missing value.
+      const dateAlt = dateVariants(expected).find((d) => haystack.includes(d));
+      if (dateAlt) return { expected, actual: dateAlt, result: 'PASS', reason: `Same date, printed in the template's format ("${dateAlt}").` };
+      if (compactIncludes(haystack, expected)) return { expected, actual: expected, result: 'PASS', reason: 'Same text; only spacing differs in the PDF text.' };
       const fuzzy = findPunctuationRelaxedMatch(haystack, expected);
       if (fuzzy) {
         // See the same change in the 'requiredText' case above for the reasoning — a punctuation/spacing-only
