@@ -193,7 +193,14 @@ function makeSalutationRequirement(docOrder) {
 // Whether a field is actually editable is ALREADY verified separately by this tool's own interactiveChecks
 // (dictionary-declared vs. observed editability) — this was the same fact being described twice, once as a
 // real check and once as a dead-end content requirement.
-const BEHAVIORAL_COMMENTARY_RE = /\b(?:is|are)\s+editable\b|selected manually|free form editable/i;
+// "This field will be selectable in SmartCOMM: ..." (DIG34) is the same kind of note — the user picks the
+// wording in the editor, so there's no single expected value either.
+const BEHAVIORAL_COMMENTARY_RE = /\b(?:is|are)\s+editable\b|selected manually|free form editable|\bselectable in smartcomm\b/i;
+
+// "Dynamic language to display either “Bodily Injury” or “Property Damage” in SmartCOMM." (DIG55) — no single
+// expected value, but exactly one of the named phrases must print; checked as that instead of an unverifiable
+// "text-shaped value" that could only ever report BLOCKED.
+const EITHER_OR_RE = /\beither\s+[“"']([^”"']+)[”"']\s+or\s+[“"']([^”"']+)[”"']/i;
 
 function makeDynamicRequirement(n, fieldName, value, { conditional = false, conditionReason = '' } = {}) {
   const field = synonyms.lookup(fieldName);
@@ -223,6 +230,14 @@ function makeDynamicRequirement(n, fieldName, value, { conditional = false, cond
     fieldName, // raw BA-comment/label text — lets tooling audit field-name coverage across the whole catalog without re-parsing descriptions
     sampleValue: value, // the mock-up's own text under this comment (e.g. a "Free Form Editable" area's sample wording)
   };
+  const eitherOr = !field && !conditional && fieldName.match(EITHER_OR_RE);
+  if (eitherOr) {
+    const esc = (s) => s.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+    Object.assign(req, {
+      type: 'regexMatch', pattern: `(?:${esc(eitherOr[1])}|${esc(eitherOr[2])})`,
+      description: `One of "${eitherOr[1].trim()}" / "${eitherOr[2].trim()}" must appear (for "${fieldName}")`,
+    });
+  }
   if (conditional) {
     req.enabled = false;
     req.disabledReason = conditionReason;
@@ -363,7 +378,9 @@ function parseCommentAnchors(documentXml) {
 // Matched directly by name instead: every "Copy ..." field found across the
 // full catalog (2026-09-04 scan) is one of these three, with no unrelated
 // field sharing that prefix, so it's safe as a direct, unscoped match.
-const CONDITIONAL_RE = /display only if|only (?:visible|shown|displayed) if|\bonly\b[^.]{0,40}\bif\b|otherwise[^.]*(?:not[^.]*visible|will not|do not)|will not (?:be )?(?:visible|display|print|show)|if\b.*\b(?:is selected|is entered|is added)\b|if\b.*\bcheckbox|else\b.*\bdo not\b|^fraud language\b|if\b.*\bstate\s*=|^copy\b/i;
+// "...if CC details <> Null else suppress" (DIG187) — the same "print only when present" condition, worded as
+// pseudo-code.
+const CONDITIONAL_RE = /display only if|only (?:visible|shown|displayed) if|\bonly\b[^.]{0,40}\bif\b|otherwise[^.]*(?:not[^.]*visible|will not|do not)|will not (?:be )?(?:visible|display|print|show)|if\b.*\b(?:is selected|is entered|is added)\b|if\b.*\bcheckbox|else\b.*\bdo not\b|^fraud language\b|if\b.*\bstate\s*=|^copy\b|\bif\b.*<>\s*null\b|\belse\s+suppress\b/i;
 
 // Collapses whitespace to single spaces while recording, for each character
 // kept, its index in the ORIGINAL string — lets anchor text be located in
