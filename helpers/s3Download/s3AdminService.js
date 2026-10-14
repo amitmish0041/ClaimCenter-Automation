@@ -622,6 +622,22 @@ const ARCHIVE_PREFIX = 'cc/outbound-files/smartcomm/output/archive';
 // the archive watch missed is still found here instead of waiting minutes for something that already left.
 const PROCESSING_PREFIX = 'cc/inbound-files/pending/smartcomm/output/output/archive/processing';
 
+const INPUT_PREFIX = 'cc/outbound-files/smartcomm/input';
+
+// Every S3 object for a key, for the S3 download tool: the finished document (PDF + .json) from the archive, or
+// the processing folder when the archive no longer has it, plus the request payload from input. Each entry gets
+// a `where` label. Admin API only — returns null when its token couldn't be picked up (caller uses the UI search).
+async function findAllForKey(page, key, { log = console.log } = {}) {
+  const holder = await ensureApiAuth(page, { log }).catch(() => ({}));
+  if (!holder.authorization) return null;
+  const docs = await listForKey(page, key, { log });
+  const archive = docs.filter((o) => o.where === 'archive');
+  const chosen = archive.length ? archive : docs; // processing only when the archive has none
+  const input = (await apiList(page, INPUT_PREFIX, { log }).catch(() => []))
+    .filter((o) => String(o.key).includes(key)).map((o) => ({ ...o, where: 'input (payload)' }));
+  return [...chosen, ...input];
+}
+
 // Objects whose key contains `key`, from the archive first, then the processing fallback.
 async function listForKey(page, key, { log } = {}) {
   const [archive, processing] = await Promise.all([ARCHIVE_PREFIX, PROCESSING_PREFIX]
@@ -753,4 +769,4 @@ async function watchArchiveForIdentifier(page, identifierPromise, outDir, { log 
   return finish();
 }
 
-module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, ensureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches, downloadFirstValidPdf, downloadArchiveMetadataJson, watchArchiveForIdentifier, _api: { apiList, apiDownload, ensureApiAuth } };
+module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, ensureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches, downloadFirstValidPdf, downloadArchiveMetadataJson, watchArchiveForIdentifier, findAllForKey, _api: { apiList, apiDownload, ensureApiAuth } };

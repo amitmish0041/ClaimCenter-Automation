@@ -66,6 +66,35 @@ async function emailResults(key, downloaded, to, foundIn) {
   page.setDefaultTimeout(30000);
   try {
     await svc.loginAndEnsureTestPlanet(page);
+
+    // Preferred (2026-10-14): the admin UI's own API, across all three places a document's files can be — the
+    // archive (emptied by the filing job within seconds), the filing job's processing folder (keeps the PDF +
+    // .json — byte-identical to the archive copy), and input (the payload). Downloads everything found, so one
+    // run returns PDF + .json + payload. Falls through to the click-through search below if the API isn't usable.
+    const objs = await svc.findAllForKey(page, key).catch((e) => { console.log(`[S3] API search failed (${e.message}) — using the folder search.`); return null; });
+    if (objs && objs.length) {
+      const where = [...new Set(objs.map((o) => o.where))].join(' + ');
+      console.log(`[S3] "${key}" → ${objs.length} file(s): ${objs.map((o) => `${o.key.split('/').pop()} [${o.where}]`).join(', ')}`);
+      const downloaded = [];
+      const failed = [];
+      for (const o of objs) {
+        try { downloaded.push(await svc._api.apiDownload(page, o.key, outDir)); } catch (err) {
+          console.log(`[S3] FAILED to download "${o.key}": ${err.message}`);
+          failed.push({ text: o.key, error: err.message });
+        }
+      }
+      if (!downloaded.some((d) => /\.pdf$/i.test(d.fileName))) console.log(`[S3] WARNING: no PDF found for "${key}" (archive or processing folder).`);
+      if (!downloaded.length) throw new Error(`all ${objs.length} matched file(s) failed to download`);
+      const emailResult = await emailResults(key, downloaded, to, where);
+      writeManifest({
+        matches: downloaded.map((d) => ({ text: d.text, fileName: d.fileName })),
+        failed, foundIn: where, emailed: emailResult.sent, emailReason: emailResult.reason || null, error: null,
+      });
+      console.log(`[S3] Done — ${downloaded.length} file(s) downloaded to ${outDir}`);
+      return;
+    }
+    if (objs && !objs.length) console.log(`[S3] Nothing for "${key}" in the archive, processing or input folders via the API — trying the folder search as well...`);
+
     // Completed documents (PDF + .json + email) now live in the archive (output) folder; the original request
     // payloads live in input. Check the archive FIRST — that's where a finished document's files are — and fall
     // back to the input folder so a payload key still resolves. Downloads whatever matched, from whichever one.
