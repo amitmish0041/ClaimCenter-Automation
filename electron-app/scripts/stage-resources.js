@@ -76,6 +76,21 @@ function shouldSkip(srcPath, name) {
   return false;
 }
 
+// A NESTED project's node_modules holding only its devDependencies (2026-10-14: policy-repo/address-helper —
+// jest/typescript/ts-jest, 116MB and ~15,000 of the installer's ~25,000 files; the Runner only loads its built
+// dist/index.js, which needs none of them). File count is what makes building, uploading, downloading and
+// installing slow. Only nested ones — a repo root's own node_modules always ships, even if its packages are
+// listed as devDependencies (Playwright is).
+function isDevOnlyNestedNodeModules(srcPath, root) {
+  if (path.basename(srcPath) !== 'node_modules') return false;
+  const owner = path.dirname(srcPath);
+  if (path.resolve(owner) === path.resolve(root)) return false;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(owner, 'package.json'), 'utf8'));
+    return !pkg.dependencies || !Object.keys(pkg.dependencies).length;
+  } catch (_) { return false; }
+}
+
 function copyTree(src, dest) {
   // maxRetries/retryDelay: confirmed live - deleting a just-rebuilt staging tree can transiently EPERM/
   // ENOTEMPTY on Windows (something - Search indexing or AV real-time scanning, never pinned down exactly
@@ -85,7 +100,7 @@ function copyTree(src, dest) {
   fs.rmSync(dest, { recursive: true, force: true, maxRetries: 10, retryDelay: 3000 });
   fs.cpSync(src, dest, {
     recursive: true,
-    filter: (source) => !shouldSkip(source, path.basename(source)),
+    filter: (source) => !shouldSkip(source, path.basename(source)) && !isDevOnlyNestedNodeModules(source, src),
   });
 }
 
@@ -116,9 +131,14 @@ console.log('── Installing pinned Playwright Chromium for both repos into a 
 // bloated the installer before both repos were aligned on one Playwright version. Wiping guarantees the
 // bundle holds only what the current repos actually resolve to, at the cost of one browser re-download per
 // build (acceptable - builds are occasional, the installer size and first-install time are what matter).
+// Faster builds (2026-10-14): install into a cache that persists between builds (so an unchanged Chromium isn't
+// re-downloaded every release), then copy ONLY the revisions the two repos currently pin into the bundle — the
+// cache may hold older revisions, but they never ship, which keeps the no-duplicates guarantee above.
+const BROWSER_CACHE = path.join(path.dirname(STAGING), 'claimcenter-runner-pw-cache');
 fs.rmSync(BROWSERS_DEST, { recursive: true, force: true, maxRetries: 10, retryDelay: 3000 });
 fs.mkdirSync(BROWSERS_DEST, { recursive: true });
-const installEnv = { ...process.env, PLAYWRIGHT_BROWSERS_PATH: BROWSERS_DEST };
+fs.mkdirSync(BROWSER_CACHE, { recursive: true });
+const installEnv = { ...process.env, PLAYWRIGHT_BROWSERS_PATH: BROWSER_CACHE };
 for (const cwd of [POLICY_SRC, CLAIMS_SRC]) {
   // Installs into BROWSERS_DEST (not each repo's own global ms-playwright cache) - run from each repo's own
   // cwd so npx resolves THAT repo's own installed @playwright/test version and fetches the matching Chromium
@@ -130,6 +150,19 @@ for (const cwd of [POLICY_SRC, CLAIMS_SRC]) {
     console.error(`playwright install chromium failed for ${cwd}`);
     process.exit(r.status || 1);
   }
+}
+
+// The revisions each repo's own playwright-core pins (full Chromium + its ffmpeg/winldd helpers).
+const wanted = new Set();
+for (const root of [POLICY_SRC, CLAIMS_SRC]) {
+  const { browsers } = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', 'playwright-core', 'browsers.json'), 'utf8'));
+  for (const b of browsers) if (['chromium', 'ffmpeg', 'winldd'].includes(b.name)) wanted.add(`${b.name}-${b.revision}`);
+}
+for (const name of wanted) {
+  const from = path.join(BROWSER_CACHE, name);
+  if (!fs.existsSync(from)) { console.error(`expected ${name} in the browser cache after install - not found`); process.exit(1); }
+  fs.cpSync(from, path.join(BROWSERS_DEST, name), { recursive: true });
+  console.log(`  bundled ${name} (from build cache)`);
 }
 
 // Drop the headless-shell builds. `playwright install chromium` fetches BOTH the full Chromium and a separate
