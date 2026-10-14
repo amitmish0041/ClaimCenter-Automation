@@ -215,6 +215,41 @@ async function ensureExpanded(page, chevronTestId, revealTestId, { log = console
   return false;
 }
 
+// Opens a folder whose tree level may not exist right now. S3 "folders" are only key prefixes: once the filing
+// job takes the last file out of output/archive, "output" and "archive" vanish from the tree entirely (CONFIRMED
+// live 2026-10-13 ~23:30 — every later search failed on a 30s click at a label that wasn't there), and come back
+// as soon as a file lands. Expanding a level re-reads it; if that level was already expanded (its child just
+// wasn't there yet), the first click collapses it and the second expands it again with a fresh listing.
+// Returns true once `node.label` is visible, false when the folder doesn't exist at the moment. Fast by design
+// (short waits) — callers poll.
+async function tryOpenFolder(page, node, { waitMs = 600 } = {}) {
+  const label = page.locator(`[data-testid="${node.label}"]`).first();
+  if (await label.isVisible().catch(() => false)) return true;
+  for (let i = 0; i < node.chevrons.length; i++) {
+    const reveal = page.locator(`[data-testid="${node.chevrons[i + 1] || node.label}"]`).first();
+    if (await reveal.isVisible().catch(() => false)) continue;
+    const chevron = page.locator(`[data-testid="${node.chevrons[i]}"]`).first();
+    if (!(await chevron.isVisible().catch(() => false))) return false;
+    let shown = false;
+    for (let a = 0; a < 2 && !shown; a++) {
+      await chevron.click().catch(() => {});
+      shown = await reveal.waitFor({ state: 'visible', timeout: waitMs }).then(() => true).catch(() => false);
+    }
+    if (!shown) return false;
+  }
+  return label.isVisible().catch(() => false);
+}
+
+// The tree caches each level's children once read — collapsing and re-expanding "smartcomm" does NOT pick up
+// an "output" folder created after that (CONFIRMED live 2026-10-14: the archive watch and the fallback search
+// both kept missing a document that landed while the folder was absent). A page reload re-reads it, and is
+// quick: ~1.6s until the tree is back, Planet still Test (CONFIRMED live). The folder view itself can't stand
+// in — it lists at most 1,000 keys alphabetically, and input/ + logs/ fill those before output/ is reached.
+async function reloadTree(page) {
+  await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+  await page.locator('[data-testid="chevron-cc/outbound-files/smartcomm"]').first().waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+}
+
 // Returns [{ text, row: Locator }] for every visible row matching `key` under the given tree node
 // ({chevron, label} data-testids — see OUTPUT_NODE/INPUT_NODE above). Each chevron expands its own parent
 // level, VERIFIED (see ensureExpanded above) rather than a blind click-and-hope, since the tree can silently
@@ -228,6 +263,14 @@ async function searchNode(page, node, key, { log = console.log, folderDescriptio
     const revealTestId = i + 1 < node.chevrons.length ? node.chevrons[i + 1] : node.label;
     const ok = await ensureExpanded(page, node.chevrons[i], revealTestId, { log });
     if (!ok) log(`[S3] WARNING: never confirmed "${node.chevrons[i]}" expanded "${revealTestId}" after retries — continuing anyway, the label click below will surface a clear error if the tree genuinely isn't in the right state.`);
+  }
+  if (!(await page.locator(`[data-testid="${node.label}"]`).first().isVisible().catch(() => false))
+    && !(await tryOpenFolder(page, node))
+    && !(await reloadTree(page).then(() => ensureTestPlanet(page, { log })).then(() => tryOpenFolder(page, node, { waitMs: 1500 })))) {
+    // The folder isn't in the tree at all right now — it holds no files at the moment (see tryOpenFolder), so
+    // nothing can match yet. 0 matches, not a 30s click timeout; polling callers simply look again.
+    log(`[S3] "${folderDescription}" isn't in the S3 tree right now (it has no files at the moment) — 0 matches for "${key}".`);
+    return [];
   }
   try {
     await page.locator(`[data-testid="${node.label}"]`).click();
@@ -407,6 +450,31 @@ async function downloadMatches(page, matches, outDir, { log = console.log } = {}
 async function downloadFirstValidPdf(page, key, outDir, { log = console.log, maxWaitMs = Number(process.env.SMARTCOMM_S3_WAIT_MS) || 300000, pollMs = 15000 } = {}) {
   const fs = require('fs');
   const deadline = Date.now() + maxWaitMs;
+  // Through the admin UI's own API when its token is available (see apiList) — a 2s poll instead of a 15s one,
+  // and immune to the archive folder vanishing from the tree whenever it's empty.
+  const holder = await ensureApiAuth(page, { log }).catch(() => ({}));
+  if (holder.authorization) {
+    let lastCount = 0;
+    for (let attempt = 1; ; attempt++) {
+      const objs = (await apiList(page, ARCHIVE_PREFIX, { log }).catch(() => [])).filter((o) => String(o.key).includes(key));
+      lastCount = objs.length;
+      const pdf = objs.find((o) => /\.pdf$/i.test(o.key));
+      if (pdf) {
+        try {
+          const d = await apiDownload(page, pdf.key, outDir, { log });
+          if (fs.readFileSync(d.localPath).slice(0, 5).toString('latin1') === '%PDF-') { log(`[S3] downloaded ${d.fileName} via the admin API`); return { downloaded: d }; }
+          fs.rmSync(d.localPath, { force: true });
+        } catch (e) { log(`[S3] ${pdf.key.split('/').pop()} listed but its download failed (${e.message})`); }
+      }
+      if (Date.now() + 2000 > deadline) break;
+      if (attempt % 15 === 1) log(`[S3] "${key}": not in the archive yet — polling the admin API every 2s (${Math.round((deadline - Date.now()) / 1000)}s left)...`);
+      await page.waitForTimeout(2000);
+    }
+    const waited = `${Math.round(maxWaitMs / 60000)} min`;
+    return lastCount
+      ? { error: `"${key}" matched ${lastCount} S3 object(s) under ClaimCenter Outbound > smartcomm > output > archive, but NONE of them were a real PDF within ${waited}.` }
+      : { error: `no S3 object matched Identifier "${key}" under ClaimCenter Outbound > smartcomm > output > archive within ${waited}.` };
+  }
   let lastMatchCount = 0;
   for (let attempt = 1; ; attempt++) {
     // The .pdf first (the .json filing-metadata sibling is fetched separately afterwards) — one download
@@ -440,6 +508,18 @@ async function downloadFirstValidPdf(page, key, outDir, { log = console.log, max
 // template identity (see validationService's metadata checks). Returns { metadata } parsed, or { error }.
 async function downloadArchiveMetadataJson(page, identifier, outDir, { log = console.log } = {}) {
   const fs = require('fs');
+  const holder = await ensureApiAuth(page, { log }).catch(() => ({}));
+  if (holder.authorization) {
+    const want = `${String(identifier).toLowerCase()}.json`;
+    const obj = (await apiList(page, ARCHIVE_PREFIX, { log }).catch(() => [])).find((o) => String(o.key).split('/').pop().toLowerCase() === want);
+    if (!obj) return { error: `no "${identifier}.json" filing-metadata object found in the archive for Identifier "${identifier}".` };
+    const d = await apiDownload(page, obj.key, outDir, { log });
+    try {
+      return { metadata: JSON.parse(fs.readFileSync(d.localPath, 'utf8')), fileName: d.fileName, localPath: d.localPath };
+    } catch (e) {
+      return { error: `downloaded "${d.fileName}" but could not parse it as JSON: ${e.message}` };
+    }
+  }
   const matches = await searchSmartComm(page, identifier, { log });
   // Exactly "<identifier>.json" — NOT "<identifier>_Email.json" (the email sibling), NOT the ".pdf".
   const want = `${String(identifier).toLowerCase()}.json`;
@@ -452,6 +532,89 @@ async function downloadArchiveMetadataJson(page, identifier, outDir, { log = con
     return { error: `downloaded "${dl.fileName}" but could not parse it as JSON: ${e.message}` };
   }
 }
+
+// ── The admin UI's own data API ───────────────────────────────────────────────────────────────────────
+// CONFIRMED live 2026-10-14 (recorded the UI's requests): listing a folder is GET <api>/api/s3/list?prefix=<key
+// path, no planet> → [{ key, size, lastModified }] (keys come back WITH the planet, "test/cc/..."), and a
+// download is GET <api>/api/s3/object?key=<full key>; the API host is per planet (".../donegal-dngl-test-
+// igintegrationadmin..."), and every call carries the UI's own bearer token. Calling it directly lets the
+// archive be polled every few hundred ms — needed because a finished document now survives there only a second
+// or two before the filing job takes it (SmartCOMM job 1629 uploaded a pair at 00:05:45 that a UI-driven watch,
+// reloading every ~3s, never saw). The token is read off the UI's own requests and kept in memory only — never
+// logged or written anywhere.
+const apiAuthByPage = new WeakMap();
+function apiHolder(page) {
+  if (!apiAuthByPage.has(page)) {
+    const holder = { base: null, authorization: null };
+    page.on('request', (req) => {
+      const m = req.url().match(/^(https:\/\/[^/]+)\/api\/s3\//);
+      const authorization = m && req.headers().authorization;
+      if (authorization) { holder.base = m[1]; holder.authorization = authorization; }
+    });
+    apiAuthByPage.set(page, holder);
+  }
+  return apiAuthByPage.get(page);
+}
+
+// Makes the UI issue one API call (listing the always-present input folder) so its current token is captured.
+async function ensureApiAuth(page, { log = console.log, force = false } = {}) {
+  const holder = apiHolder(page);
+  if (holder.authorization && !force) return holder;
+  if (force) holder.authorization = null;
+  const inputLabel = page.locator(`[data-testid="${INPUT_NODE.label}"]`).first();
+  if (!(await inputLabel.isVisible().catch(() => false))) await tryOpenFolder(page, INPUT_NODE, { waitMs: 2000 });
+  await inputLabel.click().catch(() => {});
+  for (let i = 0; i < 40 && !holder.authorization; i++) await page.waitForTimeout(250);
+  if (!holder.authorization) log('[S3] couldn\'t pick up the admin UI\'s API token — falling back to driving the UI.');
+  return holder;
+}
+
+async function apiGet(page, pathAndQuery, { log } = {}) {
+  let holder = await ensureApiAuth(page, { log });
+  if (!holder.authorization) throw new Error('S3 API token unavailable');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(`${holder.base}${pathAndQuery}`, { headers: { authorization: holder.authorization, accept: '*/*' } });
+    if (res.status === 401 || res.status === 403) { holder = await ensureApiAuth(page, { log, force: true }); continue; }
+    if (!res.ok) throw new Error(`S3 API ${res.status} for ${pathAndQuery.split('?')[0]}`);
+    return res;
+  }
+  throw new Error('S3 API kept rejecting the token');
+}
+
+async function apiList(page, prefix, opts) {
+  const res = await apiGet(page, `/api/s3/list?prefix=${encodeURIComponent(prefix)}`, opts);
+  const data = await res.json();
+  return Array.isArray(data) ? data : (data.items || data.objects || []);
+}
+
+// Downloads one object to outDir (file named after the key's last segment). Handles the API answering with the
+// bytes themselves or with a JSON pointer to a pre-signed URL.
+async function apiDownload(page, key, outDir, opts) {
+  const fs = require('fs');
+  const path = require('path');
+  const res = await apiGet(page, `/api/s3/object?key=${encodeURIComponent(key)}`, opts);
+  let buf;
+  if (/json/i.test(res.headers.get('content-type') || '')) {
+    const data = await res.json();
+    const url = data && (data.url || data.presignedUrl || data.downloadUrl);
+    if (url) {
+      const r2 = await fetch(url);
+      if (!r2.ok) throw new Error(`S3 object download ${r2.status}`);
+      buf = Buffer.from(await r2.arrayBuffer());
+    } else {
+      buf = Buffer.from(JSON.stringify(data));
+    }
+  } else {
+    buf = Buffer.from(await res.arrayBuffer());
+  }
+  fs.mkdirSync(outDir, { recursive: true });
+  const fileName = key.split('/').pop();
+  const localPath = path.join(outDir, fileName);
+  fs.writeFileSync(localPath, buf);
+  return { text: key, fileName, localPath };
+}
+
+const ARCHIVE_PREFIX = 'cc/outbound-files/smartcomm/output/archive';
 
 // Watches output/archive while a document is being completed, and downloads its <identifier>.pdf/.json the
 // moment they land. CONFIRMED live 2026-10-13 (watched every ~1s while one DIG108 document completed): the pair
@@ -476,27 +639,81 @@ async function watchArchiveForIdentifier(page, identifierPromise, outDir, { log 
     .finally(() => { idSettled = true; idKnownAt = Date.now(); });
 
   await ensureTestPlanet(page, { log });
-  for (let i = 0; i < OUTPUT_NODE.chevrons.length; i++) {
-    await ensureExpanded(page, OUTPUT_NODE.chevrons[i], OUTPUT_NODE.chevrons[i + 1] || OUTPUT_NODE.label, { log });
+  const GUID_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(pdf|json)$/i;
+  const wanted = () => (identifier ? [`${identifier}.pdf`, `${identifier}.json`] : []);
+  const got = new Map(); // file name (lower case) -> { fileName, localPath }
+  const finish = () => {
+    const pick = (ext) => (identifier && got.get(`${identifier}.${ext}`.toLowerCase())) || null;
+    const result = identifier ? { pdf: pick('pdf'), json: pick('json') } : null;
+    // Anything else caught is another document that happened to complete meanwhile — not ours, drop it.
+    for (const [, d] of got) {
+      if (!result || ![result.pdf, result.json].includes(d)) fs.rmSync(d.localPath, { force: true });
+    }
+    if (result && result.pdf && fs.readFileSync(result.pdf.localPath).slice(0, 5).toString('latin1') !== '%PDF-') {
+      log(`[S3] archive watch: ${result.pdf.fileName} isn't a real PDF — ignoring it.`);
+      fs.rmSync(result.pdf.localPath, { force: true });
+      result.pdf = null;
+    }
+    return result;
+  };
+  const shouldStop = () => (idSettled && !identifier)
+    || (identifier && wanted().every((k) => got.has(k.toLowerCase())))
+    || (idSettled && identifier && Date.now() - idKnownAt > afterIdMs);
+
+  // Preferred: poll the admin UI's own list API every few hundred ms (see apiList) — a document can now be gone
+  // within a second or two of landing.
+  const holder = await ensureApiAuth(page, { log });
+  if (holder.authorization) {
+    const listNames = async () => (await apiList(page, ARCHIVE_PREFIX, { log })).map((o) => o.key);
+    const baseline = new Set(await listNames().catch(() => []));
+    const deadline = Date.now() + maxMs;
+    while (Date.now() < deadline && !shouldStop()) {
+      let keys;
+      try { keys = await listNames(); } catch (e) { log(`[S3] archive watch: list failed (${e.message}) — retrying.`); await page.waitForTimeout(1000); continue; }
+      for (const fullKey of keys) {
+        const name = fullKey.split('/').pop();
+        const m = name.match(GUID_FILE);
+        if (!m || got.has(name.toLowerCase())) continue;
+        const isOurs = identifier && m[1].toLowerCase() === identifier.toLowerCase();
+        if (!isOurs && (identifier || baseline.has(fullKey))) continue;
+        try {
+          got.set(name.toLowerCase(), await apiDownload(page, fullKey, dir, { log }));
+          log(`[S3] archive watch: caught ${name} as it landed`);
+        } catch (e) {
+          log(`[S3] archive watch: ${name} listed but its download failed (${e.message}) — likely filed away mid-download.`);
+        }
+      }
+      await page.waitForTimeout(250);
+    }
+    return finish();
   }
+
+  // Fallback: drive the UI (slower — only when the API token couldn't be picked up).
   const archiveLabel = page.locator(`[data-testid="${OUTPUT_NODE.label}"]`).first();
   const parentLabel = page.locator('[data-testid="label-cc/outbound-files/smartcomm/output"]').first();
   const rowLocator = page.locator('table tbody tr, [role="row"]');
   const filter = page.getByPlaceholder('Filter by key');
   const listKeys = async () => (await rowLocator.allInnerTexts().catch(() => []))
     .map((t) => t.trim().split(/\s+/)[0]).filter(Boolean);
-  await archiveLabel.click();
-  if (await filter.isVisible().catch(() => false)) await filter.fill('').catch(() => {});
-  await page.waitForTimeout(800);
-  const baseline = new Set(await listKeys());
-  const got = new Map(); // key -> { fileName, localPath }
-  const GUID_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(pdf|json)$/i;
+  // The archive folder only exists while it holds files (see tryOpenFolder) — when it's absent, everything that
+  // shows up later is new, so the baseline is empty and the loop keeps re-reading the tree until it appears.
+  const openArchive = async (waitMs) => {
+    if (!(await tryOpenFolder(page, OUTPUT_NODE, { waitMs }))) return false;
+    await archiveLabel.click().catch(() => {});
+    if (await filter.isVisible().catch(() => false)) await filter.fill('').catch(() => {});
+    await page.waitForTimeout(500);
+    return true;
+  };
+  let opened = await openArchive(1500);
+  const baseline = new Set(opened ? await listKeys() : []);
+  if (!opened) log('[S3] archive watch: output/archive is empty right now (not in the tree) — watching for it to appear.');
   const deadline = Date.now() + maxMs;
-  const wanted = () => (identifier ? [`${identifier}.pdf`, `${identifier}.json`] : []);
-  while (Date.now() < deadline) {
-    if (idSettled && !identifier) break;
-    if (identifier && wanted().every((k) => got.has(k.toLowerCase()))) break;
-    if (idSettled && identifier && Date.now() - idKnownAt > afterIdMs) break;
+  while (Date.now() < deadline && !shouldStop()) {
+    if (!opened) {
+      await reloadTree(page); // see reloadTree — the only way a newly created archive folder shows up
+      opened = await openArchive(800);
+      if (!opened) { await page.waitForTimeout(intervalMs); continue; }
+    }
     for (const key of await listKeys()) {
       const m = key.match(GUID_FILE);
       if (!m || got.has(key.toLowerCase())) continue;
@@ -514,24 +731,12 @@ async function watchArchiveForIdentifier(page, identifierPromise, outDir, { log 
     }
     await parentLabel.click().catch(() => {});
     await page.waitForTimeout(150);
+    // Emptied by the filing job since the last look → the folder is gone again; re-find it next pass.
+    if (!(await archiveLabel.isVisible().catch(() => false))) { opened = false; continue; }
     await archiveLabel.click().catch(() => {});
     await page.waitForTimeout(intervalMs);
   }
-  const pick = (ext) => (identifier && got.get(`${identifier}.${ext}`.toLowerCase())) || null;
-  const result = identifier ? { pdf: pick('pdf'), json: pick('json') } : null;
-  // Anything else caught is another document that happened to complete meanwhile — not ours, drop it.
-  for (const [key, d] of got) {
-    if (!result || ![result.pdf, result.json].includes(d)) fs.rmSync(d.localPath, { force: true });
-  }
-  if (result && result.pdf) {
-    const buf = fs.readFileSync(result.pdf.localPath);
-    if (buf.slice(0, 5).toString('latin1') !== '%PDF-') {
-      log(`[S3] archive watch: ${result.pdf.fileName} isn't a real PDF — ignoring it.`);
-      fs.rmSync(result.pdf.localPath, { force: true });
-      result.pdf = null;
-    }
-  }
-  return result;
+  return finish();
 }
 
 module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, ensureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches, downloadFirstValidPdf, downloadArchiveMetadataJson, watchArchiveForIdentifier };

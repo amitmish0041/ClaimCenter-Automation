@@ -27,7 +27,12 @@ test.describe('SmartCOMM Template Validator', () => {
   });
 
   test.afterAll(async () => {
-    if (templateResult) await sendReport(templateResult);
+    if (templateResult) {
+      // Each failure → an existing SMART Jira bug (or "NEW") in the report's Jira column — see jiraBugService.
+      await require('../../helpers/smartComm/jiraBugService').annotateTemplateResults([templateResult], { log: (m) => console.log(`[SmartComm] ${m}`) })
+        .catch((err) => console.log(`[SmartComm] Jira bug mapping skipped (${err.message})`));
+      await sendReport(templateResult);
+    }
     await page.close();
   });
 

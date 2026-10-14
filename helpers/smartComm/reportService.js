@@ -13,6 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const ExcelJS = require('exceljs');
+const jiraBugService = require('./jiraBugService');
 let nodemailer;
 try { nodemailer = require('nodemailer'); } catch (_) { /* reported lazily in sendReport */ }
 
@@ -253,8 +254,9 @@ function writeScenarioSheet(ws, s) {
       ws.addRow([]);
       return;
     }
-    styleHeaderRow(ws.addRow(['#', 'Requirement', 'Result', 'Expected', 'Actual', 'Reason']));
-    for (const v of list) styleResultRow(ws.addRow([v.id || '', v.description || '', v.result, v.expected, v.actual, v.reason || '']), v.result);
+    // "Jira": the existing SMART bug a failure matches (or "NEW") — see jiraBugService; blank when not mapped.
+    styleHeaderRow(ws.addRow(['#', 'Requirement', 'Result', 'Expected', 'Actual', 'Reason', 'Jira']));
+    for (const v of list) styleResultRow(ws.addRow([v.id || '', v.description || '', v.result, v.expected, v.actual, v.reason || '', jiraBugService.jiraCell(v)]), v.result);
     ws.addRow([]);
   };
   if (metaRows.length) addValidationTable('Document Metadata — ClaimCenter filing .json (S3 archive, co-located with the PDF)', metaRows);

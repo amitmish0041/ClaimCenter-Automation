@@ -37,6 +37,7 @@ const { chromium } = require('playwright');
 const validationService = require('../helpers/smartComm/validationService');
 const { createS3SessionManager } = require('../helpers/s3Download/s3SessionManager');
 const bulkReportService = require('../helpers/smartComm/bulkReportService');
+const jiraBugService = require('../helpers/smartComm/jiraBugService');
 const catalogService = require('../helpers/smartComm/catalogService');
 const { loginAsAdmin } = require('../helpers/claimCenterBase');
 
@@ -122,6 +123,15 @@ async function main() {
 
   await s3Session.close();
   await browser.close();
+
+  // Each failure → an existing SMART Jira bug where one matches (or "NEW"), so nobody logs a duplicate — needs
+  // JIRA_EMAIL/JIRA_API_TOKEN (runner Settings tab); without them the report just has no Jira column filled in.
+  try {
+    await jiraBugService.annotateTemplateResults(templateResults, { log: (m) => console.log(`[Bulk] ${m}`) });
+    fs.writeFileSync(outPath, JSON.stringify(templateResults, null, 2));
+  } catch (err) {
+    console.log(`[Bulk] Jira bug mapping skipped (${err.message})`);
+  }
   console.log(`\n[Bulk] Raw results written to ${outPath}`);
 
   await bulkReportService.sendBulkReport(templateResults);

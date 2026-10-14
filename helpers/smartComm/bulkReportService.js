@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const reportService = require('./reportService');
+const jiraBugService = require('./jiraBugService');
 let nodemailer;
 try { nodemailer = require('nodemailer'); } catch (_) { /* reported lazily in sendBulkReport */ }
 
@@ -180,6 +181,55 @@ function summarizeConditional(t) {
   return { addlRecipCell, choicesCell };
 }
 
+// Every distinct failure (per template) with the Jira bug it maps to — see jiraBugService.annotateTemplateResults.
+// Only items it actually annotated are included (none when Jira wasn't reachable/configured), so this stays
+// silent rather than claiming everything is "NEW" when nothing was ever looked up.
+function jiraFindings(templateResults) {
+  const byKey = new Map();
+  for (const t of templateResults) {
+    for (const s of t.scenarios || []) {
+      const add = (item, what) => {
+        if (item.knownBug === undefined) return;
+        const key = `${t.digNumber}|${what}`;
+        if (!byKey.has(key)) byKey.set(key, { dig: t.digNumber, what, scenarios: [], jira: jiraBugService.jiraCell(item), known: item.knownBug, similar: item.similarBug });
+        byKey.get(key).scenarios.push(s.scenarioId);
+      };
+      if (s.status === 'ERROR') add(s, `Scenario error: ${String(s.reason || '').slice(0, 160)}`);
+      for (const v of s.validations || []) if (v.result === 'FAIL') add(v, `${v.id} ${v.description}`);
+      for (const c of s.interactiveChecks || []) if (c.result === 'FAIL') add(c, `${c.id} ${c.dictionaryField || c.label || ''} — ${String(c.reason || '').slice(0, 140)}`);
+    }
+  }
+  return [...byKey.values()].sort((a, b) => Number(Boolean(a.known)) - Number(Boolean(b.known)) || a.dig.localeCompare(b.dig, undefined, { numeric: true }));
+}
+
+function jiraFindingsHtml(templateResults) {
+  const rows = jiraFindings(templateResults);
+  if (!rows.length) return '';
+  const td = 'padding:5px 8px;border:1px solid #ccc;font-family:Arial,sans-serif;font-size:12px;vertical-align:top;';
+  const th = 'padding:6px 8px;border:1px solid #ccc;background:#343a40;color:#fff;font-family:Arial,sans-serif;font-size:12px;text-align:left;';
+  const knownOpen = rows.filter((r) => r.known && r.known.open).length;
+  const knownClosed = rows.filter((r) => r.known && !r.known.open).length;
+  const fresh = rows.filter((r) => !r.known).length;
+  return `
+    <h3 style="font-family:Arial,sans-serif;margin:24px 0 4px;">Findings vs Jira (SMART)</h3>
+    <div style="font-family:Arial,sans-serif;font-size:12px;color:#444;margin-bottom:6px;"><b>${fresh}</b> new finding(s) with no matching bug — log these; <b>${knownOpen}</b> already logged as an open bug; <b>${knownClosed}</b> match a Closed/Rejected bug (re-check: possible regression).</div>
+    <table style="border-collapse:collapse;width:100%;margin-bottom:8px;">
+      <tr><th style="${th}">Template</th><th style="${th}">Finding</th><th style="${th}">Scenarios</th><th style="${th}">Jira</th></tr>
+      ${rows.map((r) => `<tr><td style="${td}">${escapeHtml(r.dig)}</td><td style="${td}">${escapeHtml(r.what)}</td><td style="${td}">${r.scenarios.map(escapeHtml).join('<br/>')}</td><td style="${td}${r.known ? '' : 'font-weight:bold;color:#c0392b;'}">${escapeHtml(r.jira)}</td></tr>`).join('')}
+    </table>`;
+}
+
+function writeJiraFindingsSheet(ws, templateResults) {
+  const rows = jiraFindings(templateResults);
+  ws.addRow(['Findings vs Jira (SMART)']).font = { bold: true, size: 14 };
+  if (!rows.length) { ws.addRow(['Not mapped — Jira credentials not set or Jira unreachable for this run.']); return; }
+  ws.addRow(['"NEW" findings have no matching bug yet — log those; the rest are already in Jira (re-check any that match a Closed bug).']);
+  ws.addRow([]);
+  reportService.styleHeaderRow(ws.addRow(['Template', 'Finding', 'Scenarios', 'Jira']));
+  for (const r of rows) reportService.styleResultRow(ws.addRow([r.dig, r.what, r.scenarios.join(', '), r.jira]), r.known ? 'BLOCKED' : 'FAIL');
+  ws.columns = [{ width: 12 }, { width: 80 }, { width: 40 }, { width: 60 }];
+}
+
 function buildHtmlReport(templateResults) {
   const totals = templateResults.reduce((acc, t) => {
     acc.scenarios += t.scenarioCount || 0;
@@ -296,6 +346,7 @@ function buildHtmlReport(templateResults) {
       ${templateRows}
     </table>
 
+    ${jiraFindingsHtml(templateResults)}
     ${patternTable('Common FAIL patterns (content validation)', failPatterns, 'FAIL')}
     ${patternTable('Common BLOCKED patterns (couldn’t evaluate)', blockedPatterns, 'BLOCKED')}
     ${scenarioReasonTable}
@@ -418,8 +469,9 @@ function buildBulkExcelReport(templateResults) {
   }
 
   writeCommonIssuesSheet(wb.addWorksheet('Common Issues'), templateResults);
+  writeJiraFindingsSheet(wb.addWorksheet('Findings vs Jira'), templateResults);
 
-  const usedNames = new Set(['Summary', 'Common Issues']);
+  const usedNames = new Set(['Summary', 'Common Issues', 'Findings vs Jira']);
   for (const t of templateResults) {
     for (const s of t.scenarios || []) {
       const ws = wb.addWorksheet(reportService.sanitizeSheetName(s.scenarioId, usedNames));
