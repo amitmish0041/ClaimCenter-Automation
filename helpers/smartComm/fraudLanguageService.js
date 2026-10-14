@@ -64,15 +64,29 @@ function loadFraudLanguageTable({ refresh = false } = {}) {
   if (!ws) throw new Error(`fraudLanguageService: "${filePath}" has no "Fraud Language" tab`);
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
   // Header row: S.No. | State | Policy State Code | Fraud Language | Conditions | Effective Date | Location/Size | Citation
-  cache = rows.slice(1)
+  // — found by name, not assumed to be row 1: CONFIRMED live 2026-10-14 the sheet gained note rows above it
+  // ("Fraud Language Font Size | Arial Size 9", ...), and reading from row 2 turned those notes and the header
+  // itself into "states" — e.g. a "State [Conditions]: Fraud Language" entry that made DIG58 report "another
+  // state's fraud wording" on letters that were correct. Only rows naming a real state are kept.
+  const cell = (r, i) => String(r[i] || '').trim();
+  const headerIdx = rows.findIndex((r) => r.some((c) => /^state$/i.test(String(c).trim())) && r.some((c) => /^fraud language$/i.test(String(c).trim())));
+  const colOf = (name, fallback) => {
+    const i = headerIdx >= 0 ? rows[headerIdx].findIndex((c) => String(c).trim().toLowerCase() === name) : -1;
+    return i >= 0 ? i : fallback;
+  };
+  const cState = colOf('state', 1);
+  const cText = colOf('fraud language', 3);
+  const cCond = colOf('conditions', 4);
+  const cCite = colOf('citation', 7);
+  cache = rows.slice(headerIdx + 1)
     .map((r) => ({
-      stateName: String(r[1] || '').trim(),
-      stateCode: STATE_NAME_TO_CODE[String(r[1] || '').trim()],
-      fraudLanguage: String(r[3] || '').trim(),
-      conditions: String(r[4] || '').trim(),
-      citation: String(r[7] || '').trim(),
+      stateName: cell(r, cState),
+      stateCode: STATE_NAME_TO_CODE[cell(r, cState)],
+      fraudLanguage: cell(r, cText),
+      conditions: cell(r, cCond),
+      citation: cell(r, cCite),
     }))
-    .filter((r) => r.stateName);
+    .filter((r) => r.stateName && r.stateCode);
   cachedFilePath = filePath;
   return cache;
 }

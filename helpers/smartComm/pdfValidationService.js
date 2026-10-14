@@ -47,7 +47,14 @@ async function extractPdfText(pdfPath) {
   if (!pdfParse) throw new Error('pdf-parse is not installed — run npm install in ClaimCenter-Automation');
   const buffer = fs.readFileSync(pdfPath);
   const data = await pdfParse(buffer);
-  return data.text;
+  // Page footers ("DIG 58Page 2 of 6") land in the middle of any paragraph that crosses a page break —
+  // CONFIRMED live 2026-10-14: DIG58's Pennsylvania fraud notice was printed correctly but read as
+  // "...for the purpose of misleading, DIG 58Page 2 of 6 information concerning..." and failed its exact match.
+  // Moved to the end instead of dropped, so the body reads continuously and a form-number check still finds them.
+  const FOOTER_RE = /^\s*(?:DIG\s*\d+[A-Z]*\s*)?Page\s+\d+\s+of\s+\d+\s*$/i;
+  const lines = String(data.text || '').split('\n');
+  const footers = lines.filter((l) => FOOTER_RE.test(l));
+  return footers.length ? `${lines.filter((l) => !FOOTER_RE.test(l)).join('\n')}\n${footers.join('\n')}` : data.text;
 }
 
 function resolvePath(obj, dotted) {
