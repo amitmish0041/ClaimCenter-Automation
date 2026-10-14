@@ -35,7 +35,16 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
   }
 
   const { requirements, sourceFile, mode, mentionsFraudLanguage } = await templateRequirementService.getRequirements(template, catalogService.DATA_DIR);
-  if (!requirements.length) {
+  // Overlay forms (catalog Overlay = "Yes", e.g. DIG150MIC): the mapping doc is scanned page images — no text,
+  // so no static-wording requirements can be derived (CONFIRMED 2026-10-14: DIG150MIC's .docx has 0 text runs,
+  // only images). They're still validated on DATA: every Data Dictionary field with an Xpath for this DIG is
+  // checked against the real payload and the generated PDF (buildXpathRequirements, unscoped), plus the
+  // archive filing metadata. The earlier "Invalid PDF structure" was the pre-archive download grabbing the
+  // filing .json instead of the PDF (results/smartComm/downloads, 2026-10-07: a 176-byte JSON) — fixed since.
+  if (!requirements.length && template.overlay === 'Yes') {
+    template.overlayMode = true;
+    console.log(`[SmartComm] ${dig}: overlay form — mapping doc has no text, so validating data fields (Data Dictionary Xpaths vs payload/PDF) and filing metadata only; static wording isn't checked.`);
+  } else if (!requirements.length) {
     // CONFIRMED live 2026-10-07 (DIG150MIC): this previously always blamed "not found / not a .docx" even
     // when getRequirements had ALREADY found and parsed a real .docx (via resolveLocalTemplatePath's fuzzy
     // fallback — the catalog's OWN mapped path pointed at a ".pdf" that doesn't exist, but a same-stem .docx
@@ -52,19 +61,7 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
     // state "ENTER CONTENT HERE" watermark), and its generated PDF also fails `pdf-parse` ("Invalid PDF
     // structure"). Continuing just traded one clean BLOCKED result for a confusing crash further downstream,
     // with no actual validation gained — reverted per user direction 2026-10-07. An "overlay" template is
-    // flagged clearly and immediately instead, rather than attempting a session this tool doesn't support yet.
-    if (template.overlay === 'Yes') {
-      return blockedTemplateResult(
-        dig,
-        `${dig} (${template.documentName}) is marked "overlay" in the SmartCOMM catalog — this automation does not ` +
-        `support overlay-type templates yet. Confirmed live: its live editor content renders inside a separate ` +
-        `nested preview iframe this tool's field-scanner doesn't look inside (0 merge fields found despite the ` +
-        `Data Dictionary tracking real fields for it), and its generated PDF also fails text extraction ("Invalid ` +
-        `PDF structure"). Not a missing-file or configuration problem — this document type needs its own, not-yet-` +
-        `built support.`,
-        template
-      );
-    }
+    // flagged clearly and immediately instead. (Superseded 2026-10-14: overlay forms now run in data-only mode — see above.)
     const reason = sourceFile
       ? `No requirements could be derived for ${dig} (${template.documentName}) — its template file WAS found and parsed ` +
         `(${sourceFile}, mode: ${mode || 'unknown'}), but ${mode === 'heuristic' || mode === 'heuristic-doc' ? 'the heuristic classifier' : 'parsing'} ` +
@@ -658,6 +655,17 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     const validations = pdfValidationService.evaluateRequirements([...reportableRequirements, ...fraudRequirements, ...xpathRequirements], text, context);
     explainFraudLanguageFailures(validations, text, fraudDetails);
     annotateInteractiveEditFailures(validations, interactiveChecks);
+    // An overlay form can be pure page images with no text layer (CONFIRMED live 2026-10-14, DIG150MIC: the
+    // 2-page Michigan "Rights and Responsibilities" pamphlet, 6 characters of extractable text, no claim data
+    // printed — same as its mapping doc's page images). Text checks can't say anything about such a document:
+    // report them as not verifiable rather than as missing content.
+    if (template.overlayMode && String(text || '').replace(/\s+/g, '').length < 50) {
+      for (const v of validations) {
+        if (v.result !== 'FAIL') continue;
+        v.result = 'BLOCKED';
+        v.reason = 'Overlay form printed as page images only (no text layer), so this value can\'t be read from the PDF — not verifiable, not a defect.';
+      }
+    }
     // Append the archive .json filing-metadata checks (META*) so they count toward the scenario result and
     // render in their own report table (see reportService). A wrong claim #/template here is a real failure.
     if (metadataChecks && metadataChecks.length) validations.push(...metadataChecks);
@@ -1662,7 +1670,8 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
   };
   const rows = dataDictionaryService.getAttributesForTemplate(template.digNumber)
     .filter((r) => r.xpath && r.xpath.trim())
-    .filter(referencedByTemplate);
+    // An overlay form has no text requirements to scope by — check every dictionary field for this DIG.
+    .filter((r) => template.overlayMode || referencedByTemplate(r));
   const requirements = [];
   let n = 0;
   let fieldScoped = 0;
