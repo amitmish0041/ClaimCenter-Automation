@@ -202,6 +202,15 @@ function resolveWhere(root, targetPath, whereText) {
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 function formatLongDate(d) { return `${MONTH_NAMES[d.getUTCMonth()]} ${String(d.getUTCDate()).padStart(2, '0')}, ${d.getUTCFullYear()}`; }
 function toDate(v) { const d = new Date(v); return isNaN(d.getTime()) ? null : d; }
+// "Current date" = today in the company's own timezone (US Eastern), which is the date the letter prints —
+// returned as a UTC-midnight Date so formatLongDate's UTC getters read that same calendar day. CONFIRMED live
+// 2026-10-13 20:01 EDT: formatting new Date() with those UTC getters gave "October 14" once UTC passed midnight,
+// FAILing every Date of Letter check run after 8 PM Eastern against a correctly dated "October 13" letter.
+function todayEastern() {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(new Date());
+  const part = (type) => Number(parts.find((p) => p.type === type).value);
+  return new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
+}
 
 // ── Top-level expression evaluator ──────────────────────────────────────────────────────────────────
 
@@ -252,7 +261,17 @@ function evalExpr(root, exprRaw, depth) {
   const expr = cleanExpr(exprRaw);
   if (!expr) return { value: undefined };
 
-  if (/^current date$/i.test(expr)) return { value: formatLongDate(new Date()) };
+  if (/^current date$/i.test(expr)) {
+    const eastern = formatLongDate(todayEastern());
+    const utc = formatLongDate(new Date());
+    // CONFIRMED live 2026-10-13: ClaimCenter/SmartCOMM date the letter in UTC — one generated at 8:13 PM
+    // Eastern printed "October 14". Accepted (so it doesn't FAIL every check run in that window) but noted,
+    // since it IS the next day's date for the person sending it.
+    return utc === eastern ? { value: eastern } : {
+      value: eastern, alsoAccept: [utc],
+      alsoAcceptNote: `Letter is dated ${utc} — the UTC date; it is still ${eastern} in Eastern time, so any letter generated after 8 PM Eastern (7 PM in winter) carries the next day's date.`,
+    };
+  }
 
   // "Label - <path> (Concat[en]ated) Label2 - <path2>" — CONFIRMED live (From Name, From Phone): a labeled
   // multi-part format distinct from the plain "+"/juxtaposition concatenation forms below. The labels

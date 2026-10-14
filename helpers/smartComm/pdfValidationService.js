@@ -31,34 +31,16 @@ function buildLabelSynonymGroups() {
   return byPath;
 }
 const LABEL_SYNONYM_GROUPS = buildLabelSynonymGroups();
-// CONFIRMED live 2026-10-13 (DIG108): a requirement's expected text can carry a short lead-in fused onto the
-// label itself — the Word source's "RE: <tab> Claim No.:" line becomes the single requirement "RE:Claim No.:",
-// while the rendered letter reads "RE:Our Claim No.:" ("CLAIM NO" / "OUR CLAIM NO" are already the same field
-// in the table). An exact-label-only lookup missed that and reported reworded content as missing. So the label
-// is matched on its words (punctuation/case ignored — "Claim No.:" vs the table's "CLAIM NO") either as the
-// whole expected text or as its trailing words after a lead-in of at most MAX_LABEL_LEAD_IN_WORDS (longest
-// label wins), and the lead-in is carried onto each synonym. Returns { label, phrase } per synonym: `label` for
-// the report, `phrase` (lead-in + synonym) to search for — findPunctuationRelaxedMatch reduces it to words too.
-const MAX_LABEL_LEAD_IN_WORDS = 2;
+// Exact labels only (e.g. a bare "D/L:" vs "Date of Loss:", per user direction 2026-09-30). Deliberately NOT
+// widened to wording around a label: a briefly-tried 2026-10-13 change that matched "RE: Claim No.:" to the
+// printed "RE: Our Claim No.:" hid a real, open defect — Jira SMART-1434 (DIG108's mapping-doc header vs the
+// printed document) — and the team treats an added/removed "Our" as a defect (SMART-1245, DIG158).
 function findLabelSynonyms(expectedValue) {
-  const words = reduceToWordsWithMap(String(expectedValue || '').replace(/[‘’]/g, "'")).reduced;
-  if (!words) return [];
-  let best = null;
+  const key = String(expectedValue || '').trim().toUpperCase().replace(/:$/, '');
   for (const labels of LABEL_SYNONYM_GROUPS.values()) {
-    for (const label of labels) {
-      const labelWords = reduceToWordsWithMap(label).reduced;
-      let leadIn;
-      if (words === labelWords) leadIn = '';
-      else if (words.endsWith(` ${labelWords}`)) leadIn = words.slice(0, -labelWords.length - 1);
-      else continue;
-      if (leadIn && leadIn.split(' ').length > MAX_LABEL_LEAD_IN_WORDS) continue;
-      if (!best || labelWords.length > best.labelWords.length) best = { labels, label, labelWords, leadIn };
-    }
+    if (labels.includes(key)) return labels.filter((l) => l !== key);
   }
-  if (!best) return [];
-  return best.labels
-    .filter((l) => l !== best.label)
-    .map((l) => ({ label: l, phrase: best.leadIn ? `${best.leadIn} ${reduceToWordsWithMap(l).reduced}` : l }));
+  return [];
 }
 
 async function extractPdfText(pdfPath) {
@@ -170,6 +152,42 @@ function findPunctuationRelaxedMatch(haystack, expectedValue) {
   return haystack.slice(startIdx, endIdx);
 }
 
+// The expected text's words, in order, with at most `maxExtra` extra words mixed in — e.g. the template's "RE:
+// Claim No.:" printed as "RE:Our Claim No.:". Still a FAIL (an added/removed word is exactly what the team files
+// as a defect — Jira SMART-1434, SMART-1245, SMART-1320), but shown as the printed wording instead of "Not
+// Found", so the report says what actually differs. Returns the literal printed substring, or null.
+function findNearWording(haystack, expectedValue, maxExtra = 2) {
+  const want = reduceToWordsWithMap(String(expectedValue || '')).reduced.split(' ').filter(Boolean);
+  if (want.length < 2) return null;
+  // One CHANGED word too ("Our Policy No." printed as "Our Policy Number" — SMART-1320), only for phrases of 3+
+  // words so a 2-word label can't "nearly match" an unrelated pair.
+  const maxSubst = want.length >= 3 ? 1 : 0;
+  const { reduced, map } = reduceToWordsWithMap(haystack);
+  const words = [];
+  let pos = 0;
+  for (const w of reduced.split(' ')) { words.push({ w, start: pos, end: pos + w.length }); pos += w.length + 1; }
+  for (let i = 0; i < words.length; i++) {
+    if (words[i].w !== want[0]) continue;
+    let j = i;
+    let k = 1;
+    let extra = 0;
+    let subst = 0;
+    while (k < want.length && j + 1 < words.length && extra <= maxExtra) {
+      j++;
+      if (words[j].w === want[k]) k++;
+      else if (subst < maxSubst && (k === want.length - 1 || (words[j + 1] && words[j + 1].w === want[k + 1]))) { k++; subst++; }
+      else extra++;
+    }
+    if (k === want.length && (extra > 0 || subst > 0) && extra <= maxExtra) {
+      const startIdx = map[words[i].start];
+      let endIdx = map[words[j].end - 1] + 1;
+      while (endIdx < haystack.length && /[^\sa-zA-Z0-9]/.test(haystack[endIdx])) endIdx++;
+      return haystack.slice(startIdx, endIdx);
+    }
+  }
+  return null;
+}
+
 function evaluateOne(req, haystack, context) {
   if (req.enabled === false) {
     return { expected: 'N/A', actual: 'SKIPPED', result: 'SKIPPED', reason: req.disabledReason || 'Disabled' };
@@ -179,6 +197,10 @@ function evaluateOne(req, haystack, context) {
     case 'requiredText': {
       const found = normHaystack.includes(normalizeWs(req.expectedValue).toLowerCase());
       if (found) return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS' };
+      // An explicitly-allowed alternative value (e.g. the UTC date for "current date" — see payloadXpathService),
+      // passed with its own note so the difference stays visible in the report.
+      const alt = (req.alsoAccept || []).find((a) => normHaystack.includes(normalizeWs(a).toLowerCase()));
+      if (alt) return { expected: req.expectedValue, actual: alt, result: 'PASS', reason: req.alsoAcceptNote || `Accepted alternative value "${alt}".` };
       const fuzzy = findPunctuationRelaxedMatch(haystack, req.expectedValue);
       if (fuzzy) {
         // CONFIRMED live 2026-09-30 (user direction): the SAME words are genuinely present, just punctuated/
@@ -197,11 +219,11 @@ function evaluateOne(req, haystack, context) {
       // they both mean, so check each one before giving up, rather than treating a reworded-but-correct
       // label as missing content.
       for (const synonym of findLabelSynonyms(req.expectedValue)) {
-        const synMatch = findPunctuationRelaxedMatch(haystack, synonym.phrase);
+        const synMatch = findPunctuationRelaxedMatch(haystack, synonym);
         if (synMatch) {
           return {
             expected: req.expectedValue, actual: synMatch, result: 'PASS',
-            reason: `The template's own label "${req.expectedValue}" wasn't found verbatim, but its known synonym "${synonym.label}" was found as "${synMatch}" — same field, worded differently in the rendered document. Treated as a match.`,
+            reason: `The template's own label "${req.expectedValue}" wasn't found verbatim, but its known synonym "${synonym}" was found as "${synMatch}" — same field, worded differently in the rendered document. Treated as a match.`,
           };
         }
       }
@@ -217,9 +239,36 @@ function evaluateOne(req, haystack, context) {
           reason: `Not found anywhere in the document — but this field was itself intentionally overwritten by this test's own editable-field check (see the Interactive Session section), and this template doesn't appear to repeat the value elsewhere. Not a template defect, just this test's own edit consuming the only occurrence.`,
         };
       }
+      const near = findNearWording(haystack, req.expectedValue);
+      if (near) {
+        return {
+          expected: req.expectedValue, actual: near, result: 'FAIL',
+          reason: `The document prints similar but different wording: "${near.replace(/\s+/g, ' ').trim()}" instead of the template's "${req.expectedValue}" — word(s) added or changed.`,
+        };
+      }
       return {
         expected: req.expectedValue, actual: 'Not Found', result: 'FAIL',
         reason: `No similar wording found anywhere in the generated document — this content appears to be missing entirely, not just reworded.`,
+      };
+    }
+    // "Dear <recipient>:" — the name itself is checked by its own To Name requirement; this asserts the
+    // salutation is there and carries NO fixed honorific. Per user direction 2026-10-13: a hard-coded "Mrs."
+    // (the Word mock-ups' sample "Dear Mrs. DONNA BRANDT") is a bug for a male or business recipient —
+    // CONFIRMED live, DIG59's letters go to "ROBERT CHARLES" and "JOHNS AND SONS". An honorific that is part
+    // of the recipient's own name in ClaimCenter is fine.
+    case 'salutation': {
+      const expected = 'Dear <recipient> (no fixed Mr./Mrs./Ms.)';
+      const line = ((normalizeTypography(haystack).match(/^[ \t]*Dear\b.*$/im) || [])[0] || '').trim();
+      if (!line) return { expected, actual: 'Not Found', result: 'FAIL', reason: 'No "Dear ..." salutation line found anywhere in the generated document.' };
+      const m = line.match(/^Dear\s+(Mr|Mrs|Ms|Miss)\b\.?/i);
+      if (!m) return { expected, actual: line, result: 'PASS' };
+      const recipientName = String(resolvePath(context, 'recipient.name') || '').trim();
+      if (new RegExp(`^${m[1]}\\b`, 'i').test(recipientName)) {
+        return { expected, actual: line, result: 'PASS', reason: `The "${m[1]}." is part of the recipient's own name in ClaimCenter ("${recipientName}").` };
+      }
+      return {
+        expected, actual: line, result: 'FAIL',
+        reason: `The salutation prints a fixed "${m[1]}." that isn't part of the recipient's name${recipientName ? ` ("${recipientName}")` : ''} — wrong whenever the recipient is male or a business.`,
       };
     }
     // CONFIRMED live 2026-09-30 (user direction): for an Interactive template, the SAME dictionary field was
@@ -236,6 +285,9 @@ function evaluateOne(req, haystack, context) {
       const normExpected = normalizeWs(req.expectedValue).toLowerCase();
       if (normField === normExpected || (normField && normExpected && (normField.includes(normExpected) || normExpected.includes(normField)))) {
         return { expected: req.expectedValue, actual: req.fieldValue, result: 'PASS' };
+      }
+      if ((req.alsoAccept || []).some((a) => normField && normField.includes(normalizeWs(a).toLowerCase()))) {
+        return { expected: req.expectedValue, actual: req.fieldValue, result: 'PASS', reason: req.alsoAcceptNote || 'Accepted alternative value.' };
       }
       const fuzzy = findPunctuationRelaxedMatch(req.fieldValue, req.expectedValue) || findPunctuationRelaxedMatch(req.expectedValue, req.fieldValue);
       if (fuzzy) {

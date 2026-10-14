@@ -148,6 +148,21 @@ const FAIL_IF_PAYLOAD_MISSING = new Set([
   'payload.fromName', 'payload.fromTitle', 'payload.fromPhone', 'payload.fromEmail',
 ]);
 
+// Sample VALUES the Word mock-ups print in place of a real merge field that their BA comments never anchor,
+// mapped to the field label (above) they stand for — so the requirement checks the claim's real value instead
+// of the mock-up's sample text. CONFIRMED live 2026-10-13 (DIG5): the signature block's "DONEGAL INSURANCE
+// GROUP" line is the live template's "underco" (Underwriting Company) merge field — it printed "SOUTHERN
+// INSURANCE COMPANY OF VIRGINIA" on a TN auto claim — yet sits un-commented in 44 of the 51 templates checked,
+// so it was asserted as fixed text and FAILed whenever the company wasn't literally "Donegal Insurance Group".
+const SAMPLE_VALUE_TO_FIELD_LABEL = {
+  'DONEGAL INSURANCE GROUP': 'Underwriting Company',
+};
+
+function sampleValueField(text) {
+  const key = String(text || '').replace(/\s+/g, ' ').trim().toUpperCase();
+  return Object.prototype.hasOwnProperty.call(SAMPLE_VALUE_TO_FIELD_LABEL, key) ? SAMPLE_VALUE_TO_FIELD_LABEL[key] : undefined;
+}
+
 function lookup(label) {
   // Word's smart quotes (‘/’) render as curly apostrophes in the
   // extracted text ("Employer’s Name and Address") while this
@@ -181,4 +196,4 @@ const UNANCHORED_PATTERNS = Object.fromEntries(
   Object.entries(PATTERN_SOURCES).map(([k, src]) => [k, new RegExp(src, 'i')])
 );
 
-module.exports = { LABEL_TO_TESTDATA_FIELD, lookup, PATTERNS, UNANCHORED_PATTERNS, FAIL_IF_PAYLOAD_MISSING };
+module.exports = { LABEL_TO_TESTDATA_FIELD, lookup, sampleValueField, PATTERNS, UNANCHORED_PATTERNS, FAIL_IF_PAYLOAD_MISSING };

@@ -1165,10 +1165,23 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // templates, whereas that same field previously passed with Save Changes in the flow. Complete Document
   // evidently does not itself commit a pending field edit the way Save Changes does — Save Changes is back,
   // clicked before Complete Document, so an edit is actually persisted before the document is finalized.
-  await interactiveEditService.saveChanges(page, { log });
+  // The completed PDF + .json survive in the S3 archive only ~15s before a downstream filing job takes them
+  // (CONFIRMED live 2026-10-13 — see s3AdminService.watchArchiveForIdentifier), often less time than Complete
+  // Document + reading Document Properties takes. So the archive is watched from just BEFORE Complete Document,
+  // on the shared S3 page, and handed the identifier once it's known; whatever the watch didn't catch still
+  // falls back to the regular search below.
+  let resolveIdentifier;
+  const identifierKnown = new Promise((resolve) => { resolveIdentifier = resolve; });
+  const archiveWatch = s3Session.withPage((s3Page) => s3AdminService.watchArchiveForIdentifier(s3Page, identifierKnown, documentService.DOWNLOAD_DIR, { log }))
+    .catch((err) => { log(`[S3] archive watch failed (${err.message.split('\n')[0]}) — falling back to searching after completion.`); return null; });
+  let identifier;
   try {
+    await interactiveEditService.saveChanges(page, { log });
     await interactiveEditService.completeDocument(page, { log, scenarioId: scenario.scenarioId });
+    identifier = await interactiveEditService.readDocumentPropertiesIdentifier(page);
   } catch (err) {
+    resolveIdentifier(null);
+    await archiveWatch;
     // CONFIRMED live 2026-10-06 (DIG200, "Content is not allowed in prolog"): this throw previously lost
     // every field this scenario had already edited/validated up to this exact point — runScenario's own
     // catch block only had err.message to save, so a Complete-Document failure left NOTHING to diagnose WHY
@@ -1179,8 +1192,9 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     err.choicesApplied = choicesApplied;
     throw err;
   }
-  const identifier = await interactiveEditService.readDocumentPropertiesIdentifier(page);
+  resolveIdentifier(identifier);
   log(`Document Properties Identifier: ${identifier}`);
+  const watched = await archiveWatch;
 
   // S3 is a fully separate origin/login from ClaimCenter (see s3AdminService.js) — `s3Session` (see
   // s3SessionManager.js) owns ONE browser context/page for it, reused across every scenario (and, when the
@@ -1196,9 +1210,20 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     // ClaimCenter's own document-indexing metadata object (same folder, same Identifier) instead of the real
     // PDF — see downloadFirstValidPdf's own header for the full story (12/12 scenarios across 4 templates,
     // 100% reproducible, not a flake).
-    const pdfResult = await s3AdminService.downloadFirstValidPdf(s3Page, identifier, documentService.DOWNLOAD_DIR, { log });
-    if (pdfResult.error) throw new Error(`INTERACTIVE_S3_NOT_FOUND: ${pdfResult.error}`);
-    const finalPath = path.join(path.dirname(pdfResult.downloaded.localPath), `${fileNamePrefix}_interactive.pdf`);
+    const pdfResult = watched && watched.pdf
+      ? { downloaded: watched.pdf }
+      : await s3AdminService.downloadFirstValidPdf(s3Page, identifier, documentService.DOWNLOAD_DIR, { log });
+    if (pdfResult.error) {
+      // Tell "SmartCOMM got the request" apart from "nothing reached S3 at all" — CONFIRMED live 2026-10-13
+      // (DIG5-GL-TN, DIG5-AUTO-TN): the input payload landed but no PDF/.json was seen in output/archive, which is
+      // only a hand-off point (a downstream filing job removes each PDF + .json pair once it picks it up).
+      const inputHits = await s3AdminService.searchSmartCommPayload(s3Page, identifier, { log }).catch(() => []);
+      const where = inputHits.length
+        ? ' SmartCOMM DID receive this document\'s request (its input payload is in S3 > smartcomm > input), but the completed PDF never showed up in output/archive while the tool was polling — either it wasn\'t produced, or it arrived late and the downstream filing job took it first. Check the claim\'s documents in ClaimCenter.'
+        : ' Its input payload isn\'t in S3 > smartcomm > input either.';
+      throw new Error(`INTERACTIVE_S3_NOT_FOUND: ${pdfResult.error}${where}`);
+    }
+    const finalPath = path.join(documentService.DOWNLOAD_DIR, `${fileNamePrefix}_interactive.pdf`);
     fs.renameSync(pdfResult.downloaded.localPath, finalPath);
 
     // Co-located filing metadata (<identifier>.json, the SAME archive folder as the PDF) — per user direction
@@ -1208,7 +1233,9 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     // s3AdminService.downloadArchiveMetadataJson + buildMetadataChecks.
     let metadataChecks = [];
     try {
-      const metaResult = await s3AdminService.downloadArchiveMetadataJson(s3Page, identifier, documentService.DOWNLOAD_DIR, { log });
+      const metaResult = watched && watched.json
+        ? { metadata: JSON.parse(fs.readFileSync(watched.json.localPath, 'utf8')), fileName: watched.json.fileName }
+        : await s3AdminService.downloadArchiveMetadataJson(s3Page, identifier, documentService.DOWNLOAD_DIR, { log });
       if (metaResult.error) {
         log(`archive filing metadata: ${metaResult.error}`);
         metadataChecks = [{ id: 'META1', description: 'ClaimCenter filing metadata (.json)', result: 'SKIPPED', expected: '', actual: '', reason: metaResult.error }];
@@ -1293,6 +1320,13 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       if (c.dictionaryMatchedOn && c.dictionaryMatchedOn.endsWith('Unscoped')) {
         const note = `Matched "${c.dictionaryField}" by exact name only — this DIG isn't yet listed in that row's own Form(s) column in the dictionary; consider updating the dictionary.`;
         c.reason = c.reason ? `${c.reason} ${note}` : note;
+      }
+      // Fraud language must never be editable (Jira SMART-1313, re-opened 2026-10). It has no Data Dictionary
+      // row, so an editable fraud paragraph would otherwise sit above as an unmatched SKIPPED field.
+      if (c.expectedEditable && String(c.before || '').length >= 40
+        && fraudLanguageService.findFraudLanguageInText(String(c.before)).length) {
+        c.result = 'FAIL';
+        c.reason = 'This field holds fraud-notice wording (Fraud Language sheet) and is EDITABLE in the live session — fraud language must be locked (same defect as Jira SMART-1313).';
       }
     }
 
@@ -1554,6 +1588,7 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
       description: `Value for "${row.attributeName}" must match the SmartCOMM payload (via Data Dictionary Xpath)`,
       type: matchedCheck ? 'fieldValueMatch' : 'requiredText',
       expectedValue: String(result.value),
+      alsoAccept: result.alsoAccept, alsoAcceptNote: result.alsoAcceptNote,
       fieldValue: matchedCheck ? (matchedCheck.committedMarker || matchedCheck.after || matchedCheck.before) : undefined,
       fieldLabel: matchedCheck ? matchedCheck.label : undefined,
       wasEditedByTest: !matchedCheck && editedByTest,

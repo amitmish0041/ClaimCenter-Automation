@@ -175,6 +175,16 @@ function extractInlineLabelValues(line) {
 // FAIL otherwise regardless of whether the real recipient's own name/address correctly prints elsewhere.
 const RECIPIENT_DEPENDENT_RE = /\badditional recipient\b|\bcc\b.*\b(?:name|address|number)\b|^copy\b/i;
 
+// What's left of a "Dear <To Name>:" line once the name field is cut out — with or without the mock-up's sample
+// honorific. Checked as a salutation (see makeSalutationRequirement), never as literal text.
+const SALUTATION_RE = /^Dear(?:\s+(?:Mr|Mrs|Ms|Miss)\.?)?:?$/i;
+function makeSalutationRequirement(docOrder) {
+  return {
+    id: 'R0', type: 'salutation', expectedValue: 'Dear', docOrder,
+    description: 'Salutation "Dear <recipient>" must appear, with no fixed honorific (Mr./Mrs./Ms.) unless it is part of the recipient\'s own name',
+  };
+}
+
 // Some BA comments describe the EDITOR'S OWN mechanics ("Checkboxes are editable", "Checkboxes selected
 // manually", "Free Form Editable") rather than real document content — CONFIRMED live 2026-10-04 (full-
 // catalog scan, 238 templates): these can never resolve to an actual expected VALUE (there's no "correct
@@ -229,6 +239,18 @@ function buildRequirementsHeuristic(paragraphs) {
   for (let i = 0; i < paragraphs.length; i++) {
     const line = paragraphs[i];
     if (isBlankField(line) || isNoiseLine(line)) continue;
+
+    const sampleField = synonyms.sampleValueField(line);
+    if (sampleField) {
+      const req = makeDynamicRequirement(++n, sampleField, line);
+      req.docOrder = i;
+      requirements.push(req);
+      continue;
+    }
+    if (SALUTATION_RE.test(line.trim())) {
+      requirements.push({ ...makeSalutationRequirement(i), id: `R${++n}` });
+      continue;
+    }
 
     const inlinePairs = extractInlineLabelValues(line);
     if (inlinePairs) {
@@ -383,6 +405,17 @@ function classifyResidualFragment(fragment, docOrder) {
   // meant to print — excluded here the same way blank/noise lines are, not turned into a requirement at all.
   if (/fraud\s+language/i.test(line)) return [];
 
+  // The mock-up's own sample VALUE for a merge field its BA comments never anchored (e.g. the signature
+  // block's "DONEGAL INSURANCE GROUP" = Underwriting Company) — check the claim's real value instead.
+  const sampleField = synonyms.sampleValueField(line);
+  if (sampleField) return [{ ...makeDynamicRequirement(0, sampleField, line), docOrder }];
+
+  // The salutation in front of the To Name field: "Dear", or "Dear Mrs." when that comment anchored only the
+  // SAMPLE recipient's name ("Dear Mrs. DONNA BRANDT:" -> "DONNA BRANDT"; DIG59/DIG62). Not asserted verbatim:
+  // a fixed honorific is itself a bug for a male or business recipient (user direction 2026-10-13) — see
+  // pdfValidationService's 'salutation' check, which FAILs a printed Mr./Mrs./Ms. the recipient's name lacks.
+  if (SALUTATION_RE.test(line)) return [makeSalutationRequirement(docOrder)];
+
   // A recognized label glued directly to its value on the SAME line (e.g.
   // "Date of Loss:May 03,") — left over because the BA's own comments never
   // anchored this field at all, not because it's genuinely static. Without
@@ -504,6 +537,12 @@ function buildRequirementsFromComments(paragraphs, anchors, comments) {
       match.endIdx += trailing[0].length;
     }
   });
+
+  // NOTE (2026-10-13): the mock-up's own letterhead line ("1195 River Road, P.O Box 302, Marietta, PA 17547 |
+  // (800) 877-0600 | www.donegalgroup.com") stays an ordinary static check on purpose, even though the template
+  // author points the logo/website at the Base Template. The live letterhead currently prints only "P.O. BOX 302
+  // / MARIETTA, PA 17547-0302", and the missing "1195 River Rd" is a real, re-opened defect (Jira SMART-1424) —
+  // excluding the line (tried briefly) would have hidden it.
 
   // Pass 2 — emit one requirement per match, then cut every matched range
   // out of fullText (reverse order, so earlier ranges' indices stay valid).

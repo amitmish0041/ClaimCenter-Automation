@@ -219,7 +219,7 @@ async function ensureExpanded(page, chevronTestId, revealTestId, { log = console
 // ({chevron, label} data-testids — see OUTPUT_NODE/INPUT_NODE above). Each chevron expands its own parent
 // level, VERIFIED (see ensureExpanded above) rather than a blind click-and-hope, since the tree can silently
 // re-collapse on its own after sitting idle; the label then selects the actual child folder to list/filter.
-async function searchNode(page, node, key, { log = console.log, folderDescription = node.label } = {}) {
+async function searchNode(page, node, key, { log = console.log, folderDescription = node.label, retries = 2 } = {}) {
   // Re-verify Planet = Test before every search, not just once at login. A search on the wrong planet silently
   // returns the wrong files or none, and this admin app resets its own session state unprompted (see
   // ensureExpanded's tree-re-collapse note). No-op cost when already on Test (just a badge read).
@@ -266,7 +266,7 @@ async function searchNode(page, node, key, { log = console.log, folderDescriptio
   // upload-delivery lag between ClaimCenter completing the document and it actually landing in the S3
   // admin tool's own index, not a wrong key or a missing file. Re-filtering (not just re-counting the same
   // stale rows) after a short wait gives that lag a couple of chances to resolve before giving up.
-  for (let attempt = 0; count === 0 && attempt < 2; attempt++) {
+  for (let attempt = 0; count === 0 && attempt < retries; attempt++) {
     log(`[S3] "${key}" → 0 matches under ${folderDescription} on attempt ${attempt + 1} — waiting in case of upload-delivery lag, then retrying...`);
     await page.waitForTimeout(3000);
     await filterBox.fill('');
@@ -289,8 +289,8 @@ async function searchNode(page, node, key, { log = console.log, folderDescriptio
 }
 
 // The generated PDF — ClaimCenter Outbound > smartcomm > output > archive (moved here 2026-10-13, see OUTPUT_NODE).
-async function searchSmartComm(page, key, { log = console.log } = {}) {
-  return searchNode(page, OUTPUT_NODE, key, { log, folderDescription: 'ClaimCenter Outbound > smartcomm > output > archive' });
+async function searchSmartComm(page, key, { log = console.log, retries } = {}) {
+  return searchNode(page, OUTPUT_NODE, key, { log, retries, folderDescription: 'ClaimCenter Outbound > smartcomm > output > archive' });
 }
 
 // The ORIGINAL payload ClaimCenter sent to SmartCOMM for this same transaction — ClaimCenter Outbound >
@@ -394,20 +394,26 @@ async function downloadMatches(page, matches, outDir, { log = console.log } = {}
 // occasionally. Downloads each current match in turn and keeps the first one whose own BYTES start with the
 // real PDF magic header ("%PDF-") — content-sniffing instead of trusting position/order, which nothing here
 // has ever reliably predicted. If NONE of the current matches are a real PDF yet, that could still just be
-// genuine upload-delivery lag (the real document hasn't finished landing in S3) — re-searches and retries a
-// few times before giving up with a clear, specific error distinguishing "found nothing at all" from "found
+// genuine upload-delivery lag (the real document hasn't finished landing in S3) — keeps re-searching until a
+// deadline before giving up with a clear, specific error distinguishing "found nothing at all" from "found
 // only ClaimCenter's own metadata object, never the real document."
-async function downloadFirstValidPdf(page, key, outDir, { log = console.log, maxSearchAttempts = 3 } = {}) {
+//
+// Polls for up to SMARTCOMM_S3_WAIT_MS (default 5 min), not a fixed ~1 min. CONFIRMED live 2026-10-13: the
+// archive is only a hand-off point — a downstream filing job picks up each PDF + .json pair and REMOVES it
+// (every document fetched earlier that evening was gone ~30 min later). Most documents land within seconds,
+// but some intermittently take minutes (same template/claim/user found instantly on one run, absent for a
+// full minute on the next), and a late one could be filed away before anyone looked again. Re-checking every
+// ~15s for longer catches it in that window instead of reporting a missing document.
+async function downloadFirstValidPdf(page, key, outDir, { log = console.log, maxWaitMs = Number(process.env.SMARTCOMM_S3_WAIT_MS) || 300000, pollMs = 15000 } = {}) {
   const fs = require('fs');
-  for (let attempt = 1; attempt <= maxSearchAttempts; attempt++) {
-    const matches = await searchSmartComm(page, key, { log });
-    if (!matches.length) {
-      if (attempt === maxSearchAttempts) {
-        return { error: `no S3 object matched Identifier "${key}" under ClaimCenter Outbound > smartcomm > output > archive.` };
-      }
-      await page.waitForTimeout(3000);
-      continue;
-    }
+  const deadline = Date.now() + maxWaitMs;
+  let lastMatchCount = 0;
+  for (let attempt = 1; ; attempt++) {
+    // The .pdf first (the .json filing-metadata sibling is fetched separately afterwards) — one download
+    // instead of two, and the pair is less likely to be filed away mid-fetch.
+    const matches = (await searchSmartComm(page, key, { log, retries: 0 }))
+      .sort((a, b) => Number(/\.pdf\b/i.test(b.text)) - Number(/\.pdf\b/i.test(a.text)));
+    lastMatchCount = matches.length;
     for (const m of matches) {
       const [downloaded] = await downloadMatches(page, [m], outDir, { log });
       const buf = fs.readFileSync(downloaded.localPath);
@@ -417,12 +423,14 @@ async function downloadFirstValidPdf(page, key, outDir, { log = console.log, max
       log(`[S3] "${downloaded.fileName}" matched Identifier "${key}" but isn't a real PDF (starts with "${buf.slice(0, 60).toString('latin1').replace(/\s+/g, ' ')}") — likely ClaimCenter's own document-indexing metadata object, not the generated document. Discarding and checking the next match.`);
       fs.unlinkSync(downloaded.localPath);
     }
-    if (attempt === maxSearchAttempts) {
-      return { error: `"${key}" matched ${matches.length} S3 object(s) under ClaimCenter Outbound > smartcomm > output > archive, but NONE of them were a real PDF (all looked like ClaimCenter's own document-indexing metadata) after ${maxSearchAttempts} attempt(s) — the actual generated document likely hasn't finished uploading to S3 yet.` };
-    }
-    log(`[S3] none of the ${matches.length} current match(es) for "${key}" were a real PDF yet — waiting in case the actual document is still uploading, then re-searching (attempt ${attempt}/${maxSearchAttempts})...`);
-    await page.waitForTimeout(3000);
+    if (Date.now() + pollMs > deadline) break;
+    log(`[S3] "${key}": ${matches.length ? `${matches.length} match(es) but no real PDF yet` : 'not in the archive yet'} — re-checking in ${pollMs / 1000}s (attempt ${attempt}, ${Math.round((deadline - Date.now()) / 1000)}s left)...`);
+    await page.waitForTimeout(pollMs);
   }
+  const waited = `${Math.round(maxWaitMs / 60000)} min`;
+  return lastMatchCount
+    ? { error: `"${key}" matched ${lastMatchCount} S3 object(s) under ClaimCenter Outbound > smartcomm > output > archive, but NONE of them were a real PDF (all looked like ClaimCenter's own document-indexing metadata) within ${waited} — the actual generated document never finished landing.` }
+    : { error: `no S3 object matched Identifier "${key}" under ClaimCenter Outbound > smartcomm > output > archive within ${waited}.` };
 }
 
 // The completed document's co-located ClaimCenter filing metadata — "<identifier>.json" in the SAME archive
@@ -445,4 +453,85 @@ async function downloadArchiveMetadataJson(page, identifier, outDir, { log = con
   }
 }
 
-module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, ensureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches, downloadFirstValidPdf, downloadArchiveMetadataJson };
+// Watches output/archive while a document is being completed, and downloads its <identifier>.pdf/.json the
+// moment they land. CONFIRMED live 2026-10-13 (watched every ~1s while one DIG108 document completed): the pair
+// appeared at 20:07:25 and was GONE at 20:07:40 — a downstream filing job takes each PDF + .json pair ~15s
+// after it lands (SmartCOMM's own job log shows the upload succeeding), so searching only AFTER Complete
+// Document + reading Document Properties (often >15s later) intermittently found nothing at all. Started just
+// BEFORE Complete Document is clicked: takes a baseline listing, then re-opens the folder (which re-fetches the
+// listing — confirmed by the same experiment) every ~intervalMs and immediately downloads every NEW GUID-named
+// .pdf/.json (the identifier isn't known yet, so it can't be filtered on), keeping only the one whose identifier
+// `identifierPromise` later resolves to and deleting any other new document (someone else's) it picked up.
+// Resolves to { pdf, json } (each { fileName, localPath } or null) — null when the identifier never arrives
+// (null/rejected promise) — so the caller can fall back to the regular search for whatever wasn't caught.
+async function watchArchiveForIdentifier(page, identifierPromise, outDir, { log = console.log, maxMs = 120000, afterIdMs = 45000, intervalMs = 700 } = {}) {
+  const fs = require('fs');
+  const path = require('path');
+  const dir = path.join(outDir, '.archive-watch');
+  fs.mkdirSync(dir, { recursive: true });
+  let identifier;
+  let idSettled = false;
+  let idKnownAt = 0;
+  Promise.resolve(identifierPromise).then((id) => { identifier = id || null; }, () => { identifier = null; })
+    .finally(() => { idSettled = true; idKnownAt = Date.now(); });
+
+  await ensureTestPlanet(page, { log });
+  for (let i = 0; i < OUTPUT_NODE.chevrons.length; i++) {
+    await ensureExpanded(page, OUTPUT_NODE.chevrons[i], OUTPUT_NODE.chevrons[i + 1] || OUTPUT_NODE.label, { log });
+  }
+  const archiveLabel = page.locator(`[data-testid="${OUTPUT_NODE.label}"]`).first();
+  const parentLabel = page.locator('[data-testid="label-cc/outbound-files/smartcomm/output"]').first();
+  const rowLocator = page.locator('table tbody tr, [role="row"]');
+  const filter = page.getByPlaceholder('Filter by key');
+  const listKeys = async () => (await rowLocator.allInnerTexts().catch(() => []))
+    .map((t) => t.trim().split(/\s+/)[0]).filter(Boolean);
+  await archiveLabel.click();
+  if (await filter.isVisible().catch(() => false)) await filter.fill('').catch(() => {});
+  await page.waitForTimeout(800);
+  const baseline = new Set(await listKeys());
+  const got = new Map(); // key -> { fileName, localPath }
+  const GUID_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(pdf|json)$/i;
+  const deadline = Date.now() + maxMs;
+  const wanted = () => (identifier ? [`${identifier}.pdf`, `${identifier}.json`] : []);
+  while (Date.now() < deadline) {
+    if (idSettled && !identifier) break;
+    if (identifier && wanted().every((k) => got.has(k.toLowerCase()))) break;
+    if (idSettled && identifier && Date.now() - idKnownAt > afterIdMs) break;
+    for (const key of await listKeys()) {
+      const m = key.match(GUID_FILE);
+      if (!m || got.has(key.toLowerCase())) continue;
+      // Before the identifier is known, only grab what appeared since the baseline; once it IS known, also grab
+      // its own pair even if it was already listed in the baseline (it can land before the watch got going).
+      const isOurs = identifier && m[1].toLowerCase() === identifier.toLowerCase();
+      if (!isOurs && (identifier || baseline.has(key))) continue;
+      try {
+        const [d] = await downloadMatches(page, [{ text: key, row: rowLocator.filter({ hasText: key }).first() }], dir, { log });
+        got.set(key.toLowerCase(), d);
+        log(`[S3] archive watch: caught ${key} as it landed`);
+      } catch (e) {
+        log(`[S3] archive watch: ${key} listed but its download failed (${e.message.split('\n')[0]}) — likely filed away mid-download.`);
+      }
+    }
+    await parentLabel.click().catch(() => {});
+    await page.waitForTimeout(150);
+    await archiveLabel.click().catch(() => {});
+    await page.waitForTimeout(intervalMs);
+  }
+  const pick = (ext) => (identifier && got.get(`${identifier}.${ext}`.toLowerCase())) || null;
+  const result = identifier ? { pdf: pick('pdf'), json: pick('json') } : null;
+  // Anything else caught is another document that happened to complete meanwhile — not ours, drop it.
+  for (const [key, d] of got) {
+    if (!result || ![result.pdf, result.json].includes(d)) fs.rmSync(d.localPath, { force: true });
+  }
+  if (result && result.pdf) {
+    const buf = fs.readFileSync(result.pdf.localPath);
+    if (buf.slice(0, 5).toString('latin1') !== '%PDF-') {
+      log(`[S3] archive watch: ${result.pdf.fileName} isn't a real PDF — ignoring it.`);
+      fs.rmSync(result.pdf.localPath, { force: true });
+      result.pdf = null;
+    }
+  }
+  return result;
+}
+
+module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, ensureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches, downloadFirstValidPdf, downloadArchiveMetadataJson, watchArchiveForIdentifier };
