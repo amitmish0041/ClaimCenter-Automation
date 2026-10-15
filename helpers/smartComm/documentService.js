@@ -27,13 +27,28 @@ fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
 
 function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
+// Actions > New > Create from template, confirmed by the wizard's "Select Template" tab actually showing.
+// CONFIRMED 2026-10-14 (DIG237A-GL-PA on a colleague's PC, two scenarios in parallel): the menu clicks went
+// through but the wizard never opened, and the run died 15s later on "waiting for getByRole('tab', { name:
+// 'Select Template' })" with no clue why. Now: wait for the tab, retry the whole menu sequence once (closing
+// any half-open menu), and if it still isn't there save a screenshot and say what didn't open.
 async function openCreateFromTemplate(page) {
-  await openClaimActionsMenu(page, 'smartComm.documentService');
-  const newSubmenu = page.getByRole('menuitem', { name: L.menu.newSubmenu }).first();
-  await newSubmenu.hover().catch(() => {});
-  await newSubmenu.click().catch(() => {});
-  await page.getByRole('menuitem', { name: L.menu.createFromTemplate }).click();
-  await page.waitForLoadState('domcontentloaded').catch(() => {});
+  const tab = page.getByRole('tab', { name: L.selectTemplate.tab, exact: true });
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    await openClaimActionsMenu(page, 'smartComm.documentService');
+    const newSubmenu = page.getByRole('menuitem', { name: L.menu.newSubmenu }).first();
+    await newSubmenu.hover().catch(() => {});
+    await newSubmenu.click().catch(() => {});
+    await page.getByRole('menuitem', { name: L.menu.createFromTemplate }).click({ timeout: 15000 }).catch(() => {});
+    await page.waitForLoadState('domcontentloaded').catch(() => {});
+    if (await tab.waitFor({ state: 'visible', timeout: 20000 }).then(() => true).catch(() => false)) return;
+    console.log(`[SmartComm] Create-from-template screen didn't open (attempt ${attempt}/2)${attempt < 2 ? ' — retrying the Actions menu' : ''}.`);
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.waitForTimeout(1500);
+  }
+  const diag = await saveDiagnostic(page, 'createFromTemplate_notOpened').catch(() => null);
+  throw new Error('CREATE_FROM_TEMPLATE_NOT_OPENED: Actions > New > Create from template did not open the template wizard ' +
+    `(no "Select Template" tab after 2 attempts) — ClaimCenter may be slow, or this user may lack the menu on this claim.${diag ? ` Diagnostic: ${diag}.png` : ''}`);
 }
 
 async function searchTemplateByName(page, templateName) {
