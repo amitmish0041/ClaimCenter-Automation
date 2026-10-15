@@ -122,7 +122,25 @@ async function loginAndEnsureTestPlanet(page, { log = console.log } = {}) {
   await page.goto(S3_ADMIN_URL, { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForTimeout(1200);
 
-  const landed = page.url().startsWith('https://intadmin-');
+  let landed = page.url().startsWith('https://intadmin-');
+
+  // Owner's PC only (SMARTCOMM_OKTA_AUTO_RENEW=1 — set in this repo's .env, which installed copies never get):
+  // an expired shared session is renewed on the spot (email + SSO, no password — renewSession.js) and this run
+  // carries on, instead of failing with S3_SHARED_SESSION_EXPIRED until someone renews it by hand. Once per process.
+  if (!landed && READONLY_SESSION && process.env.SMARTCOMM_OKTA_AUTO_RENEW === '1' && !loginAndEnsureTestPlanet.renewTried) {
+    loginAndEnsureTestPlanet.renewTried = true;
+    log('[S3] Shared S3 session has expired — renewing it automatically (email + SSO)...');
+    const { renewSharedSession } = require('./renewSession');
+    if (await renewSharedSession({ log }).catch((e) => { log(`[S3] renewal failed: ${e.message}`); return false; })) {
+      // Drop the expired cookies first — left in place (e.g. a stale okta.com "sid" on a different domain/path
+      // than the new one) they still get sent and the page stays signed out.
+      await page.context().clearCookies();
+      await oktaSessionStore.loadIntoContext(page.context(), { log });
+      await page.goto(S3_ADMIN_URL, { waitUntil: 'networkidle', timeout: 60000 });
+      await page.waitForTimeout(1200);
+      landed = page.url().startsWith('https://intadmin-');
+    }
+  }
 
   // Shared-session mode: this machine must not sign in to Okta itself. A session that didn't land is either
   // missing, expired, or the team drive holding it isn't reachable - fail fast with an actionable message
