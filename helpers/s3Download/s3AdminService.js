@@ -86,6 +86,18 @@ async function ensureTestPlanet(page, { log = console.log, maxAttempts = 2 } = {
     await page.waitForTimeout(400);
   }
   if (planet === 'Test') { log('[S3] Planet already Test'); return; }
+  // No "Planet:" badge at all = this isn't the admin tool any more — the shared S3 sign-in lapsed and the page
+  // is showing Okta's sign-in (CONFIRMED 2026-10-15: overnight expiry surfaced as "waiting for getByRole(
+  // 'menuitem', { name: 'Settings' })" on every run). Say so plainly instead of hunting for a Settings menu.
+  if (!planet) {
+    const settingsShown = await page.getByRole('menuitem', { name: 'Settings', exact: true }).first().isVisible().catch(() => false);
+    if (!settingsShown) {
+      throw new Error(
+        `S3_SHARED_SESSION_EXPIRED: the S3 admin tool is showing its sign-in page instead of Integration Files (${page.url().slice(0, 60)}) ` +
+        `— the shared S3 sign-in session has expired. Ask ${SESSION_OWNER} to renew it ("Establish S3 Session", or node scripts/renewS3Session.js), then retry.`
+      );
+    }
+  }
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     log(`[S3] Planet is "${planet}" — switching to Test (attempt ${attempt}/${maxAttempts})`);
