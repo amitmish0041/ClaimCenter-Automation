@@ -599,7 +599,10 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // regardless of which claim/recipient this scenario used. testData here
     // is effectiveTestData (testData.js merged with whatever
     // claimSummaryService captured live) — not the raw scenario.testData.
+    // Layout-aware second reading (boxed / column forms) — a fallback for checks the plain text reads across.
+    const layoutText = await require('./pdfLayoutText').extractLayoutText(pdfPath).catch(() => '');
     const context = {
+      layoutText,
       testData: effectiveTestData, scenario, template, recipient, additionalRecipient,
       // Spreads every flat field payloadService already returns (claimNumber,
       // lossDate, policyNumber, policyEffectiveDate/ExpirationDate,

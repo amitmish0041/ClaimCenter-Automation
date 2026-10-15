@@ -110,6 +110,29 @@ function compactIncludes(haystack, needle) {
   return n.length >= 8 && compact(haystack).includes(n);
 }
 
+// Words with punctuation inside a word removed ("WORKER'S" -> "workers", "V.I.N." -> "vin"), for punctuation-blind
+// whole-word matching.
+const words = (s) => normalizeTypography(String(s || '')).toLowerCase().replace(/['’.]/g, '').split(/[^a-z0-9]+/).filter(Boolean);
+// True when expected's words appear consecutively, as whole words, in the text — optionally with ONE gap of up
+// to maxGap words (a merge-field value printed inside a sentence the mapping doc splits around the field).
+function wordsInOrder(text, expected, maxGap = 0) {
+  const t = words(text); const e = words(expected);
+  if (!e.length) return false;
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] !== e[0]) continue;
+    let ti = i + 1; let gapUsed = maxGap === 0; let ok = true;
+    for (let k = 1; k < e.length; k++) {
+      if (t[ti] === e[k]) { ti++; continue; }
+      if (gapUsed) { ok = false; break; }
+      const j = t.slice(ti, ti + maxGap + 1).indexOf(e[k]);
+      if (j < 0) { ok = false; break; }
+      ti += j + 1; gapUsed = true;
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
 // Other ways the same calendar date can print: "August 06, 2026" <-> "08/06/2026", "8/6/2026", "August 6, 2026".
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 function dateVariants(value) {
@@ -241,9 +264,14 @@ function evaluateOne(req, haystack, context) {
         // line. When the template has a blank to write on ("____"), the printed text must still have one right
         // where the wording ends (the relaxed match ignores underscores, so look at the text that follows it).
         if (/_{3,}/.test(req.expectedValue)) {
-          const at = haystack.indexOf(fuzzy);
-          const span = at >= 0 ? haystack.slice(at, at + fuzzy.length + 12) : '';
-          if (!/_{3,}/.test(span)) {
+          // Check EVERY place this wording prints (DIG49: "DESCRIBE" also opens "5. DESCRIBE AUTOMOBILES…", and the
+          // first hit has no line), and accept an editable field in the blank — the line IS the field there, so
+          // this run's own "[QA-EDIT-n]" (or the field's value marker "[") sits where the underscores were.
+          let hasBlank = false;
+          for (let at = haystack.indexOf(fuzzy); at >= 0 && !hasBlank; at = haystack.indexOf(fuzzy, at + 1)) {
+            if (/_{3,}|\[/.test(haystack.slice(at, at + fuzzy.length + 14))) hasBlank = true;
+          }
+          if (!hasBlank) {
             return {
               expected: req.expectedValue, actual: fuzzy, result: 'FAIL',
               reason: 'Same wording is printed, but the fill-in line ("____") the template has here is missing — the recipient has nowhere to write.',
@@ -285,6 +313,28 @@ function evaluateOne(req, haystack, context) {
           expected: req.expectedValue, actual: 'Not Found', result: 'SKIPPED',
           reason: `Not found anywhere in the document — but this field was itself intentionally overwritten by this test's own editable-field check (see the Interactive Session section), and this template doesn't appear to repeat the value elsewhere. Not a template defect, just this test's own edit consuming the only occurrence.`,
         };
+      }
+      // Fallbacks for text that IS printed but the plain text can't show as one phrase (CONFIRMED 2026-10-15, DIG49
+      // Application for Benefits — a boxed form):
+      const layout = context && context.layoutText ? context.layoutText : '';
+      const expectedNoBlank = req.expectedValue.replace(/_{3,}/g, ' ').trim();
+      // 1. Boxed / multi-column layout: side-by-side boxes run together and wrapped questions get split.
+      if (layout && !/_{3,}/.test(req.expectedValue) && (normalizeWs(layout).toLowerCase().includes(normalizeWs(req.expectedValue).toLowerCase()) || compactIncludes(layout, req.expectedValue))) {
+        return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Printed in a boxed / column layout — the plain PDF text reads across the boxes, the layout reading finds it intact.' };
+      }
+      // 2. Punctuation inside words only ("WORKER'S" vs "WORKERS", "V.I.N." vs "VIN") — passes per user direction.
+      if (!/_{3,}/.test(req.expectedValue) && (wordsInOrder(haystack, req.expectedValue) || (layout && wordsInOrder(layout, req.expectedValue)))) {
+        return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Same words; only punctuation differs (e.g. an apostrophe or full stops).' };
+      }
+      // 3. A list number from the next item glued onto the last word by the mapping-doc parse ("…COMPLETE AND3.").
+      const glued = expectedNoBlank.match(/^(.*[A-Za-z])\d{1,2}\.$/);
+      if (glued && (normHaystack.includes(normalizeWs(glued[1]).toLowerCase()) || (layout && wordsInOrder(layout, glued[1])))) {
+        return { expected: req.expectedValue, actual: glued[1], result: 'PASS', reason: `The mapping doc's text has the next list number glued on ("${req.expectedValue.slice(glued[1].length)}"); the wording itself is printed.` };
+      }
+      // 4. A fragment the mapping doc split around a merge field (starts with ":" / ","): the field's value prints
+      //    inside it ("Name of Injured Person: [value] (herein after …)").
+      if (/^\s*[:;,]/.test(req.expectedValue) && (wordsInOrder(haystack, req.expectedValue, 8) || (layout && wordsInOrder(layout, req.expectedValue, 8)))) {
+        return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Printed with a merge-field value inside it (the mapping doc splits this sentence around the field).' };
       }
       const near = findNearWording(haystack, req.expectedValue);
       if (near) {
