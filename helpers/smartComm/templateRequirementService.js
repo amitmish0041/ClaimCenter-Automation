@@ -637,9 +637,19 @@ function buildRequirementsFromComments(paragraphs, anchors, comments) {
     .filter((a) => a.text && comments[a.id] && /\bto name\b/i.test(comments[a.id].fullText || ''))
     .map((a) => normalizeWs(a.text).replace(/^(?:Mr|Mrs|Ms|Miss|Dr)\.?\s+/i, '').replace(/:$/, '').toLowerCase())
     .filter(Boolean);
+  // A bare "cc:" label in front of the template's conditional Copy Name/Address fields has no BA comment of its
+  // own, so it would be an always-required static line — but it only prints with those fields, i.e. when an
+  // additional recipient is added (user direction 2026-10-16, DIG239). The "Copy …" fieldName puts it under
+  // validationService's ADDITIONAL_RECIPIENT_CONDITION_RE, so it's re-enabled exactly when a recipient is added.
+  const hasConditionalCopyFields = requirements.some((r) => r.enabled === false && /^copy\b/i.test(r.fieldName || ''));
   let offset = 0;
   for (const frag of residual.split('\n')) {
     for (const req of classifyResidualFragment(frag, offset, { sampleNames })) {
+      if (hasConditionalCopyFields && req.type === 'requiredText' && /^c\.?c\.?\s*:?$/i.test(String(req.expectedValue || '').trim())) {
+        req.fieldName = 'Copy (cc:) label';
+        req.enabled = false;
+        req.disabledReason = 'The "cc:" line prints only with the Copy Name/Address block, i.e. when an additional recipient is added.';
+      }
       req.id = `R${++n}`;
       requirements.push(req);
     }

@@ -31,14 +31,16 @@ function buildLabelSynonymGroups() {
   return byPath;
 }
 const LABEL_SYNONYM_GROUPS = buildLabelSynonymGroups();
-// Exact labels only (e.g. a bare "D/L:" vs "Date of Loss:", per user direction 2026-09-30). Deliberately NOT
-// widened to wording around a label: a briefly-tried 2026-10-13 change that matched "RE: Claim No.:" to the
-// printed "RE: Our Claim No.:" hid a real, open defect — Jira SMART-1434 (DIG108's mapping-doc header vs the
-// printed document) — and the team treats an added/removed "Our" as a defect (SMART-1245, DIG158).
+// Exact labels (e.g. a bare "D/L:" vs "Date of Loss:", per user direction 2026-09-30), optionally behind an
+// "RE:" prefix, which is kept on every synonym. Per user direction 2026-10-16 (DIG239), "RE: Claim No.:"
+// printed as "RE: Our Claim No.:" is a match for ALL templates — knowingly reversing the 2026-10-13 call that
+// kept it a FAIL, so DIG108's SMART-1434 header difference no longer fails here either.
 function findLabelSynonyms(expectedValue) {
-  const key = String(expectedValue || '').trim().toUpperCase().replace(/:$/, '');
+  const m = String(expectedValue || '').trim().match(/^(RE\s*:\s*)?(.*?)\.?\s*:?$/i);
+  const prefix = m[1] || '';
+  const key = m[2].toUpperCase().replace(/\.$/, '');
   for (const labels of LABEL_SYNONYM_GROUPS.values()) {
-    if (labels.includes(key)) return labels.filter((l) => l !== key);
+    if (labels.includes(key)) return labels.filter((l) => l !== key).map((l) => `${prefix}${l}`);
   }
   return [];
 }
@@ -203,9 +205,10 @@ function findPunctuationRelaxedMatch(haystack, expectedValue) {
   return haystack.slice(startIdx, endIdx);
 }
 
-// The expected text's words, in order, with at most `maxExtra` extra words mixed in — e.g. the template's "RE:
-// Claim No.:" printed as "RE:Our Claim No.:". Still a FAIL (an added/removed word is exactly what the team files
-// as a defect — Jira SMART-1434, SMART-1245, SMART-1320), but shown as the printed wording instead of "Not
+// The expected text's words, in order, with at most `maxExtra` extra words mixed in — e.g. the template's "Our
+// Policy No." printed as "Our Policy Number". Still a FAIL (an added/removed word is what the team files as a
+// defect — Jira SMART-1245, SMART-1320; "Claim No."/"Our Claim No." is the exception, matched as a synonym
+// above), but shown as the printed wording instead of "Not
 // Found", so the report says what actually differs. Returns the literal printed substring, or null.
 function findNearWording(haystack, expectedValue, maxExtra = 2) {
   const want = reduceToWordsWithMap(String(expectedValue || '')).reduced.split(' ').filter(Boolean);

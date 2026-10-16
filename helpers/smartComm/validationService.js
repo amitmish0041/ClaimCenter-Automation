@@ -648,7 +648,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // not a guess, and covering far more fields than payloadService.js's own hand-curated subset. Only
     // generated when the payload actually downloaded (rawPayloadRoot set) — degrades to zero extra
     // requirements otherwise, same graceful-skip convention as fraudRequirements above.
-    const xpathRequirements = rawPayloadRoot ? buildXpathRequirements(template, rawPayloadRoot, scenarioRequirements, interactiveChecks, (m) => console.log(`[SmartComm] ${scenario.scenarioId}: ${m}`)) : [];
+    const xpathRequirements = rawPayloadRoot ? buildXpathRequirements(template, rawPayloadRoot, scenarioRequirements, interactiveChecks, (m) => console.log(`[SmartComm] ${scenario.scenarioId}: ${m}`), { additionalRecipientAdded: Boolean(additionalRecipient) }) : [];
 
     // A Choices-panel question that never got confirmed Yes this scenario (it genuinely wasn't on the page
     // for this claim, or simply defaults to No and nothing selected it) has nothing to validate — its gated
@@ -1663,17 +1663,18 @@ function isNoFraudLanguageRequired(match) {
 // claim's LOB (e.g. Vehicle Make on a Homeowners claim, which has no exposure/vehicle node at all) simply has
 // nothing to resolve, so no check gets generated for it either — only fields with REAL, resolved data AND a
 // real template reference become an assertion.
-function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, interactiveChecks, log) {
-  const templateFieldNames = (baseRequirements || [])
-    .map((r) => dataDictionaryService.normalizeForMatch(r.fieldName))
-    .filter(Boolean);
-  const referencedByTemplate = (row) => {
+function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, interactiveChecks, log, { additionalRecipientAdded = false } = {}) {
+  const templateFields = (baseRequirements || [])
+    .map((r) => ({ req: r, fn: dataDictionaryService.normalizeForMatch(r.fieldName) }))
+    .filter((t) => t.fn);
+  const referencingRequirements = (row) => {
     const attrNorm = dataDictionaryService.normalizeForMatch(row.attributeName);
     const tmplAttrNorm = dataDictionaryService.normalizeForMatch(row.templateAttributeName);
-    return templateFieldNames.some((fn) =>
+    return templateFields.filter(({ fn }) =>
       (attrNorm && attrNorm.length >= 3 && fn.includes(attrNorm)) ||
-      (tmplAttrNorm && tmplAttrNorm.length >= 3 && fn.includes(tmplAttrNorm)));
+      (tmplAttrNorm && tmplAttrNorm.length >= 3 && fn.includes(tmplAttrNorm))).map((t) => t.req);
   };
+  const referencedByTemplate = (row) => referencingRequirements(row).length > 0;
   const rows = dataDictionaryService.getAttributesForTemplate(template.digNumber)
     .filter((r) => r.xpath && r.xpath.trim())
     // An overlay form has no text requirements to scope by — check every dictionary field for this DIG.
@@ -1710,7 +1711,17 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
     // find the original value anywhere, pdfValidationService needs to know it was this test's own edit that
     // did that, not a real template defect (per user direction 2026-10-06, DIG236).
     const editedByTest = (interactiveChecks || []).some((c) => c.dictionaryField === row.attributeName && c.observedChanged === true);
+    // Every template field this attribute belongs to is switched off for THIS scenario (e.g. Agent Number,
+    // which prints only for an added additional recipient — DIG239 2026-10-16, user direction): the payload
+    // still carries the value, but the document correctly doesn't print it, so skip with the same reason.
+    // Still checked once a recipient really was added: a role-gated field like DIG239's "Agent Number … role of
+    // Producer" is never re-enabled itself, and this payload check is the only thing exercising it then.
+    const refs = template.overlayMode ? [] : referencingRequirements(row);
+    const recipientGated = refs.some((r) => /additional recipient|^copy\b/i.test(r.fieldName || ''));
+    const conditionallyOff = (r) => r.enabled === false && !/editor's own mechanics/.test(r.disabledReason || '');
+    const gatedOff = refs.length > 0 && refs.every(conditionallyOff) && !(additionalRecipientAdded && recipientGated);
     requirements.push({
+      ...(gatedOff ? { enabled: false, disabledReason: refs[0].disabledReason || 'Conditional field, not printed in this scenario.' } : {}),
       id: `XP${n}`,
       description: `Value for "${row.attributeName}" must match the SmartCOMM payload (via Data Dictionary Xpath)`,
       type: matchedCheck ? 'fieldValueMatch' : 'requiredText',
