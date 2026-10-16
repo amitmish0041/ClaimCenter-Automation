@@ -696,7 +696,9 @@ async function dismissAnyPopups(page, { log = console.log, maxSeconds = 10 } = {
   while (Date.now() < deadline && attempts < MAX_DISMISS_ATTEMPTS) {
     const btn = page.getByRole('button', { name: /^(OK|Yes|Confirm|Got it|Acknowledge)$/i })
       .filter({ hasNotText: NEVER_AUTO_CLICK }).first();
-    const label = await btn.innerText().catch(() => null);
+    // Short timeout: with no popup there's nothing to match, and the default action timeout made this wait
+    // 15s after every Save Changes / Complete Document (CONFIRMED in a 2026-10-16 trace).
+    const label = await btn.innerText({ timeout: 500 }).catch(() => null);
     if (label && !NEVER_AUTO_CLICK.test(label.trim()) && await btn.isVisible({ timeout: 500 }).catch(() => false)) {
       log(`[Interactive] Dismissing a popup ("${label}")`);
       await btn.click().catch(() => {});
@@ -732,7 +734,12 @@ async function completeDocument(page, { log = console.log, scenarioId = 'scenari
   // has bitten other exact-text matches elsewhere in this codebase (see documentService.js's own notes).
   // Races against a possible validation error banner too, so a real "can't complete this" reason surfaces
   // on its own instead of a generic timeout with no explanation.
-  const propsHeading = page.getByText(/Document Properties/i).first();
+  // The page heading specifically (role=heading, #gw-pageTitle) — NOT getByText().first(): CONFIRMED live
+  // 2026-10-16 ClaimCenter's multi-tab menu keeps a hidden "Current Tab: main. Document Properties"
+  // .gw-menu-header earlier in the DOM, which .first() latched onto and waited on for the full 60s while the
+  // real heading was already showing — so every interactive run timed out here, before the S3 lookup.
+  const propsHeading = page.getByRole('heading', { name: /Document Properties/i })
+    .or(page.locator('#gw-pageTitle').filter({ hasText: /Document Properties/i })).first();
   const errorBanner = page.getByRole('group', { name: /^Errors/i }).first();
   const winner = await Promise.race([
     propsHeading.waitFor({ state: 'visible', timeout: 60000 }).then(() => 'props').catch(() => 'timeout'),
