@@ -264,15 +264,38 @@ async function loginToClaimCenter(page, { username, password } = {}) {
     const usernameField = page.getByRole('textbox', { name: 'Username' });
     const passwordField = page.getByRole('textbox', { name: 'Password' });
 
-    await usernameField.waitFor({ state: 'visible', timeout: 30_000 });
-    await usernameField.fill(user);
-    await passwordField.fill(pass);
-    await page.getByRole('button', { name: 'Log In' }).click();
     // desktop.ready ([id*="TabBar"]) matched 54 elements including a hidden
     // placeholder, so waitForSelector never resolved. The "Search" nav menu
     // item is part of the persistent top nav and confirmed present in the
     // actual post-login snapshot.
-    await page.getByRole('menuitem', { name: 'Search' }).waitFor({ state: 'visible', timeout: 30_000 });
+    const searchMenu = page.getByRole('menuitem', { name: 'Search' });
+    // CONFIRMED 2026-10-17 (trace of a SmartCOMM run's 2nd scenario): a re-login right after an interactive
+    // scenario was filled 0.0s after the page loaded, Log In was clicked, and ClaimCenter came back to an EMPTY
+    // login form — the credentials were dropped — so the old single 30s wait for Search always failed. The 3rd
+    // scenario's login then worked, which is why every other scenario errored on teammates' admin-only runs.
+    // Now: let the form settle, and if it comes back still showing an empty login form, fill and submit again.
+    for (let attempt = 1; ; attempt++) {
+      await usernameField.waitFor({ state: 'visible', timeout: 30_000 });
+      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+      await usernameField.fill(user);
+      await passwordField.fill(pass);
+      await page.getByRole('button', { name: 'Log In' }).click();
+      const clickedAt = Date.now();
+      let outcome = 'timeout';
+      while (Date.now() - clickedAt < 30_000) {
+        if (await searchMenu.isVisible().catch(() => false)) { outcome = 'in'; break; }
+        if (Date.now() - clickedAt > 4_000 && await usernameField.isVisible().catch(() => false)
+          && !(await usernameField.inputValue().catch(() => 'x'))) { outcome = 'bounced'; break; }
+        await page.waitForTimeout(500);
+      }
+      if (outcome === 'in') break;
+      if (outcome === 'timeout' || attempt >= 3) {
+        throw new Error(outcome === 'timeout'
+          ? `ClaimCenter login as ${user}: the Search menu didn't appear within 30s of Log In`
+          : `ClaimCenter login as ${user} kept returning to an empty login form (${attempt} attempts)`);
+      }
+      console.log(`CC Login: login form came back empty after Log In (attempt ${attempt}) — submitting again`);
+    }
   }
 
   console.log('CC Login successful [' + ENV + '] | URL: ' + page.url());

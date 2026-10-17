@@ -642,9 +642,31 @@ function buildRequirementsFromComments(paragraphs, anchors, comments) {
   // additional recipient is added (user direction 2026-10-16, DIG239). The "Copy …" fieldName puts it under
   // validationService's ADDITIONAL_RECIPIENT_CONDITION_RE, so it's re-enabled exactly when a recipient is added.
   const hasConditionalCopyFields = requirements.some((r) => r.enabled === false && /^copy\b/i.test(r.fieldName || ''));
+  // Leftover text that is word-for-word another BA-commented field's sample value is that sample claim data printed
+  // in a second, uncommented spot, not fixed letter wording (CONFIRMED 2026-10-17, DIG242: the recipient line
+  // "TEST TEST1246" has no comment of its own — the one beside it is on the blank space after it — while "Test
+  // Test1246" is the sample under its To Name / Insured Name comments). Checked as that field instead of as static
+  // text, which could never match a real claim. Exact case, 2+ words and not a label ("Address:"), so a heading like
+  // DIG16's "EXPLANATION" or DIG174's "Address:" label stays static. Person-name fields only (To/From/Insured Name,
+  // Claim Representative): a company name or the letterhead phone ("(800) 877-0600", DIG36/DIG101) is often fixed text too.
+  const sampleKey = (s) => normalizeWs(s).replace(/[.,;]+$/, '');
+  const fieldBySample = new Map();
+  for (const { anchor } of matches) {
+    const key = sampleKey(anchor.text);
+    if (key.split(' ').length < 2 || /:$/.test(key) || CONDITIONAL_RE.test(anchor.comment.fullText)) continue;
+    if (!/\bname\b|\brepresentative\b/i.test(anchor.comment.fullText) || /company|office/i.test(anchor.comment.fullText)) continue;
+    // The sample recipient is usually also the sample insured; an uncommented copy of it is the address block's name.
+    if (!fieldBySample.has(key) || /\bto name\b/i.test(anchor.comment.fullText)) fieldBySample.set(key, anchor.comment.fullText);
+  }
   let offset = 0;
   for (const frag of residual.split('\n')) {
-    for (const req of classifyResidualFragment(frag, offset, { sampleNames })) {
+    for (let req of classifyResidualFragment(frag, offset, { sampleNames })) {
+      const sampleOf = req.type === 'requiredText' && fieldBySample.get(sampleKey(req.expectedValue));
+      if (sampleOf) {
+        const docOrder = req.docOrder;
+        req = makeDynamicRequirement(n + 1, sampleOf, req.expectedValue);
+        req.docOrder = docOrder;
+      }
       if (hasConditionalCopyFields && req.type === 'requiredText' && /^c\.?c\.?\s*:?$/i.test(String(req.expectedValue || '').trim())) {
         req.fieldName = 'Copy (cc:) label';
         req.enabled = false;
