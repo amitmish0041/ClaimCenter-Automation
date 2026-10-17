@@ -279,6 +279,33 @@ function buildRequirementsHeuristic(paragraphs) {
       continue;
     }
 
+    // An exposure financials table ("Type  Reserves  Paid  Expenses  Recoveries  Net Incurred" — DIG26, user direction
+    // 2026-10-17): the rows under it are the mock-up's SAMPLE exposures and the "Total" row its sample sums — real
+    // values per claim, from the payload. One check for every exposure's row and one for the totals replace them.
+    if (/^type\s+reserves\s+paid\s+expenses\s+recoveries\s+net\s+incurred$/i.test(line.replace(/\s+/g, ' ').trim())) {
+      requirements.push({ id: `R${++n}`, description: staticContentDescription(line), type: 'requiredText', expectedValue: line, docOrder: i });
+      requirements.push({ id: `R${++n}`, description: 'Every exposure on the claim prints a row: type, reserves, paid, expenses, recoveries, net incurred (from the payload)', type: 'exposureTable', docOrder: i + 0.1 });
+      let j = i + 1;
+      while (j < paragraphs.length && j <= i + 40 && !/^total\b/i.test(paragraphs[j].trim()) && !/:\s*$/.test(paragraphs[j].trim())) j++;
+      if (j < paragraphs.length && /^total\b/i.test(paragraphs[j].trim())) {
+        requirements.push({ id: `R${++n}`, description: 'The "Total" row shows the claim\'s totals (from the payload)', type: 'exposureTotals', docOrder: j });
+        i = j;
+      } else {
+        i = j - 1;
+      }
+      continue;
+    }
+    // "Label:<tab>value" with a known label (DIG26's "Loss Description:\tCollision") — the label is fixed text, the
+    // value is the claim's own data.
+    const tabbed = line.match(/^([A-Za-z][A-Za-z ./']{1,40}):\s*\t\s*(\S.*)$/);
+    if (tabbed && synonyms.lookup(tabbed[1]) !== undefined) {
+      requirements.push({ id: `R${++n}`, description: `Label "${tabbed[1]}:" must appear`, type: 'requiredText', expectedValue: `${tabbed[1]}:`, docOrder: i });
+      const req = makeDynamicRequirement(++n, tabbed[1], tabbed[2].trim());
+      req.docOrder = i + 0.1;
+      requirements.push(req);
+      continue;
+    }
+
     const inlinePairs = extractInlineLabelValues(line);
     if (inlinePairs) {
       for (const { label, value } of inlinePairs) {

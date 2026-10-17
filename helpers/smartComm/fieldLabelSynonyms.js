@@ -28,6 +28,10 @@ const LABEL_TO_TESTDATA_FIELD = {
   'LOSS DATE': 'testData.lossDate', // catalog scan 2026-09-04 found this exact wording separately from "Date of Loss" on 10 templates
   // One part of the loss date (DIG27–32: "THE 5 DAY OF February, 2024") — pdfValidationService compares just
   // that part (see dateLossPart). Were BLOCKED as unmapped until 2026-10-17 (user direction).
+  // DIG26 (Claim Status Report, legacy .doc): "Loss Description:\tCollision" / "Location:\t\t2005 MARKET ST…" were
+  // asserted as fixed text (2026-10-17). raw.* reads the SmartCOMM payload itself (see pdfValidationService).
+  'LOSS DESCRIPTION': 'raw.claim.description',
+  'LOCATION': 'testData.lossLocation',
   'DATE OF LOSS DAY': 'testData.lossDate',
   'DATE OF LOSS MONTH': 'testData.lossDate',
   'DATE OF LOSS YEAR': 'testData.lossDate',

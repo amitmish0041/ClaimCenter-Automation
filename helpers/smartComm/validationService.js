@@ -662,6 +662,9 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     const context = {
       layoutText,
       testData: effectiveTestData, scenario, template, recipient, additionalRecipient,
+      // The SmartCOMM payload itself (ccDocumentCreationRequest) — "raw.*" sources (fieldLabelSynonyms) and the
+      // exposure-table checks read it directly.
+      raw: rawPayloadRoot,
       // Spreads every flat field payloadService already returns (claimNumber,
       // lossDate, policyNumber, policyEffectiveDate/ExpirationDate,
       // underwritingCompany, agentNumber, vehicleYear/Make/Model/Vin/

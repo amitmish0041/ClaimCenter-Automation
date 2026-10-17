@@ -526,6 +526,56 @@ function evaluateOne(req, haystack, context) {
         reason: m ? undefined : `No text matching pattern /${req.pattern}/ found anywhere in the generated document.`,
       };
     }
+    // DIG26's exposure financials table (see templateRequirementService's exposure-table rule): every exposure in the
+    // payload must print its type and amounts; the Total row the claim's sums. Amounts as money ("1193.00" → "$1,193"
+    // or "$1,193.00"), never as part of a longer number.
+    case 'exposureTable':
+    case 'exposureTotals': {
+      const raw = context && context.raw;
+      if (!raw || !raw.claim) return { expected: '(from the payload)', actual: 'N/A', result: 'BLOCKED', reason: 'The SmartCOMM payload wasn\'t available for this scenario, so the exposure amounts couldn\'t be checked.' };
+      const money = (amt) => {
+        const n = Math.abs(Number(amt && amt.amount !== undefined ? amt.amount : amt));
+        if (!Number.isFinite(n)) return null;
+        const whole = n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+        // With or without thousands separators — DIG26 prints "$1200.00" / "Total$1193.00" (live 2026-10-17).
+        const forms = [...new Set([whole, n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), String(Math.round(n * 100) / 100), n.toFixed(2)])]
+          .map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        return { label: `$${whole}`, re: new RegExp(forms.map((f) => `\\$\\s?${f}${/\./.test(f) ? '' : '(?:\\.0{1,2})?'}(?![\\d,])`).join('|')) };
+      };
+      const COLS = [['reserves', 'openReserves_Ext', 'sumReserves_Ext'], ['paid', 'totalPaid_Ext', 'sumPaid_Ext'], ['expenses', 'totalExpenses_Ext', 'sumExpenses_Ext'], ['recoveries', 'totalRecoveries_Ext', 'sumRecoveries_Ext'], ['net incurred', 'totalIncurred_Ext', 'sumIncurred_Ext']];
+      const missing = []; const shown = [];
+      if (req.type === 'exposureTotals') {
+        for (const [label, , sumField] of COLS) {
+          const m = money(raw.claim[sumField]);
+          if (!m) continue;
+          shown.push(`${label} ${m.label}`);
+          if (!m.re.test(haystack)) missing.push(`total ${label} ${m.label}`);
+        }
+      } else {
+        const exposures = [].concat(raw.claim.exposures || []).flatMap((x) => (x && x.exposures ? [].concat(x.exposures) : [x])).filter(Boolean);
+        if (!exposures.length) return { expected: 'One row per exposure', actual: 'No exposures in the payload', result: 'SKIPPED', reason: 'The claim has no exposures in the SmartCOMM payload, so there are no rows to check.' };
+        // The type cell is an editable field the interactive check overwrites (QA-EDIT-n, live DIG26), so a missing type
+        // isn't counted when this run's edits are in the document. Types also stay out of `expected`, which the
+        // "overwritten by the test" annotation compares against — otherwise a real amount problem would be SKIPPED too.
+        const typeEditedByTest = /QA-EDIT-\d/.test(haystack);
+        exposures.forEach((e, k) => {
+          const type = e.type && (e.type.name || e.type);
+          const row = [];
+          if (type && !typeEditedByTest && !normHaystack.includes(normalizeWs(String(type)).toLowerCase())) missing.push(`exposure ${k + 1} type "${type}"`);
+          for (const [label, field] of COLS) {
+            const m = money(e[field]);
+            if (!m) continue;
+            row.push(`${label} ${m.label}`);
+            if (!m.re.test(haystack)) missing.push(`exposure ${k + 1} ${label} ${m.label}`);
+          }
+          shown.push(`${k + 1}. ${row.join(', ')}`);
+        });
+      }
+      const expected = shown.join(' | ') || '(no amounts in the payload)';
+      return missing.length
+        ? { expected, actual: 'Not Found', result: 'FAIL', reason: `Missing from the generated document: ${missing.join('; ')}.` }
+        : { expected, actual: expected, result: 'PASS' };
+    }
     default:
       return { expected: 'N/A', actual: 'N/A', result: 'BLOCKED', reason: `Unknown requirement type "${req.type}"` };
   }
