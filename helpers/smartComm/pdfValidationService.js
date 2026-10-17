@@ -249,6 +249,17 @@ function evaluateOne(req, haystack, context) {
   const normHaystack = normalizeWs(haystack).toLowerCase();
   switch (req.type) {
     case 'requiredText': {
+      // A short value (a date's day/month/year — see validationService.dateLossPart) only counts as a whole word:
+      // "5" anywhere in a letter means nothing. `wordValues` lists every accepted spelling ("5", "05").
+      if (req.wordValues) {
+        const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const hit = req.wordValues.find((w) => new RegExp(`(^|[^A-Za-z0-9])${esc(w)}(?![A-Za-z0-9])`, 'i').test(haystack));
+        if (hit) return { expected: req.expectedValue, actual: hit, result: 'PASS', reason: req.wordNote };
+        if (req.wasEditedByTest) {
+          return { expected: req.expectedValue, actual: 'Not Found', result: 'SKIPPED', reason: 'Not found as a separate word — but this field was itself overwritten by this test\'s own editable-field check, which consumed the only occurrence.' };
+        }
+        return { expected: req.expectedValue, actual: 'Not Found', result: 'FAIL', reason: `"${req.expectedValue}" doesn't appear as a separate word anywhere in the generated document. ${req.wordNote || ''}`.trim() };
+      }
       const found = normHaystack.includes(normalizeWs(req.expectedValue).toLowerCase());
       if (found) return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS' };
       // An explicitly-allowed alternative value (e.g. the UTC date for "current date" — see payloadXpathService),

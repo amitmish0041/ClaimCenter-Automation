@@ -1711,6 +1711,22 @@ function isNoFraudLanguageRequired(match) {
 // claim's LOB (e.g. Vehicle Make on a Homeowners claim, which has no exposure/vehicle node at all) simply has
 // nothing to resolve, so no check gets generated for it either — only fields with REAL, resolved data AND a
 // real template reference become an assertion.
+// "Date of Loss Day/Month/Year" rows share the full loss date's Xpath in the Data Dictionary, but the letter prints
+// just that part ("THE 5 DAY OF February, 2024" — DIG27/DIG28, user direction 2026-10-17), so compare the part
+// only. Returns { value, accept[], note } or null for any other row / a value that isn't a date.
+function dateLossPart(attributeName, value) {
+  const which = (String(attributeName || '').match(/\b(day|month|year)\s*$/i) || [])[1];
+  if (!which) return null;
+  const s = String(value || '').trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const d = iso ? new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])) : new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  const note = `"${attributeName}" is one part of the payload's loss date (${s}).`;
+  if (/day/i.test(which)) { const day = d.getDate(); return { value: String(day), accept: [String(day), String(day).padStart(2, '0')], note }; }
+  if (/month/i.test(which)) { const m = d.toLocaleString('en-US', { month: 'long' }); return { value: m, accept: [m, d.toLocaleString('en-US', { month: 'short' })], note }; }
+  return { value: String(d.getFullYear()), accept: [String(d.getFullYear())], note };
+}
+
 function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, interactiveChecks, log, { additionalRecipientAdded = false } = {}) {
   const templateFields = (baseRequirements || [])
     .map((r) => ({ req: r, fn: dataDictionaryService.normalizeForMatch(r.fieldName) }))
@@ -1758,7 +1774,13 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
     // though it's excluded from matchedCheck above — if the fallback whole-document search below still can't
     // find the original value anywhere, pdfValidationService needs to know it was this test's own edit that
     // did that, not a real template defect (per user direction 2026-10-06, DIG236).
-    const editedByTest = (interactiveChecks || []).some((c) => c.dictionaryField === row.attributeName && c.observedChanged === true);
+    // ...or an edited field that wasn't matched to this row by label but HELD exactly this value before the edit
+    // (CONFIRMED 2026-10-17, DIG27/DIG28: "RECEIVED OF [QA-EDIT-5] HEREINAFTER CALLED THE COMPANY" — the
+    // Underwriting Company field, whose label "RECEIVED OF" matches no dictionary row, reported as a FAIL).
+    const sameText = (a, b) => pdfValidationService.normalizeWs(a || '').replace(/[[\]]/g, '').trim().toLowerCase() === pdfValidationService.normalizeWs(b || '').trim().toLowerCase();
+    const editedByTest = (interactiveChecks || []).some((c) => c.observedChanged === true
+      && (c.dictionaryField === row.attributeName || (String(result.value).length >= 4 && sameText(c.before, result.value))));
+    const datePart = dateLossPart(row.attributeName, result.value);
     // Every template field this attribute belongs to is switched off for THIS scenario (e.g. Agent Number,
     // which prints only for an added additional recipient — DIG239 2026-10-16, user direction): the payload
     // still carries the value, but the document correctly doesn't print it, so skip with the same reason.
@@ -1773,8 +1795,8 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
       id: `XP${n}`,
       description: `Value for "${row.attributeName}" must match the SmartCOMM payload (via Data Dictionary Xpath)`,
       type: matchedCheck ? 'fieldValueMatch' : 'requiredText',
-      expectedValue: String(result.value),
-      alsoAccept: result.alsoAccept, alsoAcceptNote: result.alsoAcceptNote,
+      expectedValue: datePart ? datePart.value : String(result.value),
+      ...(datePart ? { wordValues: datePart.accept, wordNote: datePart.note, alsoAccept: datePart.accept } : { alsoAccept: result.alsoAccept, alsoAcceptNote: result.alsoAcceptNote }),
       fieldValue: matchedCheck ? (matchedCheck.committedMarker || matchedCheck.after || matchedCheck.before) : undefined,
       fieldLabel: matchedCheck ? matchedCheck.label : undefined,
       wasEditedByTest: !matchedCheck && editedByTest,
