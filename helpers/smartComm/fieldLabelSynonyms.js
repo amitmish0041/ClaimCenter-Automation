@@ -26,6 +26,11 @@ const LABEL_TO_TESTDATA_FIELD = {
   'DATE OF ACCIDENT': 'testData.lossDate',
   'DATE OF LOSS': 'testData.lossDate',
   'LOSS DATE': 'testData.lossDate', // catalog scan 2026-09-04 found this exact wording separately from "Date of Loss" on 10 templates
+  // One part of the loss date (DIG27–32: "THE 5 DAY OF February, 2024") — pdfValidationService compares just
+  // that part (see dateLossPart). Were BLOCKED as unmapped until 2026-10-17 (user direction).
+  'DATE OF LOSS DAY': 'testData.lossDate',
+  'DATE OF LOSS MONTH': 'testData.lossDate',
+  'DATE OF LOSS YEAR': 'testData.lossDate',
   'D/L': 'testData.lossDate',
   'FILE NUMBER': 'testData.claimNumber',
   'FILE NO': 'testData.claimNumber',
@@ -48,6 +53,9 @@ const LABEL_TO_TESTDATA_FIELD = {
   'LOSS LOCATION': 'testData.lossLocation', // CONFIRMED live on DIG126 (Witness Report)
   'POLICY NUMBER': 'testData.policyNumber', // captured live off the info bar's "Pol:" field
   'UNDERWRITING COMPANY': 'testData.underwritingCompany', // captured live off Summary > Basics
+  // DIG242's BA comment on "Underwriting Co.: Southern Insurance Company of Virginia" — same field, was BLOCKED
+  // as unmapped (user direction 2026-10-17).
+  'UNDERWRITING OFFICE': 'testData.underwritingCompany',
   // The claim's agent/producer — from the payload's own "agent"-role
   // contact and policy.producerCode (catalog scan 2026-09-04: "cc:
   // 0000988" at the bottom of a real generated letter is exactly this
@@ -99,6 +107,7 @@ const LABEL_TO_TESTDATA_FIELD = {
   // non-comma spelling of the city/state/zip label in the wild.
   'TO NAME': 'recipient.name',
   'TO STREET ADDRESS': 'recipient.streetAddress',
+  'TO STREET': 'recipient.streetAddress', // DIG60/DIG103/DIG106's shorter wording — was BLOCKED as unmapped (2026-10-17)
   'TO ADDRESS': 'recipient.address',
   'TO CITY, STATE, ZIP': 'recipient.cityStateZip',
   'TO CITY, STATE ZIP': 'recipient.cityStateZip',

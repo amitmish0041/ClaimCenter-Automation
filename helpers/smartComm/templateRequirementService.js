@@ -208,7 +208,9 @@ const EITHER_OR_RE = /\beither\s+[“"']([^”"']+)[”"']\s+or\s+[“"']([^”"
 
 function makeDynamicRequirement(n, fieldName, value, { conditional = false, conditionReason = '' } = {}) {
   const field = synonyms.lookup(fieldName);
-  const shape = classifyDynamicShape(value) || 'text';
+  // "Date of Letter" whose comment anchors only part of the sample date (DIG129/190–192: just "2026") is still a
+  // date — checked as date-shaped instead of BLOCKED with no shape (2026-10-17).
+  const shape = classifyDynamicShape(value) || (/^date of letter$/i.test(String(fieldName || '').trim()) ? 'date' : 'text');
   // A CONDITIONAL field with no dictionary mapping and a generic "text" shape is very likely a static,
   // toggleable content block (e.g. a letterhead paragraph shown only when a Choices-panel question is Yes)
   // rather than an unrecognized PER-CLAIM placeholder sample value — CONFIRMED live 2026-10-02 (DIG52's

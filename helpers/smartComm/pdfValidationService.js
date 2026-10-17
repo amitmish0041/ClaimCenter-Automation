@@ -242,6 +242,22 @@ function findNearWording(haystack, expectedValue, maxExtra = 2) {
   return null;
 }
 
+// "Date of Loss Day/Month/Year" rows share the full loss date's Xpath in the Data Dictionary, but the letter prints
+// just that part ("THE 5 DAY OF February, 2024" — DIG27/DIG28, user direction 2026-10-17), so compare the part
+// only. Returns { value, accept[], note } or null for any other row / a value that isn't a date.
+function dateLossPart(attributeName, value) {
+  const which = (String(attributeName || '').match(/\b(day|month|year)\s*$/i) || [])[1];
+  if (!which) return null;
+  const s = String(value || '').trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const d = iso ? new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])) : new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  const note = `"${attributeName}" is one part of the loss date (${s}).`;
+  if (/day/i.test(which)) { const day = d.getDate(); return { value: String(day), accept: [String(day), String(day).padStart(2, '0')], note }; }
+  if (/month/i.test(which)) { const m = d.toLocaleString('en-US', { month: 'long' }); return { value: m, accept: [m, d.toLocaleString('en-US', { month: 'short' })], note }; }
+  return { value: String(d.getFullYear()), accept: [String(d.getFullYear())], note };
+}
+
 function evaluateOne(req, haystack, context) {
   if (req.enabled === false) {
     return { expected: 'N/A', actual: 'SKIPPED', result: 'SKIPPED', reason: req.disabledReason || 'Disabled' };
@@ -476,6 +492,10 @@ function evaluateOne(req, haystack, context) {
           : `Neither the live claim data nor the Test Data claim inventory has a "${field}" value for this claim — presence not verified.`;
         return { expected: `(from ${req.expectedSource})`, actual: 'N/A', result: 'BLOCKED', reason };
       }
+      // "Date of Loss Day/Month/Year" (DIG27–32): only that part of the loss date prints ("THE 5 DAY OF February,
+      // 2024"), so compare the part, as a whole word.
+      const part = dateLossPart(req.fieldName, expected);
+      if (part) return evaluateOne({ ...req, type: 'requiredText', expectedValue: part.value, wordValues: part.accept, wordNote: part.note }, haystack, context);
       const found = normHaystack.includes(normalizeWs(expected).toLowerCase());
       if (found) return { expected, actual: expected, result: 'PASS' };
       // The same date in the template's own format (DIG47B prints the loss date as 08/06/2026; the claim data
@@ -521,4 +541,4 @@ function evaluateRequirements(requirements, text, context) {
   }));
 }
 
-module.exports = { extractPdfText, evaluateRequirements, normalizeWs };
+module.exports = { extractPdfText, evaluateRequirements, normalizeWs, dateLossPart };
