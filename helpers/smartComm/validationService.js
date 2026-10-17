@@ -950,7 +950,9 @@ function buildEditValue(field, n, digNumber) {
   if (dataType === 'Date') return buildDateValue(match.row.sampleValue, n);
   if (dataType === 'Money' || dataType === 'Number') return String(900 + n);
   if (dataType === 'Time') return buildTimeValue(match.row.sampleValue, n);
-  return /\$\s*\[?\s*$/.test(field.labelContext || '') ? String(900 + n) : `[QA-EDIT-${n}]`;
+  // No brackets (user direction 2026-10-17): they were typed as part of the value and printed in the completed PDF
+  // ("RECEIVED OF [QA-EDIT-4] HEREINAFTER…"), which a manual edit never shows.
+  return /\$\s*\[?\s*$/.test(field.labelContext || '') ? String(900 + n) : `QA-EDIT-${n}`;
 }
 
 // Claims a still-unmatched interactiveChecks entry by comparing its OWN captured value (`before` — the
@@ -1616,7 +1618,13 @@ function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
   const haystackNoWs = haystack.replace(/\s+/g, '');
   const foundInPdf = (marker) => {
     const needle = pdfValidationService.normalizeWs(marker || '').toLowerCase();
-    return !!needle && (haystack.includes(needle) || haystackNoWs.includes(needle.replace(/\s+/g, '')));
+    if (!needle) return false;
+    // "qa-edit-1" must not match inside "qa-edit-10" (no brackets around the marker any more to separate them).
+    if (/^qa-edit-\d+$/.test(needle)) {
+      const re = new RegExp(`${needle}(?!\\d)`);
+      return re.test(haystack) || re.test(haystackNoWs);
+    }
+    return haystack.includes(needle) || haystackNoWs.includes(needle.replace(/\s+/g, ''));
   };
   // One SmartCOMM field whose placeholder wraps across lines renders as MULTIPLE editable spans sharing the
   // SAME technical name (CONFIRMED live 2026-10-13, DIG108: editableField3 split into INT10 "--" + INT11

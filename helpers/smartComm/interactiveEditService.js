@@ -653,8 +653,10 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, log = console
   // as not edited so the retry pass tries this field again. "X" (checkbox) only ever counts in its own span.
   const placement = await field.locator.evaluate((own, needle) => {
     const clean = (t) => (t || '').replace(/\s+/g, ' ').trim();
-    if ((own.textContent || '').includes(needle)) return { after: clean(own.textContent) };
-    const hit = needle === 'X' ? null : Array.from(own.ownerDocument.querySelectorAll('span.th-data-value-editable')).find((s) => s.textContent.includes(needle));
+    // "QA-EDIT-1" must not match a span showing "QA-EDIT-10".
+    const has = (t) => (/^QA-EDIT-\d+$/.test(needle) ? new RegExp(`${needle}(?!\\d)`).test(t || '') : (t || '').includes(needle));
+    if (has(own.textContent)) return { after: clean(own.textContent) };
+    const hit = needle === 'X' ? null : Array.from(own.ownerDocument.querySelectorAll('span.th-data-value-editable')).find((s) => has(s.textContent));
     if (!hit) return { after: null };
     const block = (el) => el.closest('p, li, td, th') || el.parentElement;
     return block(hit) === block(own) ? { after: clean(hit.textContent) } : { after: null, landedElsewhere: clean(hit.textContent) };

@@ -299,7 +299,7 @@ function evaluateOne(req, haystack, context) {
           // this run's own "[QA-EDIT-n]" (or the field's value marker "[") sits where the underscores were.
           let hasBlank = false;
           for (let at = haystack.indexOf(fuzzy); at >= 0 && !hasBlank; at = haystack.indexOf(fuzzy, at + 1)) {
-            if (/_{3,}|\[/.test(haystack.slice(at, at + fuzzy.length + 14))) hasBlank = true;
+            if (/_{3,}|\[|QA-EDIT-\d/.test(haystack.slice(at, at + fuzzy.length + 14))) hasBlank = true;
           }
           if (!hasBlank) {
             return {
