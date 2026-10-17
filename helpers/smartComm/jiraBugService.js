@@ -96,6 +96,7 @@ const SUBJECTS = [
   ['signature', /signature|from (name|title|phone|email)|designation|sincerely/i], ['header', /claim no|header|\bRE\b section|\bRE:/i],
   ['date_letter', /date of letter/i], ['agent', /agent number/i], ['loss_location', /loss location/i],
   ['align', /align|LAYOUT1/i], ['paragraph', /paragraph|merged|run.?on|LAYOUT2/i], ['order', /\border\b|LAYOUT3|printed \d(st|nd|rd|th)/i],
+  ['choice', /letterhead|choices? (panel|option)|CHOICE\d/i],
   ['generate', /fail(ed)? to (generate|load)|unable to generate|error (when|during|generating)|GENERATE_FAILED|COMPLETE_FAILED|prolog/i],
 ];
 const EDIT_RE = /editable|not able to edit|unable to edit|able to (edit|delete)|should (not )?be (editable|locked)|can delete|LOCK1/i;

@@ -161,6 +161,22 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
   }
 }
 
+// A mapping doc's full text (body + BA comments), read once per file — for the CHOICE checks in runScenario.
+const mappingDocTextCache = new Map();
+function mappingDocText(docPath) {
+  if (!docPath || !/\.docx$/i.test(docPath)) return '';
+  if (!mappingDocTextCache.has(docPath)) {
+    let text = '';
+    try {
+      const zip = new (require('adm-zip'))(docPath);
+      text = ['word/document.xml', 'word/comments.xml'].filter((n) => zip.getEntry(n))
+        .map((n) => zip.readAsText(n).replace(/<[^>]+>/g, ' ')).join(' ').replace(/\s+/g, ' ');
+    } catch (_) { /* unreadable — the requirements text is still used */ }
+    mappingDocTextCache.set(docPath, text);
+  }
+  return mappingDocTextCache.get(docPath);
+}
+
 // ClaimCenter's generic server-side failure banner ("An application error occurred. Contact your administrator
 // if the problem persists.") — shown in place of a screen that couldn't be built.
 async function hasApplicationError(page) {
@@ -722,6 +738,39 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     }
     if (base.claimFallbackNote) {
       validations.push({ id: 'DATA2', description: 'The scenario ran on its own test claim', expected: `Claim ${base.originalClaimNumber}`, actual: `Backup claim ${base.claimNumber}`, result: 'SKIPPED', reason: base.claimFallbackNote });
+    }
+    // A Choices-panel question the editor offers ("Apply Medical Letterhead?") that the mapping doc never defines —
+    // per user direction 2026-10-17 a defect: DIG27/DIG28 have no medical-letterhead option in their requirements,
+    // yet the editor offers it (and answering Yes prints the medical-bills letterhead). Defined = the question's
+    // significant words appear in the mapping doc's own comments or text (e.g. DIG239's "Display only if Apply
+    // Medical Letterhead? is selected Yes").
+    // The question only — choicesApplied entries are "<question>: <answer>", and a paragraph choice's answer is the
+    // chosen paragraph's own text ("Select Language to display in Paragraph: for bodily injury…", DIG36).
+    const choiceQuestions = [...new Set((choicesApplied || []).map((c) => String(c).split(':')[0].trim()).filter((q) => q && !/^\(unlabeled/i.test(q)))];
+    if (choiceQuestions.length) {
+      // The whole mapping doc (body + comments), not just the derived requirements: DIG11 describes its "PACE notice
+      // language" option in body text that never becomes a requirement.
+      const docText = `${mappingDocText(sourceFile)} ${(requirements || []).map((r) => [r.fieldName, r.expectedValue, r.sampleValue, r.disabledReason].filter(Boolean).join(' ')).join(' ')}`.toLowerCase();
+      choiceQuestions.forEach((q, i) => {
+        const words = (q.toLowerCase().match(/[a-z]{4,}/g) || []).filter((w) => !['apply', 'display', 'show', 'select', 'include'].includes(w));
+        // Also with spaces removed: the editor sometimes runs a label's words together ("PACEnoticelanguagerequired?", DIG11).
+        const compact = (x) => x.toLowerCase().replace(/[^a-z]/g, '');
+        // Run-together labels can't be split into words, so take the longest start of the label found in the doc.
+        const cq = compact(q);
+        const cd = compact(docText);
+        let prefix = 0;
+        while (prefix < cq.length && cd.includes(cq.slice(0, prefix + 1))) prefix++;
+        // The significant words together, as a phrase ("medical letterhead") — separately they turn up in unrelated
+        // places (DIG28: "See Base Template/Letterhead", medical wording in the release text).
+        const defined = (words.length > 0 && cd.includes(words.join('')))
+          || (cq.length >= 8 && prefix >= Math.max(10, Math.ceil(cq.length * 0.6)));
+        validations.push({
+          id: `CHOICE${i + 1}`, description: `Choices option "${q}" is defined in the mapping doc`,
+          expected: 'Defined in the mapping doc', actual: defined ? 'Defined' : 'Offered in the editor, not in the mapping doc',
+          result: defined ? 'PASS' : 'FAIL',
+          ...(defined ? {} : { reason: `The interactive editor offers the "${q}" choice, but this template's mapping doc has no such option — the template shows a choice (and its content) that wasn't specified.` }),
+        });
+      });
     }
     // Layout against the Word mapping doc — alignment, paragraph breaks, header order (layoutValidationService).
     try {
