@@ -451,6 +451,11 @@ function classifyResidualFragment(fragment, docOrder, { sampleNames = [] } = {})
   // The mock-up's own sample VALUE for a merge field its BA comments never anchored (e.g. the signature
   // block's "DONEGAL INSURANCE GROUP" = Underwriting Company) — check the claim's real value instead.
   const sampleField = synonyms.sampleValueField(line);
+  // ...except as the document's very FIRST line: there it's the mock-up's letterhead heading ("DONEGAL INSURANCE
+  // GROUP" above "Marietta, PA" / the form title — DIG7, DIG14, DIG27–32, DIG151), which the live document prints
+  // as the base template's logo letterhead, not the Underwriting Company field (CONFIRMED 2026-10-17, DIG28: no
+  // Underwriting Company comment anywhere, yet it FAILed looking for the claim's company). Not checked.
+  if (sampleField && docOrder === 0) return [];
   if (sampleField) return [{ ...makeDynamicRequirement(0, sampleField, line), docOrder }];
   // ...or a sentence starting with that sample value: the value as the field, the rest as fixed wording.
   const samplePrefix = synonyms.sampleValuePrefix(line);
