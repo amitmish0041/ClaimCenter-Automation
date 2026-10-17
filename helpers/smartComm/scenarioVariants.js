@@ -38,7 +38,9 @@
 const VARIANTS = [
   { documentType: 'Other', status: 'Draft', securityType: 'Unrestricted document', returnEnvelope: true, certifiedMail: true },
   { documentType: 'Letter sent', status: 'Final', securityType: 'Sensitive document', returnEnvelope: false, certifiedMail: true },
-  { documentType: 'Form sent', status: 'Approved', securityType: 'Unrestricted document', returnEnvelope: true, certifiedMail: false },
+  // Was 'Form sent' / 'Approved' — the third scenario kept failing (user direction 2026-10-17), so it now reuses
+  // the Document Type and Status the first two scenarios complete with, still varying the mail options.
+  { documentType: 'Letter sent', status: 'Draft', securityType: 'Unrestricted document', returnEnvelope: true, certifiedMail: false },
 ];
 
 // One login per variant slot, read from .env as SMARTCOMM_TEST_USER_<n> /

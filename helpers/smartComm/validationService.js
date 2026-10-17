@@ -161,6 +161,12 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
   }
 }
 
+// ClaimCenter's generic server-side failure banner ("An application error occurred. Contact your administrator
+// if the problem persists.") — shown in place of a screen that couldn't be built.
+async function hasApplicationError(page) {
+  return page.getByText(/An application error occurred/i).filter({ visible: true }).first().isVisible().catch(() => false);
+}
+
 // ClaimCenter answers a claim the current user can't see with "Sorry, you do
 // not have permission to view this claim. Use the tabs above to navigate to
 // another claim." — there is then no Actions menu, which used to surface as
@@ -449,14 +455,50 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
         console.log(`[SmartComm] ${scenario.scenarioId}: ${base.partiesNote}`);
       }
     }
-    const effectiveTestData = { ...scenario.testData, ...Object.fromEntries(Object.entries(captured).filter(([, v]) => v !== undefined)) };
+    const withCaptured = (td, c) => ({ ...td, ...Object.fromEntries(Object.entries(c).filter(([, v]) => v !== undefined)) });
+    let effectiveTestData = withCaptured(scenario.testData, captured);
     // Every party's own roles (e.g. "Mark Antolick" -> ["Driver", "Covered Party", ...]) — captured once,
     // here, while still on the Summary screen (same table captureClaimSummary just read), for
     // setAdditionalRecipient to optionally prefer a specific role (see templateWantsProducerRole below).
-    const partiesRoles = await claimSummaryService.capturePartiesRoles(page);
+    let partiesRoles = await claimSummaryService.capturePartiesRoles(page);
     console.log(`[SmartComm] ${scenario.scenarioId}: claim data — insuredName=${JSON.stringify(effectiveTestData.insuredName)} lossDate=${JSON.stringify(effectiveTestData.lossDate)} lossLocation=${JSON.stringify(effectiveTestData.lossLocation)} claimantName=${JSON.stringify(effectiveTestData.claimantName)}`);
 
-    await documentService.openCreateFromTemplate(page);
+    // ClaimCenter can throw "An application error occurred" on Create from template for one specific claim, every
+    // time (CONFIRMED 2026-10-16/17: WC-DE-01-26-0747131, DIG23DE's third scenario — and then every WC-DE backup claim
+    // too). Per user direction, retry on claims of OTHER LOBs (scenarioService's otherLobAlternates) instead.
+    try {
+      await documentService.openCreateFromTemplate(page);
+    } catch (err) {
+      if (!/CREATE_FROM_TEMPLATE_NOT_OPENED/.test(err.message) || !(await hasApplicationError(page))) throw err;
+      const failedClaim = scenario.testData.claimNumber;
+      let opened = false;
+      const otherLob = scenario.otherLobAlternates || [];
+      for (const alt of otherLob) {
+        console.log(`[SmartComm] ${scenario.scenarioId}: ClaimCenter application error on Create from template for claim ${failedClaim} — trying claim ${alt.claimNumber} of another LOB (${alt.lob}/${alt.state})`);
+        await openExistingClaim(page, alt.claimNumber);
+        if (await claimAccessDenied(page, alt.claimNumber)) continue;
+        const altCaptured = await claimSummaryService.captureClaimSummary(page);
+        if (unsuitable(altCaptured)) continue;
+        const altRoles = await claimSummaryService.capturePartiesRoles(page);
+        if (!(await documentService.openCreateFromTemplate(page).then(() => true, () => false))) continue;
+        scenario.testData = alt;
+        base.claimNumber = alt.claimNumber;
+        base.originalClaimNumber = failedClaim;
+        base.lob = alt.lob;
+        base.state = alt.state;
+        base.claimFallbackNote = `ClaimCenter threw an application error on Create from template for claim ${failedClaim} (${scenario.lob}/${scenario.state}); this scenario ran on claim ${alt.claimNumber} of another LOB (${alt.lob}/${alt.state}) instead, so LOB-specific content may not apply to it.`;
+        captured = altCaptured;
+        effectiveTestData = withCaptured(alt, altCaptured);
+        partiesRoles = altRoles;
+        console.log(`[SmartComm] ${scenario.scenarioId}: ${base.claimFallbackNote}`);
+        opened = true;
+        break;
+      }
+      if (!opened) {
+        err.message += ` ClaimCenter showed "An application error occurred" on claim ${failedClaim}${otherLob.length ? ` and on ${otherLob.length} claim(s) of other LOBs` : ' (no claims of other LOBs to try)'}.`;
+        throw err;
+      }
+    }
     await documentService.selectTemplate(page, [template.searchName, template.searchNameAlt]);
     const recipient = await documentService.setPrimaryRecipient(page, { preferredName: effectiveTestData.insuredName }); // { name, address }
     const scenarioLog = (m) => console.log(`[SmartComm] ${scenario.scenarioId}: ${m}`);
@@ -678,6 +720,9 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     if (base.partiesNote) {
       validations.push({ id: 'DATA1', description: 'Claimant and insured are different people on the test claim (so a claimant/insured swap would be caught)', expected: 'Different claimant and insured', actual: 'Same person', result: 'SKIPPED', reason: base.partiesNote });
     }
+    if (base.claimFallbackNote) {
+      validations.push({ id: 'DATA2', description: 'The scenario ran on its own test claim', expected: `Claim ${base.originalClaimNumber}`, actual: `Backup claim ${base.claimNumber}`, result: 'SKIPPED', reason: base.claimFallbackNote });
+    }
     // Layout against the Word mapping doc — alignment, paragraph breaks, header order (layoutValidationService).
     try {
       validations.push(...await layoutValidationService.checkLayout({ docxPath: sourceFile, pdfPath, requirements: reportableRequirements, validations }));
@@ -848,6 +893,9 @@ function buildTimeValue(sampleValue, n) {
 // (dollar heuristic, else the bracketed marker) — this only changes behavior for fields the dictionary
 // positively identifies as Date/Money/Number/Time.
 function buildEditValue(field, n, digNumber) {
+  // An empty checkbox ("[ ]" / "☐") gets an "X" (user direction 2026-10-17); inspectAndMaybeEdit also switches
+  // to "X" for any field whose technical name turns out to be checkBoxN.
+  if (/^\[\s*\]$|^[☐□]$/.test(String(field.text || '').trim())) return 'X';
   const match = digNumber && dataDictionaryService.matchAttributeForField(digNumber, { labelContext: field.labelContext });
   const dataType = match && match.row && match.row.dataType;
   if (dataType === 'Date') return buildDateValue(match.row.sampleValue, n);

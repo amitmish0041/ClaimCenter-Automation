@@ -615,6 +615,10 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, log = console
     log(`[DIAG input-editor] "${String(before).slice(0, 70)}" | input=${JSON.stringify(det)}`);
   }
 
+  // Checkbox fields ("checkBox1", shown as "[ ]") take an "X", not a text marker — per user direction 2026-10-17;
+  // the earlier bulk runs show "[QA-EDIT-n]" typed into them never stuck (still "[ ]" afterwards).
+  if (newValue !== undefined && /^check\s*box/i.test(technicalName || '')) newValue = 'X';
+
   if (newValue === undefined) {
     // Identify only — cancel without committing (CONFIRMED live safe: Escape leaves the field unchanged).
     await page.keyboard.press('Escape').catch(() => {});
@@ -642,10 +646,13 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, log = console
   await page.waitForTimeout(400);
 
   const plain = newValue.replace(/[[\]]/g, '');
-  const after = await frame.evaluate((needle) => {
-    const hit = Array.from(document.querySelectorAll('span.th-data-value-editable')).find((s) => s.textContent.includes(needle));
-    return hit ? hit.textContent.replace(/\s+/g, ' ').trim() : null;
-  }, plain).catch(() => null);
+  // A one-letter "X" (checkbox) could match any other field, e.g. a box ticked earlier — read this field's own span.
+  const after = plain === 'X'
+    ? await field.locator.textContent({ timeout: 3000 }).then((t) => (/X/.test(t || '') ? t.replace(/\s+/g, ' ').trim() : null)).catch(() => null)
+    : await frame.evaluate((needle) => {
+      const hit = Array.from(document.querySelectorAll('span.th-data-value-editable')).find((s) => s.textContent.includes(needle));
+      return hit ? hit.textContent.replace(/\s+/g, ' ').trim() : null;
+    }, plain).catch(() => null);
   // `after` is the LIVE EDITOR's own display text, which CONFIRMED live double-wraps an already-bracketed
   // committed value in its own bracket decoration (typing "[QA-EDIT-2]" renders here as "[[QA-EDIT-2]]") —
   // that decoration is a live-editing-only UI affordance, not part of the real stored value: the completed

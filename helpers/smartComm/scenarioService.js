@@ -36,6 +36,7 @@ const MAX_SCENARIOS_PER_TEMPLATE = Number(process.env.SMARTCOMM_MAX_SCENARIOS_PE
 // (a template printing both can't catch a claimant/insured swap otherwise) — hence 6, not just enough for the
 // rare no-permission fallback.
 const MAX_ALTERNATE_CLAIMS = 6;
+const MAX_OTHER_LOB_ALTERNATES = 3;
 
 // The catalog is hand-kept and doesn't always use the inventory's codes (2026-10-14: DIG238's LOB "PROPERTY"
 // matched no claim, so it only ever got the single FALLBACK scenario below even when 3 were asked for).
@@ -98,13 +99,25 @@ function getScenariosForTemplate(template, testDataRecords) {
       });
     }
   }
-  // Same-LOB/State backups, used only if the scenario's own claim can't be
-  // opened even as admin ("you do not have permission to view this claim").
+  // Same-LOB/State backups, used if the scenario's own claim can't be opened even as admin ("you do not have
+  // permission to view this claim") or ClaimCenter throws an application error on it. Claims no other scenario
+  // of this template already uses come first, so a fallback still tests a different claim.
+  const usedByScenarios = new Set(scenarios.map((sc) => sc.testData.claimNumber));
   for (const sc of scenarios) {
     const key = `${norm(sc.lob)}|${norm(sc.state)}`;
     sc.alternates = testDataRecords
       .filter(r => appliesToTemplate(template, r) && `${norm(r.lob)}|${norm(r.state)}` === key && r.claimNumber !== sc.testData.claimNumber)
+      .sort((a, b) => Number(usedByScenarios.has(a.claimNumber)) - Number(usedByScenarios.has(b.claimNumber)))
       .slice(0, MAX_ALTERNATE_CLAIMS);
+    // Claims of OTHER LOBs (same state first, one per LOB) — for when ClaimCenter throws its application error on
+    // the scenario's claim: CONFIRMED 2026-10-17 every WC-DE backup claim failed the same way, so per user
+    // direction the fallback moves to a different LOB instead of working through more claims of the same one.
+    const seenLob = new Set();
+    sc.otherLobAlternates = testDataRecords
+      .filter((r) => norm(r.lob) !== norm(sc.lob) && !usedByScenarios.has(r.claimNumber))
+      .sort((a, b) => Number(norm(a.state) !== norm(sc.state)) - Number(norm(b.state) !== norm(sc.state)))
+      .filter((r) => !seenLob.has(norm(r.lob)) && seenLob.add(norm(r.lob)))
+      .slice(0, MAX_OTHER_LOB_ALTERNATES);
   }
   if (scenarios.length) return scenarios;
 
