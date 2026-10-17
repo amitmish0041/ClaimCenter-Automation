@@ -646,13 +646,21 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, log = console
   await page.waitForTimeout(400);
 
   const plain = newValue.replace(/[[\]]/g, '');
-  // A one-letter "X" (checkbox) could match any other field, e.g. a box ticked earlier — read this field's own span.
-  const after = plain === 'X'
-    ? await field.locator.textContent({ timeout: 3000 }).then((t) => (/X/.test(t || '') ? t.replace(/\s+/g, ' ').trim() : null)).catch(() => null)
-    : await frame.evaluate((needle) => {
-      const hit = Array.from(document.querySelectorAll('span.th-data-value-editable')).find((s) => s.textContent.includes(needle));
-      return hit ? hit.textContent.replace(/\s+/g, ' ').trim() : null;
-    }, plain).catch(() => null);
+  // The value must land in THIS field: CONFIRMED 2026-10-17 (DIG242 trace) the "907" typed for Policy No. showed up
+  // in "Our Insured" one row up, and the old page-wide search still called it a successful Policy Number edit (the
+  // PDF then had the original policy number, reported as "edit didn't survive"). A hit in the same paragraph/cell
+  // still counts (a placeholder wrapped into several spans, DIG108); anywhere else is `landedElsewhere`, reported
+  // as not edited so the retry pass tries this field again. "X" (checkbox) only ever counts in its own span.
+  const placement = await field.locator.evaluate((own, needle) => {
+    const clean = (t) => (t || '').replace(/\s+/g, ' ').trim();
+    if ((own.textContent || '').includes(needle)) return { after: clean(own.textContent) };
+    const hit = needle === 'X' ? null : Array.from(own.ownerDocument.querySelectorAll('span.th-data-value-editable')).find((s) => s.textContent.includes(needle));
+    if (!hit) return { after: null };
+    const block = (el) => el.closest('p, li, td, th') || el.parentElement;
+    return block(hit) === block(own) ? { after: clean(hit.textContent) } : { after: null, landedElsewhere: clean(hit.textContent) };
+  }, plain).catch(() => ({ after: null }));
+  const after = placement.after;
+  if (placement.landedElsewhere) log(`[Interactive] "${plain}" typed for "${field.labelContext || field.stripped}" landed in a different field ("${placement.landedElsewhere}") — not counted as this field's edit.`);
   // `after` is the LIVE EDITOR's own display text, which CONFIRMED live double-wraps an already-bracketed
   // committed value in its own bracket decoration (typing "[QA-EDIT-2]" renders here as "[[QA-EDIT-2]]") —
   // that decoration is a live-editing-only UI affordance, not part of the real stored value: the completed
@@ -670,14 +678,14 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, log = console
   // text field. Retrying this exact field with the same fill-text strategy can never succeed — `vanished`
   // lets the caller stop re-attempting it instead of burning 3 more retry passes for nothing.
   let vanished = false;
-  if (after == null) {
+  if (after == null && !placement.landedElsewhere) {
     const anywhereCount = await frame.evaluate((needle) => document.body.innerText.split(needle).length - 1, plain).catch(() => -1);
     vanished = anywhereCount === 0;
   }
   return {
     attempted: true, changed: after != null, technicalName, before, after: after || before, committedMarker: plain, vanished,
     note: after == null
-      ? (vanished
+      ? placement.landedElsewhere ? `The typed value landed in a different field ("${placement.landedElsewhere}"), not this one.` : (vanished
         ? `Committed (Enter pressed) but the value never appeared anywhere on the page afterward — likely a non-text-typed field (generic "${technicalName}" name) that silently rejects free text; retrying won't help.`
         : 'Committed (Enter pressed) but no span with the new value was found afterward.')
       : '',
