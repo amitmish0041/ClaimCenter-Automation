@@ -246,7 +246,9 @@ function writeScenarioSheet(ws, s) {
   const payloadRows = allValidations.filter((v) => /^XP/i.test(v.id || ''));
   // Layout vs the mapping doc (LAYOUT*), locked template text (LOCK*) and test-data coverage notes (DATA*).
   const layoutRows = allValidations.filter((v) => /^(LAYOUT|LOCK|DATA|CHOICE)/i.test(v.id || ''));
-  const contentRows = allValidations.filter((v) => !/^(XP|META|LAYOUT|LOCK|DATA|CHOICE)/i.test(v.id || ''));
+  // Edited fields, checked before and after the edit (validationService.buildEditedFieldChecks) — their own table.
+  const editRows = allValidations.filter((v) => /^EDIT/i.test(v.id || ''));
+  const contentRows = allValidations.filter((v) => !/^(XP|META|LAYOUT|LOCK|DATA|CHOICE|EDIT)/i.test(v.id || ''));
 
   const addValidationTable = (title, list) => {
     ws.addRow([title]).font = { bold: true };
@@ -260,6 +262,19 @@ function writeScenarioSheet(ws, s) {
     for (const v of list) styleResultRow(ws.addRow([v.id || '', v.description || '', v.result, v.expected, v.actual, v.reason || '', jiraBugService.jiraCell(v)]), v.result);
     ws.addRow([]);
   };
+  if (editRows.length) {
+    const yesNo = (b) => (b ? 'Yes' : 'No');
+    const BEFORE = { match: 'Yes', mismatch: 'No', 'no default': 'No — empty placeholder', 'free-form': 'n/a (free-form)', template: 'Matches mapping doc (no CC/payload value)', unverifiable: 'Not verifiable' };
+    const ep = editRows.filter((v) => v.result === 'PASS').length; const ef = editRows.filter((v) => v.result === 'FAIL').length;
+    ws.addRow([`Edited Fields — label, value before the edit (vs ClaimCenter / payload), value after the edit (vs PDF) — ${ep} passed, ${ef} failed, ${editRows.length - ep - ef} not verifiable`]).font = { bold: true };
+    styleHeaderRow(ws.addRow(['#', 'Field', 'Label in editor', 'Label in mapping doc?', 'Expected (ClaimCenter / payload)', 'Value before edit', 'Before = expected?', 'Edited to', 'Edited value in PDF?', 'Result', 'Reason', 'Jira']));
+    for (const v of editRows) {
+      const d = v.editDetail || {};
+      styleResultRow(ws.addRow([v.id, d.dictionaryField ? `${d.field} (${d.dictionaryField})` : d.field, d.label || '—', d.label ? yesNo(d.labelOk) : '—',
+        d.expected || v.expected, d.before, BEFORE[d.beforeState] || '', d.after, yesNo(d.inPdf), v.result, v.reason || '', jiraBugService.jiraCell(v)]), v.result);
+    }
+    ws.addRow([]);
+  }
   if (metaRows.length) addValidationTable('Document Metadata — ClaimCenter filing .json (S3 archive, co-located with the PDF)', metaRows);
   addValidationTable('Template Content Validation (from the template\'s own Word-doc requirements)', contentRows);
   if (layoutRows.length) addValidationTable('Layout & Locking (alignment, paragraph breaks, header order vs the mapping doc; template text locked)', layoutRows);
@@ -331,6 +346,16 @@ async function buildAttachments(templateResult) {
 }
 
 async function sendReport(templateResult) {
+  // Opt-in local copy of the Excel report (e.g. to review it without the email): SMARTCOMM_REPORT_DIR=<folder>.
+  if (process.env.SMARTCOMM_REPORT_DIR) {
+    try {
+      const dir = process.env.SMARTCOMM_REPORT_DIR;
+      require('fs').mkdirSync(dir, { recursive: true });
+      const file = require('path').join(dir, `${templateResult.digNumber}_validation_report.xlsx`);
+      await buildExcelReport(templateResult).xlsx.writeFile(file);
+      console.log(`[SmartComm] Excel report saved: ${file}`);
+    } catch (e) { console.log(`[SmartComm] couldn't save the Excel report locally: ${e.message}`); }
+  }
   const smtpHost = process.env.EMAIL_SMTP_HOST;
   if (!smtpHost) {
     console.log('[SmartComm] EMAIL_SMTP_HOST not set — skipping email notification');

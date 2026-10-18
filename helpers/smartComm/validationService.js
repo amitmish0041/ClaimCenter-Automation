@@ -21,6 +21,7 @@ const payloadService = require('./payloadService');
 const fraudLanguageService = require('./fraudLanguageService');
 const dataDictionaryService = require('./dataDictionaryService');
 const payloadXpathService = require('./payloadXpathService');
+const synonyms = require('./fieldLabelSynonyms');
 const interactiveEditService = require('./interactiveEditService');
 const layoutValidationService = require('./layoutValidationService');
 const s3AdminService = require('../s3Download/s3AdminService');
@@ -159,6 +160,115 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
     for (const p of extraPages) await p.context().close().catch(() => {});
     if (ownsS3Session) await s3Session.close();
   }
+}
+
+// One EDITn row per field the interactive test edited, checked on its own (per user direction 2026-10-17 — the
+// content/payload rows only compared a field's pre-edit value when they FAILED, so a value repeated elsewhere in the
+// letter hid a wrong field):
+//   1. its label in the editor appears in the mapping doc (a leading "Our" tolerated, as for R2-style labels);
+//   2. BEFORE the edit it showed the real value — the recipient / claim data, else the Data Dictionary's payload value;
+//   3. AFTER the edit the edited value is in the completed PDF (verifyInteractiveEditsInPdf).
+// FAIL if any fails; BLOCKED when there's no ClaimCenter/payload value to compare the pre-edit value with.
+function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, recipient, additionalRecipient, testData, digNumber, sourceFile, requirements }) {
+  const edited = (interactiveChecks || []).filter((c) => c.observedChanged === true);
+  if (!edited.length) return [];
+  const compact = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const docCompact = compact(`${mappingDocText(sourceFile)} ${(requirements || []).map((r) => [r.expectedValue, r.sampleValue].filter(Boolean).join(' ')).join(' ')}`);
+  const td = testData || {};
+  const known = {
+    'To Name': recipient && recipient.name, 'To Street Address': recipient && recipient.streetAddress, 'To City, State, Zip': recipient && recipient.cityStateZip,
+    'Copy Name': additionalRecipient && additionalRecipient.name, 'Copy Address': additionalRecipient && additionalRecipient.streetAddress, 'Copy City, State, Zip': additionalRecipient && additionalRecipient.cityStateZip,
+    'Claimant Name': td.claimantName, 'Insured Name': td.insuredName, 'Claim Number': td.claimNumber, 'Date of Loss': td.lossDate,
+    'Loss Location': td.lossLocation, 'Underwriting Company': td.underwritingCompany,
+  };
+  const dictRows = dataDictionaryService.getAttributesForTemplate(digNumber) || [];
+  const claim = (rawPayloadRoot && rawPayloadRoot.claim) || {};
+  const exposures = [].concat(claim.exposures || []).flatMap((x) => (x && x.exposures ? [].concat(x.exposures) : [x])).filter(Boolean);
+  const nameOf = (o) => (o && (o.name || (typeof o === 'string' ? o : ''))) || '';
+  const addr = additionalRecipient || {};
+  // The real value(s) a field must have shown before the edit. `values` may hold several acceptable values (a CC line is
+  // one of the additional recipient's name/street/city; an exposure-type cell one of the claim's exposure types).
+  const sourceOf = (c, label) => {
+    const field = c.dictionaryField;
+    const one = (value, from) => (value ? { values: [String(value)], value: String(value), from } : null);
+    if (field && known[field]) return one(known[field], 'ClaimCenter');
+    if (/^underco$/i.test(c.technicalName || '')) return one(td.underwritingCompany, 'ClaimCenter'); // signature-block company
+    // CC block: the Data Dictionary's "CC" / "Copy …" rows, or a field whose technical name is the additional
+    // recipient's ("current_additionalRecipients_ext.primaryAddress.state" — DIG242's "[VA]").
+    if (field === 'CC' || /^copy\b/i.test(field || '') || /additionalRecipient/i.test(c.technicalName || '')) {
+      const vals = [addr.name, addr.streetAddress, addr.cityStateZip, ...String(addr.cityStateZip || '').split(/[\s,]+/)].filter(Boolean).map(String);
+      if (vals.length) return { values: vals, value: vals.slice(0, 3).join(' / '), from: 'ClaimCenter (additional recipient)' };
+    }
+    // Exposure type cells: the dictionary's "Type" / "Exposure Type" rows (DIG26), or a label/description naming it.
+    if ((/^(exposure\s+)?type$/i.test(field || '') || /exposure|expsousre/i.test(`${field || ''} ${c.label || ''}`)) && exposures.length) {
+      const vals = [...new Set(exposures.flatMap((e) => [nameOf(e.type), nameOf(e.coverageSubtype), nameOf(e.primaryCoverage)]).filter(Boolean))];
+      if (/line of business/i.test(label)) return one(nameOf(claim.lossType) || nameOf(claim.lobCode), 'payload');
+      return { values: vals, value: vals.join(' / '), from: 'payload (exposures)' };
+    }
+    if (/^line of business:?$/i.test(label)) return one(nameOf(claim.lossType) || nameOf(claim.lobCode), 'payload');
+    // A known label ("Our Insured:", "Policyholder:") → its claim / recipient / payload value.
+    const path = label ? synonyms.lookup(label.replace(/^(?:re:\s*)?our\s+/i, '')) : undefined;
+    if (path) {
+      const v = String(path).split('.').reduce((acc, k) => (acc == null ? acc : acc[k]), { testData: td, recipient: recipient || {}, raw: rawPayloadRoot || {} });
+      if (v !== undefined && v !== null && v !== '') return one(v, path.startsWith('raw.') ? 'payload' : 'ClaimCenter');
+    }
+    const row = field && dictRows.find((r) => r.attributeName === field && r.xpath);
+    if (!row || !rawPayloadRoot) return null;
+    const r = payloadXpathService.resolveXpath(rawPayloadRoot, row.xpath);
+    return r.unsupported || r.value === undefined || r.value === '' ? null : one(r.value, 'payload');
+  };
+  const isPlaceholder = (b) => /<<|editable\s*field|^-+$|^\s*$/i.test(String(b || '').replace(/[[\]]/g, ''));
+  const sameValue = (a, b) => {
+    const x = normForKnownValueMatch(String(a || '').replace(/[[\]]/g, '')); const y = normForKnownValueMatch(b);
+    if (!x || !y) return false;
+    if (x === y || (Math.min(x.length, y.length) >= 3 && (x.includes(y) || y.includes(x)))) return true;
+    const da = new Date(String(a).replace(/[[\]]/g, '')); const db = new Date(b);
+    if (!Number.isNaN(da.getTime()) && !Number.isNaN(db.getTime()) && /\d{4}/.test(a) && /\d{4}/.test(b)) return da.toDateString() === db.toDateString();
+    const na = Number(String(a).replace(/[$,\s[\]]/g, '')); const nb = Number(String(b).replace(/[$,\s]/g, ''));
+    return Number.isFinite(na) && Number.isFinite(nb) && String(a).match(/\d/) && na === nb;
+  };
+  // The label right in front of the field: plain text after the last other field (a "[value]" or placeholder) in the
+  // editor's preceding text, last clause only ("Our Policy No.:"). Nothing left = the field follows another field
+  // directly (address lines) — no label of its own.
+  const labelOf = (c) => {
+    let t = String(c.labelContext || '').replace(/\[\s*$/, '');
+    const lastField = Math.max(t.lastIndexOf(']'), t.lastIndexOf('>>'));
+    if (lastField >= 0) t = t.slice(lastField + (t[lastField] === ']' ? 1 : 2)).replace(/^[\s\-\]>,;]+/, '');
+    t = t.trim();
+    if (!t || !/[A-Za-z]{2}/.test(t)) return '';
+    const parts = t.split(/(?<=[.!?])\s+(?=[A-Z])/);
+    return parts[parts.length - 1].slice(-70).trim();
+  };
+  return edited.map((c, i) => {
+    const label = labelOf(c);
+    const labelOk = !label || docCompact.includes(compact(label)) || docCompact.includes(compact(label.replace(/^(?:re:\s*)?our\s+/i, '')));
+    const src = sourceOf(c, label);
+    const before = String(c.before || '');
+    const placeholder = isPlaceholder(before);
+    // No ClaimCenter/payload value behind the field: its text only has to match the mapping doc (per user direction
+    // 2026-10-17 — template wording / fixed values like DIG26's row labels pass when they're in the requirement doc).
+    const beforeText = before.replace(/[[\]]/g, '').trim();
+    const inTemplate = !!beforeText && compact(beforeText).length >= 2 && docCompact.includes(compact(beforeText));
+    const beforeState = src ? (placeholder ? 'no default' : src.values.some((v) => sameValue(before, v)) ? 'match' : 'mismatch')
+      : (placeholder ? 'free-form' : inTemplate ? 'template' : 'unverifiable');
+    const inPdf = c.verifiedInPdf === true;
+    const problems = [];
+    if (!labelOk) problems.push(`its label "${label}" isn't in the mapping doc`);
+    if (beforeState === 'mismatch') problems.push(`before the edit it showed "${before}", not the ${src.from} value "${src.value}"`);
+    if (beforeState === 'no default') problems.push(`before the edit it was an empty placeholder ("${before}") instead of the ${src.from} value "${src.value}" — no default value`);
+    if (!inPdf) problems.push(`the edited value "${c.committedMarker || c.after}" is not in the completed PDF`);
+    const result = problems.length ? 'FAIL' : beforeState === 'unverifiable' ? 'BLOCKED' : 'PASS';
+    return {
+      id: `EDIT${i + 1}`, description: `Edited field ${c.id} "${label || c.label}"${c.dictionaryField ? ` (${c.dictionaryField})` : ''}: label, value before edit, value after edit`,
+      expected: src ? src.value : (beforeState === 'free-form' ? '(free-form — no default)' : '(no ClaimCenter/payload value)'),
+      actual: `Before edit: "${before}" → after edit: "${c.committedMarker || c.after}"`,
+      result,
+      reason: problems.length ? `${problems.join('; ')}.`
+        : beforeState === 'unverifiable' ? `Label is in the mapping doc and the edit is in the PDF, but this field has no ClaimCenter/payload value to compare its pre-edit value "${before}" with.`
+        : `Label${label ? ` "${label}"` : ''} is in the mapping doc; ${beforeState === 'match' ? `before the edit it showed the ${src.from} value` : beforeState === 'template' ? `before the edit it showed "${beforeText}", which is in the mapping doc (no ClaimCenter/payload value for this field)` : 'it was a free-form field with no default'}; the edited value is in the PDF.`,
+      editDetail: { field: c.label, label, labelOk, dictionaryField: c.dictionaryField, expected: src ? `${src.value} (${src.from})` : '', before, beforeState, after: c.committedMarker || c.after, inPdf },
+    };
+  });
 }
 
 // A mapping doc's full text (body + BA comments), read once per file — for the CHOICE checks in runScenario.
@@ -740,6 +850,10 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     if (base.partiesNote) {
       validations.push({ id: 'DATA1', description: 'Claimant and insured are different people on the test claim (so a claimant/insured swap would be caught)', expected: 'Different claimant and insured', actual: 'Same person', result: 'SKIPPED', reason: base.partiesNote });
     }
+    // Every edited field checked on its own — label, value before the edit, value after the edit (buildEditedFieldChecks).
+    validations.push(...buildEditedFieldChecks(interactiveChecks, {
+      rawPayloadRoot, recipient, additionalRecipient, testData: effectiveTestData, digNumber: template.digNumber, sourceFile, requirements,
+    }));
     if (base.claimFallbackNote) {
       validations.push({ id: 'DATA2', description: 'The scenario ran on its own test claim', expected: `Claim ${base.originalClaimNumber}`, actual: `Backup claim ${base.claimNumber}`, result: 'SKIPPED', reason: base.claimFallbackNote });
     }

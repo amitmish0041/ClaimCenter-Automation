@@ -289,6 +289,9 @@ function buildRequirementsHeuristic(paragraphs) {
       while (j < paragraphs.length && j <= i + 40 && !/^total\b/i.test(paragraphs[j].trim()) && !/:\s*$/.test(paragraphs[j].trim())) j++;
       if (j < paragraphs.length && /^total\b/i.test(paragraphs[j].trim())) {
         requirements.push({ id: `R${++n}`, description: 'The "Total" row shows the claim\'s totals (from the payload)', type: 'exposureTotals', docOrder: j });
+        // ...and each column's rows add up to its Total (user direction 2026-10-17: DIG26 printed reserves $0 + $1200
+        // + $0 with a Total of $1193.00 — the Total row matched the claim's own sum, so nothing flagged it).
+        requirements.push({ id: `R${++n}`, description: 'Each column\'s exposure rows add up to its Total', type: 'exposureColumnTotals', docOrder: j + 0.1 });
         i = j;
       } else {
         i = j - 1;

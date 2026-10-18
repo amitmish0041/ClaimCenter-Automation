@@ -537,6 +537,32 @@ function evaluateOne(req, haystack, context) {
     // DIG26's exposure financials table (see templateRequirementService's exposure-table rule): every exposure in the
     // payload must print its type and amounts; the Total row the claim's sums. Amounts as money ("1193.00" → "$1,193"
     // or "$1,193.00"), never as part of a longer number.
+    // Each column's exposure amounts must add up to its Total. The rows are the payload's per-exposure amounts (proven
+    // printed by exposureTable) and the Total the claim's sums (proven printed by exposureTotals), so comparing the two
+    // sums finds a Total that doesn't add up — DIG26: reserves $0 + $1,200 + $0 printed with a Total of $1,193.
+    case 'exposureColumnTotals': {
+      const raw = context && context.raw;
+      if (!raw || !raw.claim) return { expected: '(from the payload)', actual: 'N/A', result: 'BLOCKED', reason: 'The SmartCOMM payload wasn\'t available for this scenario, so the column totals couldn\'t be checked.' };
+      const amount = (a) => { const n = Number(a && a.amount !== undefined ? a.amount : a); return Number.isFinite(n) ? n : null; };
+      const fmt = (n) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const exposures = [].concat(raw.claim.exposures || []).flatMap((x) => (x && x.exposures ? [].concat(x.exposures) : [x])).filter(Boolean);
+      const COLS = [['Reserves', 'openReserves_Ext', 'sumReserves_Ext'], ['Paid', 'totalPaid_Ext', 'sumPaid_Ext'], ['Expenses', 'totalExpenses_Ext', 'sumExpenses_Ext'], ['Recoveries', 'totalRecoveries_Ext', 'sumRecoveries_Ext'], ['Net Incurred', 'totalIncurred_Ext', 'sumIncurred_Ext']];
+      const lines = []; const bad = [];
+      for (const [label, field, sumField] of COLS) {
+        // A missing amount prints as $0 (DIG26's third exposure has no reserve amount and shows "$0").
+        const parts = exposures.map((e) => amount(e[field]) ?? 0);
+        const total = amount(raw.claim[sumField]);
+        if (!parts.length || total === null) continue;
+        const added = Math.round(parts.reduce((t, v) => t + v, 0) * 100) / 100;
+        const line = `${label}: ${parts.map(fmt).join(' + ')} = ${fmt(added)}, Total printed ${fmt(total)}`;
+        lines.push(line);
+        if (Math.abs(added - total) > 0.005) bad.push(`${label} rows add up to ${fmt(added)} but the Total shows ${fmt(total)} (off by ${fmt(Math.abs(added - total))})`);
+      }
+      if (!lines.length) return { expected: 'Column totals', actual: 'N/A', result: 'SKIPPED', reason: 'No exposure amounts / claim totals in the payload to add up.' };
+      return bad.length
+        ? { expected: 'Each column\'s rows add up to its Total', actual: lines.join(' | '), result: 'FAIL', reason: `${bad.join('; ')}.` }
+        : { expected: 'Each column\'s rows add up to its Total', actual: lines.join(' | '), result: 'PASS' };
+    }
     case 'exposureTable':
     case 'exposureTotals': {
       const raw = context && context.raw;
