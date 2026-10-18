@@ -55,8 +55,9 @@ function whereFound(value, texts) {
     const i = flat.toLowerCase().indexOf(normalizeWs(value).toLowerCase());
     if (i >= 0) return ` — in the PDF ${name}: "…${flat.slice(Math.max(0, i - 25), i + value.length + 25)}…"`;
   }
-  return ' — not in the PDF text at all';
+  return NOT_IN_PDF;
 }
+const NOT_IN_PDF = ' — not in the PDF text at all';
 
 // Applies ONLY the 2026-10-18 changes on top of the scenario's saved status — an old run's status isn't recomputed from
 // scratch, since it may come from an error/approval path or from older rules this re-score isn't about.
@@ -80,6 +81,13 @@ async function rescoreScenario(s) {
       // The live check itself, on this PDF (plain + layout text): whole word, punctuation-blind words, label synonyms.
       const accepted = isShort(v.actual) && normalizeWs(v.actual).toLowerCase() !== normalizeWs(v.expected).toLowerCase() ? [v.actual] : [];
       const [now] = pdfValidationService.evaluateRequirements([{ id: v.id, description: v.description, type: 'requiredText', expectedValue: v.expected, alsoAccept: accepted }], texts.text, { layoutText: texts.layout });
+      // The value isn't anywhere in this PDF, not even inside other text: the PDF on disk isn't the one that run checked
+      // (downloads are named <DIG>_<claim>_<scenario>.pdf, so a later run of the same scenario replaces it — DIG126 on the
+      // team PC, 2026-10-18). The new rule can't be judged on it.
+      if (now.result !== 'PASS' && whereFound(v.expected, texts) === NOT_IN_PDF) {
+        unverified.push(`${v.id} "${v.expected}" (not in the PDF on disk at all — replaced by a later run?)`);
+        continue;
+      }
       if (now.result !== 'PASS') {
         v.result = 'FAIL';
         newFail = true;
@@ -145,7 +153,7 @@ async function main() {
   }
   const unverified = rows.filter((r) => r.unverified.length);
   if (unverified.length) {
-    console.log(`\n${unverified.length} scenario(s) have short-value PASSes that couldn't be re-checked (PDF no longer on disk):`);
+    console.log(`\n${unverified.length} scenario(s) have short-value PASSes that couldn't be re-checked (PDF gone, or replaced by a later run):`);
     for (const r of unverified) console.log(`  ${r.digNumber} ${r.scenarioId}: ${r.unverified.join('; ')}`);
   }
   const out = path.join(ROOT, 'results', 'smartComm', `rescore-${Date.now()}.json`);
