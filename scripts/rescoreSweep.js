@@ -22,23 +22,35 @@
 const fs = require('fs');
 const path = require('path');
 const pdfValidationService = require('../helpers/smartComm/pdfValidationService');
-const { _test: { rollUpScenario, metadataUnavailableCheck, payloadUnavailableCheck } } = require('../helpers/smartComm/validationService');
+const { extractLayoutText } = require('../helpers/smartComm/pdfLayoutText');
+const { _test: { payloadUnavailableCheck } } = require('../helpers/smartComm/validationService');
 
 const ROOT = path.join(__dirname, '..');
 const BULK_DIR = path.join(ROOT, 'results', 'smartComm', 'bulk');
 const normalizeWs = pdfValidationService.normalizeWs;
 const isShort = (v) => typeof v === 'string' && /^\S{1,4}$/.test(normalizeWs(v)) && /[A-Za-z0-9]/.test(v);
-const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const asWord = (w, text) => new RegExp(`(^|[^A-Za-z0-9])${esc(normalizeWs(w))}(?![A-Za-z0-9])`, 'i').test(text);
+const asWord = (w, text) => Boolean(text) && pdfValidationService.wholeWord(w).test(text);
+// Only the PDF-text checks (mapping-doc R…, Data Dictionary XP…) go through the whole-word rule — not META (the archive
+// .json), EDIT, LOCK, LAYOUT or DATA rows, which compare other things.
+const PDF_CHECK_ID_RE = /^(R|XP)\d+$/;
 const PAYLOAD_MISSING_RE = /payload couldn't be downloaded or parsed/i;
 
+// The PDF's plain text and its layout-aware reading (boxed forms — same fallback the live check uses).
 const pdfTextCache = new Map();
-async function pdfText(pdfPath) {
+async function pdfTexts(pdfPath) {
   if (!pdfPath || !fs.existsSync(pdfPath)) return null;
-  if (!pdfTextCache.has(pdfPath)) pdfTextCache.set(pdfPath, await pdfValidationService.extractPdfText(pdfPath).catch(() => null));
+  if (!pdfTextCache.has(pdfPath)) {
+    const [text, layout] = await Promise.all([
+      pdfValidationService.extractPdfText(pdfPath).catch(() => ''),
+      extractLayoutText(pdfPath).catch(() => ''),
+    ]);
+    pdfTextCache.set(pdfPath, { text, layout });
+  }
   return pdfTextCache.get(pdfPath);
 }
 
+// Applies ONLY the 2026-10-18 changes on top of the scenario's saved status — an old run's status isn't recomputed from
+// scratch, since it may come from an error/approval path or from older rules this re-score isn't about.
 async function rescoreScenario(s) {
   const changes = [];
   const unverified = [];
@@ -47,36 +59,45 @@ async function rescoreScenario(s) {
   }
   if (!Array.isArray(s.validations) || s.status === 'ERROR') return { status: s.status, changes, unverified };
   const validations = s.validations.map((v) => ({ ...v }));
+  let newFail = false;
+  let newBlocked = false;
 
-  // 1. Short values as whole words.
-  const shortPasses = validations.filter((v) => v.result === 'PASS' && isShort(v.expected) && !/^Before edit/.test(String(v.actual || '')));
+  // 1. Short values as whole words (PDF-text checks only), in the plain text or the layout-aware reading.
+  const shortPasses = validations.filter((v) => PDF_CHECK_ID_RE.test(v.id || '') && v.result === 'PASS' && isShort(v.expected) && !/^Before edit/.test(String(v.actual || '')));
   if (shortPasses.length) {
-    const text = await pdfText(s.pdfPath);
+    const texts = await pdfTexts(s.pdfPath);
     for (const v of shortPasses) {
-      if (text == null) { unverified.push(`${v.id} "${v.expected}" (PDF not on disk)`); continue; }
+      if (!texts) { unverified.push(`${v.id} "${v.expected}" (PDF not on disk)`); continue; }
       const printed = isShort(v.actual) ? v.actual : v.expected;
-      if (!asWord(printed, text)) {
+      if (!asWord(printed, texts.text) && !asWord(printed, texts.layout)) {
         v.result = 'FAIL';
+        newFail = true;
         changes.push(`${v.id} "${v.expected}" PASS → FAIL: only found inside another word ("${v.description || ''}")`);
       }
     }
   }
   // 3. Checks that couldn't run.
-  for (let i = 0; i < validations.length; i++) {
-    const v = validations[i];
-    if (/^META1$/.test(v.id || '') && v.result === 'SKIPPED') {
-      validations[i] = { ...metadataUnavailableCheck(v.reason), reason: v.reason };
+  for (const v of validations) {
+    if (v.id === 'META1' && v.result === 'SKIPPED') {
+      v.result = 'BLOCKED';
+      newBlocked = true;
       changes.push(`META1 SKIPPED → BLOCKED: filing metadata not checked (${String(v.reason || '').slice(0, 80)})`);
     }
   }
   if (validations.some((v) => PAYLOAD_MISSING_RE.test(v.reason || '')) && !validations.some((v) => v.id === 'PAYLOAD0')) {
     validations.push(payloadUnavailableCheck());
+    newBlocked = true;
     changes.push('PAYLOAD0 added (BLOCKED): the payload was missing, so the Data Dictionary value checks never ran');
   }
-  // 4. Nothing actually ran — and the new status.
-  const before = validations.length;
-  const { status } = rollUpScenario(validations, s.interactiveChecks);
-  if (validations.length > before) changes.push('NOCHECK0 added (BLOCKED): no check passed or failed');
+  // 4. Nothing actually ran.
+  const ran = (x) => x.result === 'PASS' || x.result === 'FAIL';
+  if (!validations.some(ran) && !(s.interactiveChecks || []).some(ran)) {
+    newBlocked = true;
+    changes.push('NOCHECK0 added (BLOCKED): no check passed or failed');
+  }
+  let status = s.status;
+  if (newFail && (status === 'PASS' || status === 'BLOCKED')) status = 'FAIL';
+  else if (newBlocked && status === 'PASS') status = 'BLOCKED';
   return { status, changes, unverified };
 }
 

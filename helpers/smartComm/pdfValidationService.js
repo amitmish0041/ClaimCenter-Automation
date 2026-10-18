@@ -318,6 +318,15 @@ function editedBeforeResult(req, matches) {
 // A value of 1-4 characters with no space ("MI", "Yes", "PA", "N", "123") only counts as a whole word: as a plain
 // substring "MI" passed on "Michael" and "Yes" on "Yesterday" (QA review 2026-10-18), so a wrong or missing short value
 // could never fail.
+// Matches w as a whole word: no letter or digit right before or after it — checked only at an edge of w that IS a
+// letter or digit, so "D/L:" still matches in "D/L:08/06/2026" and "#1" in "VEH #1"/"VEH#1", while "MI" doesn't
+// match in "Michael" and "#1" doesn't in "#12" (re-score of 2026-10-18).
+function wholeWord(w) {
+  const v = normalizeWs(w);
+  const esc = v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`${/^[A-Za-z0-9]/.test(v) ? '(^|[^A-Za-z0-9])' : ''}${esc}${/[A-Za-z0-9]$/.test(v) ? '(?![A-Za-z0-9])' : ''}`, 'i');
+}
+
 function isShortValue(value) {
   const v = normalizeWs(value);
   return /^\S{1,4}$/.test(v) && /[A-Za-z0-9]/.test(v);
@@ -333,10 +342,12 @@ function evaluateOne(req, haystack, context) {
       // A short value (a date's day/month/year — see validationService.dateLossPart) only counts as a whole word:
       // "5" anywhere in a letter means nothing. `wordValues` lists every accepted spelling ("5", "05").
       if (req.wordValues) {
-        const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const hit = req.wordValues.find((w) => new RegExp(`(^|[^A-Za-z0-9])${esc(w)}(?![A-Za-z0-9])`, 'i').test(haystack));
+        // ...also in the layout-aware reading: on a boxed form the plain text runs neighbouring boxes together
+        // ("VEHYES"), which a whole-word match can't see through (DIG126, re-score of 2026-10-18).
+        const layout = context && context.layoutText ? context.layoutText : '';
+        const hit = req.wordValues.find((w) => wholeWord(w).test(haystack) || (layout && wholeWord(w).test(layout)));
         if (hit) return { expected: req.expectedValue, actual: hit, result: 'PASS', reason: req.wordNote };
-        if (req.wasEditedByTest) return editedBeforeResult(req, (b) => req.wordValues.some((w) => new RegExp(`(^|[^A-Za-z0-9])${esc(w)}(?![A-Za-z0-9])`, 'i').test(b)));
+        if (req.wasEditedByTest) return editedBeforeResult(req, (b) => req.wordValues.some((w) => wholeWord(w).test(b)));
         return { expected: req.expectedValue, actual: 'Not Found', result: 'FAIL', reason: `"${req.expectedValue}" doesn't appear as a separate word anywhere in the generated document. ${req.wordNote || ''}`.trim() };
       }
       if (isShortValue(req.expectedValue)) {
@@ -712,4 +723,4 @@ function evaluateRequirements(requirements, text, context) {
   }));
 }
 
-module.exports = { extractPdfText, evaluateRequirements, normalizeWs, dateLossPart, claimantsOf };
+module.exports = { extractPdfText, evaluateRequirements, normalizeWs, dateLossPart, claimantsOf, wholeWord };

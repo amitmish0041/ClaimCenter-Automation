@@ -24,3 +24,16 @@ test('rescore: the On-Demand rollup crash is flagged for a re-run', async () => 
   assert.equal((await rescoreScenario({ status: 'ERROR', reason: "Cannot read properties of undefined (reading 'filter')" })).status, 'RE-RUN');
   assert.equal((await rescoreScenario({ status: 'ERROR', reason: 'GENERATE_TIMEOUT' })).status, 'ERROR');
 });
+
+test('rescore: non-PDF rows (META1 compares the archive .json) are never re-checked as PDF text', async () => {
+  const r = await rescoreScenario({ status: 'PASS', pdfPath: '/no/such.pdf', validations: [pass('R1', 'Michael Smith'), pass('META1', 'DIG5')] });
+  assert.equal(r.status, 'PASS');
+  assert.deepEqual(r.unverified, []);
+});
+
+test('rescore: only the 2026-10-18 changes apply — a saved status is not recomputed from scratch', async () => {
+  // An approval-gated BLOCKED with an editor-field FAIL stays BLOCKED: nothing about it changed this weekend.
+  assert.equal((await rescoreScenario({ status: 'BLOCKED', reason: 'INTERACTIVE_NEEDS_APPROVAL', validations: [pass('LOCK1', 'x')], interactiveChecks: [{ result: 'FAIL' }] })).status, 'BLOCKED');
+  // A FAIL with a newly BLOCKED metadata row stays FAIL.
+  assert.equal((await rescoreScenario({ status: 'FAIL', validations: [{ id: 'R1', result: 'FAIL' }, { id: 'META1', result: 'SKIPPED' }] })).status, 'FAIL');
+});
