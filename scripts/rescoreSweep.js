@@ -43,7 +43,7 @@ async function pdfTexts(pdfPath) {
       pdfValidationService.extractPdfText(pdfPath).catch(() => ''),
       extractLayoutText(pdfPath).catch(() => ''),
     ]);
-    pdfTextCache.set(pdfPath, { text, layout });
+    pdfTextCache.set(pdfPath, { text, layout, readable: /[A-Za-z0-9]/.test(`${text}${layout}`) });
   }
   return pdfTextCache.get(pdfPath);
 }
@@ -85,7 +85,7 @@ async function rescoreScenario(s) {
       // (downloads are named <DIG>_<claim>_<scenario>.pdf, so a later run of the same scenario replaces it — DIG126 on the
       // team PC, 2026-10-18). The new rule can't be judged on it.
       if (now.result !== 'PASS' && whereFound(v.expected, texts) === NOT_IN_PDF) {
-        unverified.push(`${v.id} "${v.expected}" (not in the PDF on disk at all — replaced by a later run?)`);
+        unverified.push(`${v.id} "${v.expected}" (${texts.readable ? 'not in the PDF on disk at all — replaced by a later run' : 'the PDF on disk has no readable text — image-only or not a real PDF'})`);
         continue;
       }
       if (now.result !== 'PASS') {
@@ -154,7 +154,7 @@ async function main() {
   const unverified = rows.filter((r) => r.unverified.length);
   if (unverified.length) {
     console.log(`\n${unverified.length} scenario(s) have short-value PASSes that couldn't be re-checked (PDF gone, or replaced by a later run):`);
-    for (const r of unverified) console.log(`  ${r.digNumber} ${r.scenarioId}: ${r.unverified.join('; ')}`);
+    for (const r of unverified) console.log(`  ${r.digNumber} ${r.scenarioId} [${r.file}]: ${r.unverified.join('; ')}`);
   }
   const out = path.join(ROOT, 'results', 'smartComm', `rescore-${Date.now()}.json`);
   fs.mkdirSync(path.dirname(out), { recursive: true });
