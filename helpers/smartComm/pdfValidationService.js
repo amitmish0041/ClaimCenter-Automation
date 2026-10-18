@@ -651,13 +651,13 @@ function evaluateOne(req, haystack, context) {
       } else {
         const exposures = [].concat(raw.claim.exposures || []).flatMap((x) => (x && x.exposures ? [].concat(x.exposures) : [x])).filter(Boolean);
         if (!exposures.length) return { expected: 'One row per exposure', actual: 'No exposures in the payload', result: 'SKIPPED', reason: 'The claim has no exposures in the SmartCOMM payload, so there are no rows to check.' };
-        // The type cell is an editable field the interactive check overwrites (QA-EDIT-n, live DIG26), so a missing type
+        // The type cell is an editable field the interactive check overwrites (QA-EDIT-n, live DIG26 — or "<value>-edited"), so a missing type
         // isn't counted when this run's edits are in the document. Types also stay out of `expected`, which the
         // "overwritten by the test" annotation compares against — otherwise a real amount problem would be SKIPPED too.
         // A type cell the test overwrote is judged on what it showed BEFORE the edit (the editor's own value, per user
         // direction 2026-10-17): the payload's type must have been there.
         const editedBefores = ((context && context.interactiveChecks) || []).filter((c) => c.observedChanged === true && c.before).map((c) => normalizeWs(c.before).toLowerCase());
-        const typeEditedByTest = /QA-EDIT-\d/.test(haystack);
+        const typeEditedByTest = /QA-EDIT-\d|-edited\b/i.test(haystack);
         exposures.forEach((e, k) => {
           const type = e.type && (e.type.name || e.type);
           const row = [];

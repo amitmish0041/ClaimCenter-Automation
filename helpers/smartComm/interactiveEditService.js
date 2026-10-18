@@ -511,7 +511,7 @@ async function readMergeFields(frame) {
 // ── 4. Double-click a field to open its inline editor; read its real technical name; optionally edit ──
 // Always resolves (never throws) — every outcome (including "not a recognized editor UI") is reported in
 // the return value, since a BLOCKED classification for one odd field shouldn't abort the whole scenario.
-async function inspectAndMaybeEdit(frame, page, field, { newValue, log = console.log } = {}) {
+async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue, log = console.log } = {}) {
   const before = field.text;
   try {
     // CONFIRMED live 2026-09-29 (DIG166, a 26-field template — DIG15/DIG7's much shorter templates never hit
@@ -632,6 +632,10 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, log = console
     return { attempted: false, changed: null, technicalName, before, after: before, note: `Inline editor is a <${inputTag}>, not a plain-text <input>/<textarea> this supports yet — left untouched.` };
   }
 
+  // A copied value + "-edited" can be longer than the input allows; fill() would cut it short and the shortened text
+  // would never be found as this field's edit — use the short fallback marker (QA-EDIT-n) for that field instead.
+  const maxLength = Number(await popupInput.getAttribute('maxlength').catch(() => null)) || 0;
+  if (fallbackValue && /-edited$/.test(newValue) && maxLength > 0 && newValue.length > maxLength) newValue = fallbackValue;
   await popupInput.fill(newValue).catch((e) => log(`[Interactive] Could not fill the inline editor for "${field.stripped}": ${e.message}`));
   // CONFIRMED live 2026-09-30 (65-template sweep, DIG239): a <textarea>-based field is otherwise identical
   // to the <input> one, but Enter there inserts a newline instead of committing — every unedited required

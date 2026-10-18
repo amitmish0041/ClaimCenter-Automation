@@ -1126,7 +1126,7 @@ function buildTimeValue(sampleValue, n) {
 // doesn't resolve to a dictionary row at all, or resolves to "Text"/blank, keeps the exact prior behavior
 // (dollar heuristic, else the bracketed marker) — this only changes behavior for fields the dictionary
 // positively identifies as Date/Money/Number/Time.
-function buildEditValue(field, n, digNumber) {
+function buildEditValue(field, n, digNumber, editableValues = []) {
   // An empty checkbox ("[ ]" / "☐") gets an "X" (user direction 2026-10-17); inspectAndMaybeEdit also switches
   // to "X" for any field whose technical name turns out to be checkBoxN.
   if (/^\[\s*\]$|^[☐□]$/.test(String(field.text || '').trim())) return 'X';
@@ -1135,9 +1135,33 @@ function buildEditValue(field, n, digNumber) {
   if (dataType === 'Date') return buildDateValue(match.row.sampleValue, n);
   if (dataType === 'Money' || dataType === 'Number') return String(900 + n);
   if (dataType === 'Time') return buildTimeValue(match.row.sampleValue, n);
-  // No brackets (user direction 2026-10-17): they were typed as part of the value and printed in the completed PDF
-  // ("RECEIVED OF [QA-EDIT-4] HEREINAFTER…"), which a manual edit never shows.
-  return /\$\s*\[?\s*$/.test(field.labelContext || '') ? String(900 + n) : `QA-EDIT-${n}`;
+  if (/\$\s*\[?\s*$/.test(field.labelContext || '')) return String(900 + n);
+  // A field that already shows a value gets that value + "-edited" ("John Smith" -> "John Smith-edited"), so the
+  // edited letter reads like real data (user direction 2026-10-18). No brackets (user direction 2026-10-17): they were
+  // typed as part of the value and printed in the completed PDF ("RECEIVED OF [QA-EDIT-4] HEREINAFTER…").
+  return editedCopyOf(field, editableValues) || `QA-EDIT-${n}`;
+}
+
+// The field's own value + "-edited", or null when the field has no real value to copy or the copy couldn't be told
+// apart from another field's edit — those keep the QA-EDIT-n marker:
+// - an empty/placeholder field ("--<<Editable Field>>--", "____", "20__", "-"), or a lone "X" (a checkbox);
+// - a value already carrying a test edit (a retry pass re-reading a field that took another field's edit);
+// - a value with a bracket in it ("Vehicle [2]"): the typed value is recorded with brackets stripped (inspectAndMaybeEdit's
+//   committedMarker), so the copy would never be found as typed;
+// - a value longer than 80 characters (a whole editable paragraph — too long to find reliably in the PDF text);
+// - a value another editable field also shows, or that ends another field's value ("Smith" / "John Smith"): both
+//   edits would read "...Smith-edited", and the PDF/editor checks find an edit by its text, so they'd mix them up
+//   (DIG26's exposure rows all show the same type).
+function editedCopyOf(field, editableValues) {
+  const value = String(field.stripped != null ? field.stripped : field.text || '').replace(/\s+/g, ' ').trim();
+  if (!/[A-Za-z0-9]/.test(value) || /<<|>>|editable\s*field|_{2,}/i.test(value) || /^x$/i.test(value)) return null;
+  if (/-edited$|QA-EDIT-\d|[[\]]/i.test(value) || value.length > 80) return null;
+  const lc = value.toLowerCase();
+  const others = editableValues.map((v) => String(v || '').replace(/\s+/g, ' ').trim().toLowerCase());
+  // The field's own value is in the list once, so a second identical one is a clash.
+  const sameCount = others.filter((o) => o === lc).length;
+  const endsAnother = others.some((o) => o.length > lc.length && o.endsWith(lc) && !/[a-z0-9]/.test(o[o.length - lc.length - 1]));
+  return sameCount > 1 || endsAnother ? null : `${value}-edited`;
 }
 
 // Claims a still-unmatched interactiveChecks entry by comparing its OWN captured value (`before` — the
@@ -1392,6 +1416,9 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // haven't reached yet (an edit only moves elements at/after its own position, which are already done).
   // interactiveChecks is re-sorted back into field order right after the loop, so everything downstream (the
   // known-value passes, the report, the retry loop) sees the exact same ordered array as the old order did.
+  // Every editable field's value as first read — buildEditValue copies a field's value into its edit only when no other
+  // field shows the same text (the first pass and the retry passes both judge against these original values).
+  const editableValues = fields.filter((f) => f.editable && !f.inUnselectedChoice).map((f) => f.stripped);
   for (let fi = fields.length - 1; fi >= 0; fi--) {
     const field = fields[fi];
     const n = field.idx + 1;
@@ -1416,7 +1443,8 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
         .then((diagPath) => log(`[Interactive] Stuck-field diagnostic ${diagPath ? `saved: ${diagPath}.png / .json` : 'capture FAILED (page may be fully frozen, not just this one action)'}`));
     }, 15000);
     const outcome = await interactiveEditService.inspectAndMaybeEdit(frame, page, field, {
-      newValue: field.editable ? buildEditValue(field, n, template.digNumber) : undefined, log,
+      newValue: field.editable ? buildEditValue(field, n, template.digNumber, editableValues) : undefined,
+      fallbackValue: `QA-EDIT-${n}`, log,
     }).finally(() => clearTimeout(watchdog));
     // A locked field's "identify only" double-click (newValue left undefined, see inspectAndMaybeEdit) returns
     // changed:null — not false — whenever the double-click unexpectedly opens SOME editor popup anyway (a
@@ -1549,7 +1577,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     log(`Second pass #${retryRound}: ${targets.length} editable field(s) still not edited (${relocated.length} relocated, ${stillMissing.length} could not be relocated this round) — retrying: ${relocated.map(({ target }) => `#${target.i + 1}`).join(', ')}`);
     for (const { field, target } of relocated) {
       const n2 = target.i + 1;
-      const outcome = await interactiveEditService.inspectAndMaybeEdit(frame, page, field, { newValue: buildEditValue(field, n2, template.digNumber), log });
+      const outcome = await interactiveEditService.inspectAndMaybeEdit(frame, page, field, { newValue: buildEditValue(field, n2, template.digNumber, editableValues), fallbackValue: `QA-EDIT-${n2}`, log });
       const existing = target.c; // same object reference as interactiveChecks[target.i]
       if (outcome.attempted && outcome.changed) {
         existing.result = 'PASS';
