@@ -635,7 +635,7 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue
   // A copied value + "-edited" can be longer than the input allows; fill() would cut it short and the shortened text
   // would never be found as this field's edit — use the short fallback marker (QA-EDIT-n) for that field instead.
   const maxLength = Number(await popupInput.getAttribute('maxlength').catch(() => null)) || 0;
-  if (fallbackValue && /-edited$/.test(newValue) && maxLength > 0 && newValue.length > maxLength) newValue = fallbackValue;
+  if (fallbackValue && /-edited[.,;:!?]*$/.test(newValue) && maxLength > 0 && newValue.length > maxLength) newValue = fallbackValue;
   await popupInput.fill(newValue).catch((e) => log(`[Interactive] Could not fill the inline editor for "${field.stripped}": ${e.message}`));
   // CONFIRMED live 2026-09-30 (65-template sweep, DIG239): a <textarea>-based field is otherwise identical
   // to the <input> one, but Enter there inserts a newline instead of committing — every unedited required

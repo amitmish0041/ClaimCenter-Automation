@@ -1142,7 +1142,7 @@ function buildEditValue(field, n, digNumber, editableValues = []) {
   return editedCopyOf(field, editableValues) || `QA-EDIT-${n}`;
 }
 
-// The field's own value + "-edited", or null when the field has no real value to copy or the copy couldn't be told
+// The field's own value + "-edited" (before any trailing punctuation), or null when the field has no real value to copy or the copy couldn't be told
 // apart from another field's edit — those keep the QA-EDIT-n marker:
 // - an empty/placeholder field ("--<<Editable Field>>--", "____", "20__", "-"), or a lone "X" (a checkbox);
 // - a value already carrying a test edit (a retry pass re-reading a field that took another field's edit);
@@ -1155,13 +1155,16 @@ function buildEditValue(field, n, digNumber, editableValues = []) {
 function editedCopyOf(field, editableValues) {
   const value = String(field.stripped != null ? field.stripped : field.text || '').replace(/\s+/g, ' ').trim();
   if (!/[A-Za-z0-9]/.test(value) || /<<|>>|editable\s*field|_{2,}/i.test(value) || /^x$/i.test(value)) return null;
-  if (/-edited$|QA-EDIT-\d|[[\]]/i.test(value) || value.length > 80) return null;
+  if (/-edited[.,;:!?]*$|QA-EDIT-\d|[[\]]/i.test(value) || value.length > 80) return null;
   const lc = value.toLowerCase();
   const others = editableValues.map((v) => String(v || '').replace(/\s+/g, ' ').trim().toLowerCase());
   // The field's own value is in the list once, so a second identical one is a clash.
   const sameCount = others.filter((o) => o === lc).length;
   const endsAnother = others.some((o) => o.length > lc.length && o.endsWith(lc) && !/[a-z0-9]/.test(o[o.length - lc.length - 1]));
-  return sameCount > 1 || endsAnother ? null : `${value}-edited`;
+  if (sameCount > 1 || endsAnother) return null;
+  // Trailing punctuation stays at the end ("Smith," -> "Smith-edited,", user direction 2026-10-18).
+  const [, core, punct] = value.match(/^(.*?)([.,;:!?]*)$/);
+  return `${core}-edited${punct}`;
 }
 
 // Claims a still-unmatched interactiveChecks entry by comparing its OWN captured value (`before` — the
