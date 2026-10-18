@@ -274,6 +274,7 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, recipient, 
 // A mapping doc's full text (body + BA comments), read once per file — for the CHOICE checks in runScenario.
 const mappingDocTextCache = new Map();
 function mappingDocText(docPath) {
+  if (docPath && /\.doc$/i.test(docPath)) return templateRequirementService.getLegacyDocText(docPath); // legacy .doc — text kept by getRequirements
   if (!docPath || !/\.docx$/i.test(docPath)) return '';
   if (!mappingDocTextCache.has(docPath)) {
     let text = '';

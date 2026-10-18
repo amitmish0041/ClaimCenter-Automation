@@ -838,6 +838,10 @@ function docxMentionsFraudLanguage(zip) {
     /fraud\s+language/i.test(textOfRuns(e.getData().toString('utf8'))));
 }
 
+// Full text of each legacy .doc read by getRequirements, by path — see getLegacyDocText.
+const LEGACY_DOC_TEXT = new Map();
+function getLegacyDocText(docPath) { return LEGACY_DOC_TEXT.get(docPath) || ''; }
+
 async function getRequirements(template, dataDir) {
   const localPath = resolveLocalTemplatePath(template, dataDir);
   if (!localPath) {
@@ -861,6 +865,10 @@ async function getRequirements(template, dataDir) {
     }
     const paragraphs = extracted.getBody().split(/\r?\n/).map((p) => p.trim()).filter(Boolean);
     const mentionsFraudLanguage = /fraud\s+language/i.test(`${extracted.getHeaders() || ''} ${extracted.getFooters() || ''} ${extracted.getBody() || ''}`);
+    // The full text, for checks that look words up in the mapping doc (validationService's edited-field labels):
+    // a .doc can't be re-read synchronously there, and "Line of Business:\tAuto" became a value check whose label
+    // text never reached the requirements (DIG26, 2026-10-17 — a false "label not in the mapping doc").
+    LEGACY_DOC_TEXT.set(localPath, [extracted.getHeaders(), extracted.getBody(), extracted.getFooters(), extracted.getAnnotations && extracted.getAnnotations()].filter(Boolean).join('\n'));
     console.log(`[SmartComm] templateRequirementService: ${template.digNumber} is a legacy .doc — using word-extractor + the heuristic classifier (${paragraphs.length} paragraphs)`);
     return { requirements: buildRequirementsHeuristic(paragraphs), sourceFile: localPath, mode: 'heuristic-doc', mentionsFraudLanguage };
   }
@@ -892,6 +900,7 @@ async function getRequirements(template, dataDir) {
 }
 
 module.exports = {
+  getLegacyDocText,
   getRequirements,
   extractDocxParagraphs,
   buildRequirements: buildRequirementsHeuristic, // back-compat name
