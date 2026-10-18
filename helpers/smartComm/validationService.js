@@ -1313,13 +1313,13 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       probeWorks = self.typed;
       log(`LOCK1: probe self-check on the free-form area "${freeForm[0].slice(0, 50)}" — ${self.typed ? 'typing worked' : `typing did NOT work (${self.error || 'no effect'}) — "no effect" results below can't be trusted`}`);
     }
-    for (const t of candidates.slice(0, 40)) {
+    for (const t of candidates.slice(0, 100)) {
       const p = await interactiveEditService.probeParagraphEditable(frame, page, t);
       // Typing that landed somewhere else means the editor wouldn't put the cursor in this paragraph — it didn't change.
       if (p.typed) confirmed.push(t); else if (p.error && !/another part of the document/.test(p.error)) unverified.push(`${t} (${p.error})`); else resisted.push(t);
       if (p.typed && !p.restored) log(`LOCK1: WARNING — typed a test character into ${short(t)} and couldn't confirm it was removed; check the draft.`);
     }
-    unverified.push(...candidates.slice(40).map((t) => `${t} (not probed — more than 40 candidates)`));
+    unverified.push(...candidates.slice(100).map((t) => `${t} (not probed — more than 100 candidates)`));
     if (probeWorks === false) unverified.push(...resisted.splice(0).map((t) => `${t} (no effect, but the probe couldn't type into the free-form area either)`));
     const how = `Checked by clicking into each paragraph that has no locked section around it in the editor and typing one character (removed again immediately).`;
     const notes = [
