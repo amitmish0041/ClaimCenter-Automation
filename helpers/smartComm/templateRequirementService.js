@@ -138,6 +138,8 @@ function classifyDynamicShape(line) {
 // always FAILing since it's a layout artifact of the reference .docx's own
 // table structure, never real rendered text in the generated document.
 function isNoiseLine(line) {
+  // No letter or digit at all (a stray "\" left by the doc's markup — DIG36 R5, 2026-10-17) is never checkable wording.
+  if (!/[A-Za-z0-9]/.test(String(line || ''))) return true;
   return /^[\s.,:;!?'"()|-]+$/.test(line) && line.replace(/\s/g, '').length <= 3;
 }
 

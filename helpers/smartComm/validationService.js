@@ -788,7 +788,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // Claimant name parts ("Claimant First Name" / "Middle Initial" / "Last Name" — DIG219 2026-10-17, were BLOCKED):
     // first word, last word, and the initial of a middle word when there is one.
     if (effectiveTestData.claimantName && !effectiveTestData.claimantFirstName) {
-      const parts = String(effectiveTestData.claimantName).trim().split(/s+/);
+      const parts = String(effectiveTestData.claimantName).trim().split(/\s+/);
       effectiveTestData.claimantFirstName = parts[0];
       if (parts.length > 1) effectiveTestData.claimantLastName = parts[parts.length - 1];
       if (parts.length > 2) effectiveTestData.claimantMiddleInitial = parts[1].charAt(0);
@@ -1861,12 +1861,16 @@ function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
   // there, row 1's edit was printed in every row and rows 2-3's edits were lost, yet they were reported verified.
   // A split placeholder's pieces sit next to each other (consecutive idx), so only a neighbour verifies a fragment.
   const foundPositions = interactiveChecks
-    .filter((c) => c.observedChanged === true && c.expectedEditable === true && c.technicalName && foundInPdf(c.committedMarker || c.after))
+    .filter((c) => c.observedChanged === true && c.expectedEditable === true && foundInPdf(c.committedMarker || c.after))
     .map((c) => ({ tech: c.technicalName, idx: c.idx }));
   // ...and only for a genuine placeholder FRAGMENT ("-", "<<EditableField>>--" — DIG108/DIG242): a field that held a
   // real value ("[Vehicle]") is never another field's fragment, so a repeated row can't borrow a neighbour's edit.
-  const isFragment = (c) => /^\[?\s*(-+|-*<*<?\s*editable\s*field\s*>*>?-*|-*<<.*|.*>>-*)\s*\]?$/i.test(String(c.before || '').trim());
-  const neighbourFound = (c) => isFragment(c) && foundPositions.some((p) => p.tech === c.technicalName && p.idx !== c.idx && Math.abs(p.idx - c.idx) <= 2);
+  // "--Editable--" too (DIG36's split deductible field printed its first piece's "$911"), and a piece whose technical
+  // name didn't come back counts when it's the DIRECT neighbour (DIG108's "storage charges starting QA-EDIT-11", where
+  // INT12 had no technical name) — still only for placeholder pieces, never for a field that held a real value.
+  const isFragment = (c) => /^\[?\s*(-+|-*<*<?\s*editable(\s*field)?\s*>*>?-*|-*<<.*|.*>>-*)\s*\]?$/i.test(String(c.before || '').trim());
+  const neighbourFound = (c) => isFragment(c) && foundPositions.some((p) => p.idx !== c.idx
+    && ((p.tech === c.technicalName && c.technicalName && Math.abs(p.idx - c.idx) <= 2) || (!c.technicalName && Math.abs(p.idx - c.idx) === 1)));
   for (const c of interactiveChecks) {
     // Checks the raw observed fact (an edit genuinely took), not `result` — which, since the Data
     // Dictionary reclassification above, no longer means "this field was successfully edited" for an
@@ -1891,7 +1895,7 @@ function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
     }
     // Split-line sibling: this exact marker isn't in the PDF, but another span of the SAME field (same technical
     // name) is — the field WAS edited; this fragment just lost the merge into the single rendered field.
-    const siblingVerified = !found && c.technicalName && neighbourFound(c);
+    const siblingVerified = !found && neighbourFound(c);
     c.verifiedInPdf = found || siblingVerified;
     if (siblingVerified) {
       c.reason = `${c.reason ? `${c.reason} ` : ''}(Field placeholder split across lines into multiple editable spans sharing technical name "${c.technicalName}"; another span's edit is present in the completed PDF, so this fragment's own marker not appearing is expected — the field was edited.)`;
