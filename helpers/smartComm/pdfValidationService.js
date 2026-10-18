@@ -258,6 +258,39 @@ function dateLossPart(attributeName, value) {
   return { value: String(d.getFullYear()), accept: [String(d.getFullYear())], note };
 }
 
+// Printed text that matches the expected wording but for ONE word (an extra or missing word, or one spelled within two
+// letters of it). Returns the printed text, or null. Only for 2-12 word phrases, so a short label can't match noise.
+function closeWording(haystack, expected) {
+  const tok = (s) => String(s || '').replace(/[’']s\b/gi, ' ').toLowerCase().match(/[a-z0-9]+/g) || [];
+  const want = tok(expected);
+  if (want.length < 2 || want.length > 12) return null;
+  const lines = String(haystack || '').split(/\n/);
+  const near = (a, b) => {
+    if (a === b) return true;
+    if (Math.min(a.length, b.length) < 4 || Math.abs(a.length - b.length) > 2) return false;
+    const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+    for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return dp[a.length][b.length] <= 2;
+  };
+  for (const line of lines) {
+    const got = tok(line);
+    for (let n = want.length - 1; n <= want.length + 1; n++) {
+      for (let st = 0; st + n <= got.length; st++) {
+        const win = got.slice(st, st + n);
+        // Same words in order, allowing exactly one difference (insert, delete or near-spelling substitution).
+        let i = 0; let j = 0; let diffs = 0;
+        while (i < want.length && j < win.length && diffs <= 1) {
+          if (want[i] === win[j]) { i++; j++; } else if (near(want[i], win[j])) { diffs++; i++; j++; } else if (want.length - i > win.length - j) { diffs++; i++; } else { diffs++; j++; }
+        }
+        diffs += (want.length - i) + (win.length - j);
+        if (diffs === 1) return line.trim();
+      }
+    }
+  }
+  return null;
+}
+
 // A payload value whose only printed occurrence the interactive-edit test overwrote: judged on what the field showed
 // BEFORE the edit (req.editedBefore, from the editor) — it must have been the real value (per user direction
 // 2026-10-17: correct before the edit, and the edit itself is verified in the PDF separately). No recorded "before"
@@ -291,9 +324,13 @@ function evaluateOne(req, haystack, context) {
       }
       const found = normHaystack.includes(normalizeWs(req.expectedValue).toLowerCase());
       if (found) return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS' };
+      // The same date in the template's own format — the payload says "August 06, 2026", a form prints 08/06/2026
+      // (DIG47, 2026-10-17); dynamicValueMatch already allowed this, payload checks didn't.
+      const dateHit = dateVariants(req.expectedValue).find((d) => haystack.includes(d));
+      if (dateHit) return { expected: req.expectedValue, actual: dateHit, result: 'PASS', reason: `Same date, printed in the template's format ("${dateHit}").` };
       // An explicitly-allowed alternative value (e.g. the UTC date for "current date" — see payloadXpathService),
-      // passed with its own note so the difference stays visible in the report.
-      const alt = (req.alsoAccept || []).find((a) => normHaystack.includes(normalizeWs(a).toLowerCase()));
+      // passed with its own note so the difference stays visible in the report — in any date format, too.
+      const alt = (req.alsoAccept || []).flatMap((a) => [a, ...dateVariants(a)]).find((a) => normHaystack.includes(normalizeWs(a).toLowerCase()));
       if (alt) return { expected: req.expectedValue, actual: alt, result: 'PASS', reason: req.alsoAcceptNote || `Accepted alternative value "${alt}".` };
       // Some PDFs' text layer splits words at certain glyphs (CONFIRMED 2026-10-14, DIG47B: "benef its",
       // "f ormer", "SALARY  YES") — the printed page reads correctly. Ignoring all whitespace is still an exact
@@ -380,6 +417,12 @@ function evaluateOne(req, haystack, context) {
           expected: req.expectedValue, actual: near, result: 'FAIL',
           reason: `The document prints similar but different wording: "${near.replace(/\s+/g, ' ').trim()}" instead of the template's "${req.expectedValue}" — word(s) added or changed.`,
         };
+      }
+      // One word off — added, dropped or misspelled ("PATIENT’S NAME (FIRST)" printed "PATIENT NAME (FIRST)", the mapping
+      // doc's typo "(MIDDLE INTIAL)" vs printed "(MIDDLE INITIAL)" — DIG219, 2026-10-17): still a FAIL, but say what printed.
+      const close = closeWording(haystack, req.expectedValue);
+      if (close) {
+        return { expected: req.expectedValue, actual: close, result: 'FAIL', reason: `The document prints "${close}" instead of the template's "${req.expectedValue}" — one word differs (added, dropped or spelled differently).` };
       }
       return {
         expected: req.expectedValue, actual: 'Not Found', result: 'FAIL',

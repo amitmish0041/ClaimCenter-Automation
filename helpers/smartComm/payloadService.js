@@ -88,6 +88,15 @@ function contactStateCode(contact) {
   return (contact && contact.primaryAddress && contact.primaryAddress.state && contact.primaryAddress.state.code) || undefined;
 }
 
+// A loss location with no state field but the state in its address text ("123 FARMERS LANE MARIETTA  PA 17547" —
+// DIG242 on FOS-VA-02-26-0748018, 2026-10-17: FL1 BLOCKED as "loss state unknown"). The 2-letter code right before
+// the ZIP, only when it's a real US state code.
+const US_STATES = new Set('AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY'.split(' '));
+function stateFromAddressText(loc) {
+  const m = String((loc && (loc.displayName || loc.addressLine1)) || '').match(/\b([A-Z]{2})\s+\d{5}(?:-\d{4})?\s*$/);
+  return m && US_STATES.has(m[1]) ? m[1] : undefined;
+}
+
 // Commercial policies can carry several locations; the one actually used to
 // rate the policy isn't in a field literally labeled "rating state" — the
 // closest CONFIRMED proxy (2026-09-22 sample) is whichever location carries
@@ -221,7 +230,7 @@ function parsePayload(xmlText) {
     // contactStateCode above) whenever lossLocation itself has no state —
     // "See Policy Tab" claims still need a real state for the fraud-language
     // check, and the insured's address is the same one the letter prints.
-    lossState: (claim.lossLocation && claim.lossLocation.state && claim.lossLocation.state.code) || contactStateCode(byRole.insured) || undefined,
+    lossState: (claim.lossLocation && claim.lossLocation.state && claim.lossLocation.state.code) || stateFromAddressText(claim.lossLocation) || contactStateCode(byRole.insured) || undefined,
     lossType: (claim.lossType && claim.lossType.code) || undefined,
     lossCauseName: (claim.lossCause && claim.lossCause.name) || undefined,
     // See findPolicyState's own comment above — best-effort proxy for

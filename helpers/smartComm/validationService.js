@@ -169,7 +169,7 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
 //   2. BEFORE the edit it showed the real value — the recipient / claim data, else the Data Dictionary's payload value;
 //   3. AFTER the edit the edited value is in the completed PDF (verifyInteractiveEditsInPdf).
 // FAIL if any fails; BLOCKED when there's no ClaimCenter/payload value to compare the pre-edit value with.
-function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, recipient, additionalRecipient, testData, digNumber, sourceFile, requirements }) {
+function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, recipient, additionalRecipient, testData, digNumber, sourceFile, requirements }) {
   const edited = (interactiveChecks || []).filter((c) => c.observedChanged === true);
   if (!edited.length) return [];
   const compact = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -199,8 +199,10 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, recipient, 
       const vals = [addr.name, addr.streetAddress, addr.cityStateZip, ...String(addr.cityStateZip || '').split(/[\s,]+/)].filter(Boolean).map(String);
       if (vals.length) return { values: vals, value: vals.slice(0, 3).join(' / '), from: 'ClaimCenter (additional recipient)' };
     }
-    // Exposure type cells: the dictionary's "Type" / "Exposure Type" rows (DIG26), or a label/description naming it.
-    if ((/^(exposure\s+)?type$/i.test(field || '') || /exposure|expsousre/i.test(`${field || ''} ${c.label || ''}`)) && exposures.length) {
+    // Exposure type cells: the dictionary's "Type" / "Exposure Type" rows (DIG26), or a label/description naming the
+    // exposure TYPE ("…under expsousre/ type") — not any text that merely mentions an exposure (DIG219's "Primary
+    // Doctor field on the exposure" is a provider field).
+    if ((/^(exposure\s+)?type$/i.test(field || '') || /exp\w*\s*\/?\s*type/i.test(`${field || ''} ${c.label || ''}`)) && exposures.length) {
       const vals = [...new Set(exposures.flatMap((e) => [nameOf(e.type), nameOf(e.coverageSubtype), nameOf(e.primaryCoverage)]).filter(Boolean))];
       if (/line of business/i.test(label)) return one(nameOf(claim.lossType) || nameOf(claim.lobCode), 'payload');
       return { values: vals, value: vals.join(' / '), from: 'payload (exposures)' };
@@ -249,24 +251,37 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, recipient, 
     // 2026-10-17 — template wording / fixed values like DIG26's row labels pass when they're in the requirement doc).
     const beforeText = before.replace(/[[\]]/g, '').trim();
     const inTemplate = !!beforeText && compact(beforeText).length >= 2 && docCompact.includes(compact(beforeText));
-    const beforeState = src ? (placeholder ? 'no default' : src.values.some((v) => sameValue(before, v)) ? 'match' : 'mismatch')
+    // A field the mapping doc makes CONDITIONAL ("display claimant name if Claimant Name checkbox is selected" — DIG55,
+    // 2026-10-17) may correctly be empty: an empty placeholder then isn't "no default value".
+    const condReq = c.dictionaryField && (requirements || []).find((r) => r.enabled === false && r.fieldName && compact(r.fieldName).includes(compact(c.dictionaryField)));
+    let beforeState = src ? (placeholder ? 'no default' : src.values.some((v) => sameValue(before, v)) ? 'match' : 'mismatch')
       : (placeholder ? 'free-form' : inTemplate ? 'template' : 'unverifiable');
+    if (beforeState === 'no default' && condReq) beforeState = 'conditional';
+    // A checkbox ("[ ]" ticked with "X" — DIG219's "Return to work" boxes) has no ClaimCenter value; whatever its label
+    // matched in the dictionary, only the label and the X in the PDF apply.
+    const isCheckbox = String(c.committedMarker || '') === 'X' && /^\[?\s*\]?$/.test(before.trim());
+    if (isCheckbox) beforeState = 'checkbox';
     const inPdf = c.verifiedInPdf === true;
+    // The value the field held right before Complete Document — what the PDF must show (a later edit of a shared
+    // value can replace what was typed; see verifyInteractiveEditsInPdf).
+    const finalShown = c.finalShownInPdf ? `${c.finalShownInPdf} (typed ${c.committedMarker || c.after}; replaced by a later edit of the same field)` : (c.committedMarker || c.after);
     const problems = [];
     if (!labelOk) problems.push(`its label "${label}" isn't in the mapping doc`);
-    if (beforeState === 'mismatch') problems.push(`before the edit it showed "${before}", not the ${src.from} value "${src.value}"`);
+    if (beforeState === 'mismatch' && !isCheckbox) problems.push(`before the edit it showed "${before}", not the ${src.from} value "${src.value}"`);
     if (beforeState === 'no default') problems.push(`before the edit it was an empty placeholder ("${before}") instead of the ${src.from} value "${src.value}" — no default value`);
-    if (!inPdf) problems.push(`the edited value "${c.committedMarker || c.after}" is not in the completed PDF`);
-    const result = problems.length ? 'FAIL' : beforeState === 'unverifiable' ? 'BLOCKED' : 'PASS';
+    if (!inPdf) problems.push(`the edited value "${finalShown}" is not in the completed PDF${c.replacedBy ? ` — that spot printed "${c.replacedBy}" (another row's edit of the same field) instead` : ''}`);
+    const result = problems.length ? 'FAIL' : beforeState === 'unverifiable' ? 'BLOCKED' : beforeState === 'conditional' ? 'SKIPPED' : 'PASS';
     return {
       id: `EDIT${i + 1}`, description: `Edited field ${c.id} "${label || c.label}"${c.dictionaryField ? ` (${c.dictionaryField})` : ''}: label, value before edit, value after edit`,
-      expected: src ? src.value : (beforeState === 'free-form' ? '(free-form — no default)' : '(no ClaimCenter/payload value)'),
-      actual: `Before edit: "${before}" → after edit: "${c.committedMarker || c.after}"`,
+      expected: isCheckbox ? '(checkbox — no default)' : src ? src.value : (beforeState === 'free-form' ? '(free-form — no default)' : '(no ClaimCenter/payload value)'),
+      actual: `Before edit: "${before}" → after edit: "${finalShown}"`,
       result,
       reason: problems.length ? `${problems.join('; ')}.`
         : beforeState === 'unverifiable' ? `Label is in the mapping doc and the edit is in the PDF, but this field has no ClaimCenter/payload value to compare its pre-edit value "${before}" with.`
+        : beforeState === 'checkbox' ? `A checkbox (no ClaimCenter value): it was empty before the edit and the "X" it was ticked with is in the PDF.`
+        : beforeState === 'conditional' ? `Empty before the edit, which the mapping doc allows: this field is conditional ("${String(condReq.fieldName).slice(0, 140)}") and the condition wasn't met this run. Label and the edited value in the PDF are fine.`
         : `Label${label ? ` "${label}"` : ''} is in the mapping doc; ${beforeState === 'match' ? `before the edit it showed the ${src.from} value` : beforeState === 'template' ? `before the edit it showed "${beforeText}", which is in the mapping doc (no ClaimCenter/payload value for this field)` : 'it was a free-form field with no default'}; the edited value is in the PDF.`,
-      editDetail: { field: c.label, label, labelOk, dictionaryField: c.dictionaryField, expected: src ? `${src.value} (${src.from})` : '', before, beforeState, after: c.committedMarker || c.after, inPdf },
+      editDetail: { field: c.label, label, labelOk, dictionaryField: c.dictionaryField, expected: isCheckbox ? '(checkbox)' : src ? `${src.value} (${src.from})` : '', before, beforeState, after: finalShown, inPdf },
     };
   });
 }
@@ -770,6 +785,14 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // claimSummaryService captured live) — not the raw scenario.testData.
     // Layout-aware second reading (boxed / column forms) — a fallback for checks the plain text reads across.
     const layoutText = await require('./pdfLayoutText').extractLayoutText(pdfPath).catch(() => '');
+    // Claimant name parts ("Claimant First Name" / "Middle Initial" / "Last Name" — DIG219 2026-10-17, were BLOCKED):
+    // first word, last word, and the initial of a middle word when there is one.
+    if (effectiveTestData.claimantName && !effectiveTestData.claimantFirstName) {
+      const parts = String(effectiveTestData.claimantName).trim().split(/s+/);
+      effectiveTestData.claimantFirstName = parts[0];
+      if (parts.length > 1) effectiveTestData.claimantLastName = parts[parts.length - 1];
+      if (parts.length > 2) effectiveTestData.claimantMiddleInitial = parts[1].charAt(0);
+    }
     const context = {
       layoutText,
       testData: effectiveTestData, scenario, template, recipient, additionalRecipient,
@@ -845,6 +868,28 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
         v.reason = 'Overlay form printed as page images only (no text layer), so this value can\'t be read from the PDF — not verifiable, not a defect.';
       }
     }
+    // A form whose PRINTED wording is images, not text (CONFIRMED 2026-10-17, DIG47 Wage and Salary Verification: the
+    // page renders the whole form, but as 10 embedded images — the text layer holds only the filled-in values). Most
+    // fixed-wording checks then "fail" without telling anything. When at least 60% of 8+ fixed-wording checks fail while
+    // filled-in values ARE found as text, those are reported BLOCKED (can't be read) with one summary row asking for a
+    // visual check — a genuinely blank form still stands out there, instead of being buried in dozens of FAILs.
+    {
+      const isFixed = (v) => /^R\d/.test(v.id || '') && /^(Static content must appear|Label ")/.test(v.description || '');
+      const fixed = validations.filter(isFixed);
+      const fixedFailed = fixed.filter((v) => v.result === 'FAIL');
+      const valuesFound = validations.filter((v) => /^R\d/.test(v.id || '') && /^Value for /.test(v.description || '') && v.result === 'PASS').length;
+      if (fixed.length >= 8 && fixedFailed.length / fixed.length >= 0.6 && valuesFound >= 2) {
+        for (const v of fixedFailed) {
+          v.result = 'BLOCKED';
+          v.reason = 'This fixed wording isn\'t in the PDF\'s text layer — the form\'s printed wording is drawn as images, so it can\'t be checked as text. See DATA3: check the form visually.';
+        }
+        validations.push({
+          id: 'DATA3', description: 'The form\'s fixed wording can be read from the PDF as text', expected: 'Fixed wording present as text',
+          actual: `${fixedFailed.length} of ${fixed.length} fixed-wording lines not in the text layer; ${valuesFound} filled-in values found`, result: 'BLOCKED',
+          reason: `Most of the form's printed wording is images in the PDF (only the filled-in values are text), so ${fixedFailed.length} wording checks are reported BLOCKED instead of FAIL. Open the PDF and confirm the form wording is printed.`,
+        });
+      }
+    }
     // Append the archive .json filing-metadata checks (META*) so they count toward the scenario result and
     // render in their own report table (see reportService). A wrong claim #/template here is a real failure.
     if (metadataChecks && metadataChecks.length) validations.push(...metadataChecks);
@@ -853,7 +898,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     }
     // Every edited field checked on its own — label, value before the edit, value after the edit (buildEditedFieldChecks).
     validations.push(...buildEditedFieldChecks(interactiveChecks, {
-      rawPayloadRoot, recipient, additionalRecipient, testData: effectiveTestData, digNumber: template.digNumber, sourceFile, requirements,
+      rawPayloadRoot, payload, recipient, additionalRecipient, testData: effectiveTestData, digNumber: template.digNumber, sourceFile, requirements,
     }));
     if (base.claimFallbackNote) {
       validations.push({ id: 'DATA2', description: 'The scenario ran on its own test claim', expected: `Claim ${base.originalClaimNumber}`, actual: `Backup claim ${base.claimNumber}`, result: 'SKIPPED', reason: base.claimFallbackNote });
@@ -865,7 +910,10 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // Medical Letterhead? is selected Yes").
     // The question only — choicesApplied entries are "<question>: <answer>", and a paragraph choice's answer is the
     // chosen paragraph's own text ("Select Language to display in Paragraph: for bodily injury…", DIG36).
-    const choiceQuestions = [...new Set((choicesApplied || []).map((c) => String(c).split(':')[0].trim()).filter((q) => q && !/^\(unlabeled/i.test(q)))];
+    // One per question: the editor can show the same question twice, once with its words run together
+    // ("Select paragraph based on Department" / "Selectparagraphbasedon Department" — DIG55); the spaced one is kept.
+    const choiceQuestions = [...new Map((choicesApplied || []).map((c) => String(c).split(':')[0].trim()).filter((q) => q && !/^\(unlabeled/i.test(q))
+      .sort((x, y) => (x.match(/ /g) || []).length - (y.match(/ /g) || []).length).map((q) => [q.toLowerCase().replace(/[^a-z]/g, ''), q])).values()];
     if (choiceQuestions.length) {
       // The whole mapping doc (body + comments), not just the derived requirements: DIG11 describes its "PACE notice
       // language" option in body text that never becomes a requirement.
@@ -1549,6 +1597,27 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   const archiveWatch = s3Session.withPage((s3Page) => s3AdminService.watchArchiveForIdentifier(s3Page, identifierKnown, documentService.DOWNLOAD_DIR, { log }))
     .catch((err) => { log(`[S3] archive watch failed (${err.message.split('\n')[0]}) — falling back to searching after completion.`); return null; });
   let identifier;
+  // The FINAL value of every field, read right before Save / Complete Document (per user direction 2026-10-17): a later
+  // edit can replace an earlier one — DIG26's exposure rows share one value, and fields are edited last-to-first, so
+  // row 1's edit (QA-EDIT-8) replaced rows 2-3's (QA-EDIT-10..13) in the editor. The PDF is checked against these.
+  // Matched by CONTENT, never by position: editing changes a field's spans, so positions shift (a first version paired
+  // fields with their neighbours' values). A field was replaced only if its own typed value is in NO field any more;
+  // the value that replaced it then comes from the fields sharing its technical name whose values are still there.
+  try {
+    const finalTexts = (await interactiveEditService.readMergeFields(frame)).map((x) => String(x.stripped || x.text || ''));
+    const holds = (marker) => {
+      const m = String(marker || '').replace(/[[\]]/g, '').trim();
+      if (!m) return true;
+      const re = /^qa-edit-\d+$/i.test(m) ? new RegExp(`${m}(?!\\d)`, 'i') : null;
+      return finalTexts.some((t) => (re ? re.test(t) : t.includes(m)));
+    };
+    for (const c of interactiveChecks) {
+      if (c.observedChanged !== true || holds(c.committedMarker || c.after)) continue;
+      const kin = interactiveChecks.filter((o) => o !== c && o.observedChanged === true && o.technicalName && o.technicalName === c.technicalName && holds(o.committedMarker || o.after));
+      c.replacedBeforeComplete = kin.length ? kin.map((o) => String(o.committedMarker || o.after).replace(/[[\]]/g, '')) : null;
+      log(`${c.id}: its edit "${c.committedMarker}" is no longer in the editor before completing${kin.length ? ` — replaced by ${c.replacedBeforeComplete.join(' / ')} (same field)` : ' — nothing with the same technical name holds a replacement'}`);
+    }
+  } catch (e) { log(`couldn't re-read the fields' final values before completing (${e.message.split('\n')[0]})`); }
   try {
     await interactiveEditService.saveChanges(page, { log });
     await interactiveEditService.completeDocument(page, { log, scenarioId: scenario.scenarioId });
@@ -1766,13 +1835,17 @@ function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
   // (QA-EDIT-5/8/9/12/...) was found; only the two that happened to wrap were reported "missing". A
   // whitespace-stripped copy of the page lets the wrap-tolerant fallback below still find them.
   const haystackNoWs = haystack.replace(/\s+/g, '');
+  const usedMarkers = new Set((interactiveChecks || []).map((c) => String(c.committedMarker || '').toLowerCase()).filter((m) => /^qa-edit-\d+$/.test(m)));
   const foundInPdf = (marker) => {
     const needle = pdfValidationService.normalizeWs(marker || '').toLowerCase();
     if (!needle) return false;
-    // "qa-edit-1" must not match inside "qa-edit-10" (no brackets around the marker any more to separate them).
+    // "qa-edit-1" must not match inside "qa-edit-10" (no brackets around the marker any more to separate them) — but a
+    // PDF can run a box's value straight into the next box's date ("10/18/2026QA-EDIT-208/06/2026", DIG47 2026-10-17),
+    // so trailing digits only disqualify a hit when together they form another marker this run actually typed.
     if (/^qa-edit-\d+$/.test(needle)) {
-      const re = new RegExp(`${needle}(?!\\d)`);
-      return re.test(haystack) || re.test(haystackNoWs);
+      const re = new RegExp(`${needle}(\\d*)`, 'g');
+      const ok = (hay) => [...hay.matchAll(re)].some((m) => !m[1] || ![...Array(m[1].length)].some((_, k) => usedMarkers.has(`${needle}${m[1].slice(0, k + 1)}`)));
+      return ok(haystack) || ok(haystackNoWs);
     }
     return haystack.includes(needle) || haystackNoWs.includes(needle.replace(/\s+/g, ''));
   };
@@ -1783,12 +1856,17 @@ function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
   // NOT a lost edit, as long as some span of that same field (same technical name) IS present in the PDF.
   // Collect those technical names first. (Safe because SmartCOMM numbers editable fields uniquely — the same
   // editableFieldN appearing on more than one span means they're pieces of ONE field, not two distinct ones.)
-  const fieldFoundByTechName = new Set();
-  for (const c of interactiveChecks) {
-    if (c.observedChanged === true && c.expectedEditable === true && c.technicalName && foundInPdf(c.committedMarker || c.after)) {
-      fieldFoundByTechName.add(c.technicalName);
-    }
-  }
+  // Kept per field POSITION (idx), not just technical name: a repeated table row reuses the same technical name
+  // (DIG26's exposure-type cell on every row, 2026-10-17) and must not count as a "split fragment" of another row —
+  // there, row 1's edit was printed in every row and rows 2-3's edits were lost, yet they were reported verified.
+  // A split placeholder's pieces sit next to each other (consecutive idx), so only a neighbour verifies a fragment.
+  const foundPositions = interactiveChecks
+    .filter((c) => c.observedChanged === true && c.expectedEditable === true && c.technicalName && foundInPdf(c.committedMarker || c.after))
+    .map((c) => ({ tech: c.technicalName, idx: c.idx }));
+  // ...and only for a genuine placeholder FRAGMENT ("-", "<<EditableField>>--" — DIG108/DIG242): a field that held a
+  // real value ("[Vehicle]") is never another field's fragment, so a repeated row can't borrow a neighbour's edit.
+  const isFragment = (c) => /^\[?\s*(-+|-*<*<?\s*editable\s*field\s*>*>?-*|-*<<.*|.*>>-*)\s*\]?$/i.test(String(c.before || '').trim());
+  const neighbourFound = (c) => isFragment(c) && foundPositions.some((p) => p.tech === c.technicalName && p.idx !== c.idx && Math.abs(p.idx - c.idx) <= 2);
   for (const c of interactiveChecks) {
     // Checks the raw observed fact (an edit genuinely took), not `result` — which, since the Data
     // Dictionary reclassification above, no longer means "this field was successfully edited" for an
@@ -1802,10 +1880,18 @@ function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
     // inspectAndMaybeEdit for the full explanation.
     // Match either as-is OR with ALL whitespace removed from both sides, so a PDF line-wrap inside the marker
     // (e.g. "QA- EDIT-10") can't false-FAIL an edit that really is in the document.
-    const found = foundInPdf(c.committedMarker || c.after);
+    // What the field held right before Complete Document (c.finalValue, re-read then): if a LATER edit of the same
+    // value replaced this one (DIG26's rows share one value), the PDF must show that final value, not what was typed.
+    const typed = String(c.committedMarker || c.after || '').replace(/[[\]]/g, '').trim();
+    const replacement = (c.replacedBeforeComplete || []).find((m) => foundInPdf(m));
+    const found = replacement ? true : foundInPdf(c.committedMarker || c.after);
+    if (replacement) {
+      c.finalShownInPdf = replacement;
+      c.reason = `${c.reason ? `${c.reason} ` : ''}(Typed "${typed}", but a later edit of the same field (shared value) changed it to "${replacement}" before Complete Document; that final value is in the PDF.)`;
+    }
     // Split-line sibling: this exact marker isn't in the PDF, but another span of the SAME field (same technical
     // name) is — the field WAS edited; this fragment just lost the merge into the single rendered field.
-    const siblingVerified = !found && c.technicalName && fieldFoundByTechName.has(c.technicalName);
+    const siblingVerified = !found && c.technicalName && neighbourFound(c);
     c.verifiedInPdf = found || siblingVerified;
     if (siblingVerified) {
       c.reason = `${c.reason ? `${c.reason} ` : ''}(Field placeholder split across lines into multiple editable spans sharing technical name "${c.technicalName}"; another span's edit is present in the completed PDF, so this fragment's own marker not appearing is expected — the field was edited.)`;
@@ -1813,7 +1899,11 @@ function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
     }
     if (!found) {
       const looksLikeDate = DATE_SHAPED_RE.test(c.before || '');
+      // A repeated row whose own edit is missing while another row's edit of the same field is printed (DIG26).
+      const otherShown = c.technicalName ? interactiveChecks.find((o) => o !== c && o.technicalName === c.technicalName && o.observedChanged === true && foundInPdf(o.committedMarker || o.after)) : null;
+      if (otherShown) c.replacedBy = otherShown.committedMarker || otherShown.after;
       const note = `Edit was accepted in the interactive editor (showed "${c.after}") but this text was NOT found anywhere in the downloaded, completed PDF — the edit did not survive into the final document.` +
+        (c.replacedBy ? ` The same field elsewhere (another row) printed "${c.replacedBy}" instead — this row's edit was replaced by that one (the rows share one field).` : '') +
         (looksLikeDate ? ` This field's original value ("${c.before}") looks date-shaped — a synthetic non-date marker may get silently reformatted/rejected downstream even though the editor accepted it; worth checking with a real date-shaped test value instead.` : '');
       // A dictionary-tracked field with a stated expectation: this is a genuine, reportable defect — FAIL.
       // An unmatched field (SKIPPED by the Data Dictionary reclassification above, nothing to validate it

@@ -31,6 +31,12 @@ const LABEL_TO_TESTDATA_FIELD = {
   // DIG26 (Claim Status Report, legacy .doc): "Loss Description:\tCollision" / "Location:\t\t2005 MARKET ST…" were
   // asserted as fixed text (2026-10-17). raw.* reads the SmartCOMM payload itself (see pdfValidationService).
   'LOSS DESCRIPTION': 'raw.claim.description',
+  // DIG242/DIG151/DIG179/DIG180/DIG241 "Type of Policy" ("...your Farmowners policy") — was BLOCKED as unmapped.
+  'TYPE OF POLICY': 'raw.claim.policy.policyType.name',
+  'CLAIMANT FIRST NAME': 'testData.claimantFirstName',
+  'CLAIMANT LAST NAME': 'testData.claimantLastName',
+  'CLAIMANT MIDDLE INITIAL': 'testData.claimantMiddleInitial',
+  'POLICY TYPE': 'raw.claim.policy.policyType.name',
   'LOCATION': 'testData.lossLocation',
   'DATE OF LOSS DAY': 'testData.lossDate',
   'DATE OF LOSS MONTH': 'testData.lossDate',
