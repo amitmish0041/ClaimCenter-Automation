@@ -425,7 +425,8 @@ function parseCommentAnchors(documentXml) {
 // field sharing that prefix, so it's safe as a direct, unscoped match.
 // "...if CC details <> Null else suppress" (DIG187) — the same "print only when present" condition, worded as
 // pseudo-code.
-const CONDITIONAL_RE = /display only if|only (?:visible|shown|displayed) if|\bonly\b[^.]{0,40}\bif\b|otherwise[^.]*(?:not[^.]*visible|will not|do not)|will not (?:be )?(?:visible|display|print|show)|if\b.*\b(?:is selected|is entered|is added)\b|if\b.*\bcheckbox|else\b.*\bdo not\b|^fraud language\b|if\b.*\bstate\s*=|^copy\b|\bif\b.*<>\s*null\b|\belse\s+suppress\b/i;
+// "Only display this paragraph is Policy State…" (DIG53's typo for "if", 2026-10-17) included.
+const CONDITIONAL_RE = /display only if|only\s+display\s+this\s+paragraph\b|only (?:visible|shown|displayed) if|\bonly\b[^.]{0,40}\bif\b|otherwise[^.]*(?:not[^.]*visible|will not|do not)|will not (?:be )?(?:visible|display|print|show)|if\b.*\b(?:is selected|is entered|is added)\b|if\b.*\bcheckbox|else\b.*\bdo not\b|^fraud language\b|if\b.*\bstate\s*=|^copy\b|\bif\b.*<>\s*null\b|\belse\s+suppress\b/i;
 
 // Collapses whitespace to single spaces while recording, for each character
 // kept, its index in the ORIGINAL string — lets anchor text be located in

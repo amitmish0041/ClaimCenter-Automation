@@ -183,6 +183,13 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
   };
   const dictRows = dataDictionaryService.getAttributesForTemplate(digNumber) || [];
   const claim = (rawPayloadRoot && rawPayloadRoot.claim) || {};
+  // The claim's own values, for a field with no dictionary source whose pre-edit value is one of them.
+  const knownValues = [
+    ['insured name', td.insuredName], ['claimant name', td.claimantName], ['claim number', td.claimNumber], ['loss location', td.lossLocation],
+    ['underwriting company', td.underwritingCompany], ['recipient', recipient && recipient.name],
+    ['policy number', claim.policy && claim.policy.policyNumber], ['policy type', claim.policy && claim.policy.policyType && claim.policy.policyType.name],
+    ['loss type', claim.lossType && claim.lossType.name], ['loss description', claim.description],
+  ].filter(([, v]) => v && String(v).trim().length >= 3).map(([name, value]) => ({ name, value: String(value) }));
   const exposures = [].concat(claim.exposures || []).flatMap((x) => (x && x.exposures ? [].concat(x.exposures) : [x])).filter(Boolean);
   const nameOf = (o) => (o && (o.name || (typeof o === 'string' ? o : ''))) || '';
   const addr = additionalRecipient || {};
@@ -219,7 +226,7 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
     const r = payloadXpathService.resolveXpath(rawPayloadRoot, row.xpath);
     return r.unsupported || r.value === undefined || r.value === '' ? null : one(r.value, 'payload');
   };
-  const isPlaceholder = (b) => /<<|editable\s*field|^-+$|^\s*$/i.test(String(b || '').replace(/[[\]]/g, ''));
+  const isPlaceholder = (b) => /<<|editable|^-+$|^\s*$/i.test(String(b || '').replace(/[[\]]/g, '')); // incl. "--Editable--" (DIG179)
   const sameValue = (a, b) => {
     const x = normForKnownValueMatch(String(a || '').replace(/[[\]]/g, '')); const y = normForKnownValueMatch(b);
     if (!x || !y) return false;
@@ -254,8 +261,16 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
     // A field the mapping doc makes CONDITIONAL ("display claimant name if Claimant Name checkbox is selected" — DIG55,
     // 2026-10-17) may correctly be empty: an empty placeholder then isn't "no default value".
     const condReq = c.dictionaryField && (requirements || []).find((r) => r.enabled === false && r.fieldName && compact(r.fieldName).includes(compact(c.dictionaryField)));
-    let beforeState = src ? (placeholder ? 'no default' : src.values.some((v) => sameValue(before, v)) ? 'match' : 'mismatch')
-      : (placeholder ? 'free-form' : inTemplate ? 'template' : 'unverifiable');
+    // A value split over neighbouring pieces of one field (DIG200's loss location: "[490 CRAIG RD, NORTH ABINGTON" +
+    // "TOWNSHIP, PA 18414-7703]", both "Accident Zip") is compared as the whole.
+    const run = c.dictionaryField ? edited.filter((o) => o.dictionaryField === c.dictionaryField && Math.abs(o.idx - c.idx) <= 2) : [c];
+    const joined = run.length > 1 ? [...run].sort((x, y) => x.idx - y.idx).map((o) => String(o.before || '').replace(/[[\]]/g, '')).join(' ') : before;
+    const fieldMatches = (v) => sameValue(before, v) || (run.length > 1 && sameValue(joined, v));
+    // No dictionary source: is the pre-edit value one of the claim's own values (insured, claimant, policy number,
+    // policy type, loss location, underwriting company…)? "[MARTHA ANTOLICK]", "[Homeowner's]" (DIG200/DIG179).
+    const knownValue = !src && !placeholder ? knownValues.find((k) => sameValue(before, k.value)) : null;
+    let beforeState = src ? (placeholder ? 'no default' : src.values.some(fieldMatches) ? 'match' : 'mismatch')
+      : (placeholder ? 'free-form' : knownValue ? 'known' : inTemplate ? 'template' : 'unverifiable');
     if (beforeState === 'no default' && condReq) beforeState = 'conditional';
     // A checkbox ("[ ]" ticked with "X" — DIG219's "Return to work" boxes) has no ClaimCenter value; whatever its label
     // matched in the dictionary, only the label and the X in the PDF apply.
@@ -269,14 +284,17 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
     if (!labelOk) problems.push(`its label "${label}" isn't in the mapping doc`);
     if (beforeState === 'mismatch' && !isCheckbox) problems.push(`before the edit it showed "${before}", not the ${src.from} value "${src.value}"`);
     if (beforeState === 'no default') problems.push(`before the edit it was an empty placeholder ("${before}") instead of the ${src.from} value "${src.value}" — no default value`);
-    if (!inPdf) problems.push(`the edited value "${finalShown}" is not in the completed PDF${c.replacedBy ? ` — that spot printed "${c.replacedBy}" (another row's edit of the same field) instead` : ''}`);
-    const result = problems.length ? 'FAIL' : beforeState === 'unverifiable' ? 'BLOCKED' : beforeState === 'conditional' ? 'SKIPPED' : 'PASS';
+    if (!inPdf && !c.lostInEditor) problems.push(`the edited value "${finalShown}" is not in the completed PDF${c.replacedBy ? ` — that spot printed "${c.replacedBy}" (another row's edit of the same field) instead` : ''}`);
+    // An edit another test edit typed over before Complete (c.lostInEditor) can't be confirmed by the PDF: BLOCKED.
+    const result = problems.length ? 'FAIL' : (beforeState === 'unverifiable' || c.lostInEditor) ? 'BLOCKED' : beforeState === 'conditional' ? 'SKIPPED' : 'PASS';
     return {
       id: `EDIT${i + 1}`, description: `Edited field ${c.id} "${label || c.label}"${c.dictionaryField ? ` (${c.dictionaryField})` : ''}: label, value before edit, value after edit`,
       expected: isCheckbox ? '(checkbox — no default)' : src ? src.value : (beforeState === 'free-form' ? '(free-form — no default)' : '(no ClaimCenter/payload value)'),
       actual: `Before edit: "${before}" → after edit: "${finalShown}"`,
       result,
       reason: problems.length ? `${problems.join('; ')}.`
+        : c.lostInEditor ? `This field's edit ("${c.committedMarker}") was typed over by another test edit in the editor before Complete Document (field positions shifted while editing), so the PDF can't confirm it — not verifiable, not a template defect.`
+        : beforeState === 'known' ? `Label is fine; before the edit it showed "${before}", the claim's ${knownValue.name}; the edited value is in the PDF.`
         : beforeState === 'unverifiable' ? `Label is in the mapping doc and the edit is in the PDF, but this field has no ClaimCenter/payload value to compare its pre-edit value "${before}" with.`
         : beforeState === 'checkbox' ? `A checkbox (no ClaimCenter value): it was empty before the edit and the "X" it was ticked with is in the PDF.`
         : beforeState === 'conditional' ? `Empty before the edit, which the mapping doc allows: this field is conditional ("${String(condReq.fieldName).slice(0, 140)}") and the condition wasn't met this run. Label and the edited value in the PDF are fine.`
@@ -1614,6 +1632,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     };
     for (const c of interactiveChecks) {
       if (c.observedChanged !== true || holds(c.committedMarker || c.after)) continue;
+      c.goneBeforeComplete = true;
       const kin = interactiveChecks.filter((o) => o !== c && o.observedChanged === true && o.technicalName && o.technicalName === c.technicalName && holds(o.committedMarker || o.after));
       c.replacedBeforeComplete = kin.length ? kin.map((o) => String(o.committedMarker || o.after).replace(/[[\]]/g, '')) : null;
       // No same-named field: what the field with this SAME label holds now (DIG108 "…storage charges starting" /
@@ -1906,6 +1925,16 @@ function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
     c.verifiedInPdf = found || siblingVerified;
     if (siblingVerified) {
       c.reason = `${c.reason ? `${c.reason} ` : ''}(Field placeholder split across lines into multiple editable spans sharing technical name "${c.technicalName}"; another span's edit is present in the completed PDF, so this fragment's own marker not appearing is expected — the field was edited.)`;
+      continue;
+    }
+    // The edit was already GONE from the editor right before Complete Document and nothing replaced it there: another
+    // test edit typed over it while field positions shifted (DIG200: #37 landed in witness line 2, over #39). The PDF
+    // matches the editor, so it can't say anything about this field — not verifiable, not a template defect. (An edit
+    // still in the editor before Complete but missing from the PDF stays a real FAIL below.)
+    if (!found && c.goneBeforeComplete) {
+      c.lostInEditor = true;
+      c.reason = `${c.reason ? `${c.reason} ` : ''}(This edit was already gone from the editor before Complete Document — another test edit typed over it while field positions shifted; the PDF matches the editor, so this field couldn't be verified. Not a template defect.)`;
+      log(`${c.id} ${c.label}: edit overwritten in the editor by another test edit before completing — not verifiable`);
       continue;
     }
     if (!found) {

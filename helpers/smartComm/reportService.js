@@ -264,7 +264,7 @@ function writeScenarioSheet(ws, s) {
   };
   if (editRows.length) {
     const yesNo = (b) => (b ? 'Yes' : 'No');
-    const BEFORE = { match: 'Yes', mismatch: 'No', 'no default': 'No — empty placeholder', 'free-form': 'n/a (free-form)', template: 'Matches mapping doc (no CC/payload value)', conditional: 'Empty — conditional field, condition not met', checkbox: 'n/a (checkbox)', unverifiable: 'Not verifiable' };
+    const BEFORE = { match: 'Yes', mismatch: 'No', 'no default': 'No — empty placeholder', 'free-form': 'n/a (free-form)', template: 'Matches mapping doc (no CC/payload value)', conditional: 'Empty — conditional field, condition not met', checkbox: 'n/a (checkbox)', known: 'Yes — matches a claim value', unverifiable: 'Not verifiable' };
     const ep = editRows.filter((v) => v.result === 'PASS').length; const ef = editRows.filter((v) => v.result === 'FAIL').length;
     ws.addRow([`Edited Fields — label, value before the edit (vs ClaimCenter / payload), value after the edit (vs PDF) — ${ep} passed, ${ef} failed, ${editRows.length - ep - ef} not verifiable`]).font = { bold: true };
     styleHeaderRow(ws.addRow(['#', 'Field', 'Label in editor', 'Label in mapping doc?', 'Expected (ClaimCenter / payload)', 'Value before edit', 'Before = expected?', 'Edited to', 'Edited value in PDF?', 'Result', 'Reason', 'Jira']));
