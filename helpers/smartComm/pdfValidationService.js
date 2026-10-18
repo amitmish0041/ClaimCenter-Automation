@@ -258,6 +258,15 @@ function dateLossPart(attributeName, value) {
   return { value: String(d.getFullYear()), accept: [String(d.getFullYear())], note };
 }
 
+// Every contact with the claimant role in the SmartCOMM payload (context.raw), by display name.
+function claimantsOf(context) {
+  const claim = context && context.raw && context.raw.claim;
+  if (!claim) return [];
+  const contacts = [].concat(claim.contacts || []).flatMap((x) => (x && x.contacts ? [].concat(x.contacts) : [x])).filter(Boolean);
+  const roleCodes = (k) => [].concat(k.roles || []).flatMap((r) => (r && r.roles ? [].concat(r.roles) : [r])).map((r) => r && r.role && r.role.code);
+  return [...new Set(contacts.filter((k) => roleCodes(k).includes('claimant')).map((k) => k.displayName).filter(Boolean))];
+}
+
 // Printed text that matches the expected wording but for ONE word (an extra or missing word, or one spelled within two
 // letters of it). Returns the printed text, or null. Only for 2-12 word phrases, so a short label can't match noise.
 function closeWording(haystack, expected) {
@@ -554,6 +563,12 @@ function evaluateOne(req, haystack, context) {
       if (part) return evaluateOne({ ...req, type: 'requiredText', expectedValue: part.value, wordValues: part.accept, wordNote: part.note }, haystack, context);
       const found = normHaystack.includes(normalizeWs(expected).toLowerCase());
       if (found) return { expected, actual: expected, result: 'PASS' };
+      // A claim with several claimants: the letter prints the claimant of the exposure it's about ("Jimmy Claimant"),
+      // the claim data's first claimant is another one ("Gary Moore") — DIG30, 2026-10-17. Any claimant on the claim counts.
+      if (req.expectedSource === 'testData.claimantName') {
+        const other = claimantsOf(context).find((n) => n.toLowerCase() !== String(expected).toLowerCase() && normHaystack.includes(normalizeWs(n).toLowerCase()));
+        if (other) return { expected, actual: other, result: 'PASS', reason: `The claim has more than one claimant; the letter prints "${other}" (another claimant on this claim — likely the one on the exposure the letter is about).` };
+      }
       // The same date in the template's own format (DIG47B prints the loss date as 08/06/2026; the claim data
       // reads "August 06, 2026") — per user direction 2026-10-14 that's a match, not a missing value.
       const dateAlt = dateVariants(expected).find((d) => haystack.includes(d));
@@ -680,4 +695,4 @@ function evaluateRequirements(requirements, text, context) {
   }));
 }
 
-module.exports = { extractPdfText, evaluateRequirements, normalizeWs, dateLossPart };
+module.exports = { extractPdfText, evaluateRequirements, normalizeWs, dateLossPart, claimantsOf };

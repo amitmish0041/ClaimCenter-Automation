@@ -202,7 +202,7 @@ function makeSalutationRequirement(docOrder) {
 // "This field will be selectable in SmartCOMM: ..." (DIG34) is the same kind of note — the user picks the
 // wording in the editor, so there's no single expected value either.
 // "Allow (the) user to dynamically select Yes/No…" too (DIG236, 2026-10-17 — was BLOCKED as an unmapped value).
-const BEHAVIORAL_COMMENTARY_RE = /\b(?:is|are)\s+editable\b|selected manually|free form editable|\bselectable in smartcomm\b|\ballow\s+(?:the\s+)?user\s+to\b/i;
+const BEHAVIORAL_COMMENTARY_RE = /\b(?:is|are)\s+editable\b|selected manually|free form editable|\bselectable in smartcomm\b|\ballow\s+(?:the\s+)?user\s+to\b|\buser\s+can\s+(?:dynamically|select|choose|update|edit)\b/i;
 
 // "Dynamic language to display either “Bodily Injury” or “Property Damage” in SmartCOMM." (DIG55) — no single
 // expected value, but exactly one of the named phrases must print; checked as that instead of an unverifiable
@@ -669,7 +669,13 @@ function buildRequirementsFromComments(paragraphs, anchors, comments) {
   // and a lone leftover "." is caught by isNoiseLine.
   let residual = fullText;
   for (const { startIdx, endIdx } of [...matches].sort((x, y) => y.startIdx - x.startIdx)) {
-    residual = residual.slice(0, startIdx) + '\n' + residual.slice(endIdx);
+    // A comment range that ends MID-WORD ("Policy Cancellation No|tice attached" — DIG74, 2026-10-17) takes the rest of
+    // that word with it, so no "tice attached No" fragment is left to assert as fixed wording.
+    let end = endIdx;
+    if (end > 0 && /[A-Za-z]/.test(residual[end - 1] || '') && /[a-z]/.test(residual[end] || '')) {
+      while (end < residual.length && /[A-Za-z]/.test(residual[end])) end++;
+    }
+    residual = residual.slice(0, startIdx) + '\n' + residual.slice(end);
   }
 
   // Character offset into the residual text, matching the scale dynamic

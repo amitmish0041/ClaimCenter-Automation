@@ -2139,7 +2139,11 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
       description: `Value for "${row.attributeName}" must match the SmartCOMM payload (via Data Dictionary Xpath)`,
       type: matchedCheck ? 'fieldValueMatch' : 'requiredText',
       expectedValue: datePart ? datePart.value : String(result.value),
-      ...(datePart ? { wordValues: datePart.accept, wordNote: datePart.note, alsoAccept: datePart.accept } : { alsoAccept: result.alsoAccept, alsoAcceptNote: result.alsoAcceptNote }),
+      ...(datePart ? { wordValues: datePart.accept, wordNote: datePart.note, alsoAccept: datePart.accept }
+        // "Claimant Name" on a claim with several claimants: any of them (DIG30 prints the exposure's "Jimmy Claimant").
+        : /claimant name/i.test(row.attributeName) && pdfValidationService.claimantsOf({ raw: rawPayloadRoot }).length > 1
+          ? { alsoAccept: pdfValidationService.claimantsOf({ raw: rawPayloadRoot }), alsoAcceptNote: 'The claim has more than one claimant; the letter prints another claimant on this claim (likely the one on the exposure the letter is about).' }
+          : { alsoAccept: result.alsoAccept, alsoAcceptNote: result.alsoAcceptNote }),
       fieldValue: matchedCheck ? (matchedCheck.committedMarker || matchedCheck.after || matchedCheck.before) : undefined,
       fieldLabel: matchedCheck ? matchedCheck.label : undefined,
       wasEditedByTest: !matchedCheck && editedByTest,
