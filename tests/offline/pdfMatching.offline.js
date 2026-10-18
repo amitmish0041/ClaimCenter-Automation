@@ -27,6 +27,14 @@ test('whole-word edges: a boundary is needed only where the value starts/ends wi
   assert.equal(one({ type: 'requiredText', expectedValue: 'VEH' }, 'VEHICLE').result, 'FAIL');
 });
 
+test('short labels: a known synonym or the same words with inner punctuation still match (DIG52 "D/L:")', () => {
+  const r = one({ type: 'requiredText', expectedValue: 'D/L:' }, 'Date of Loss: 08/06/2026');
+  assert.equal(r.result, 'PASS');
+  assert.match(r.reason, /synonym/);
+  assert.equal(one({ type: 'requiredText', expectedValue: 'VIN' }, 'V.I.N. 1HGCM82633A004352').result, 'PASS');
+  assert.equal(one({ type: 'requiredText', expectedValue: 'VIN' }, 'VINTAGE car').result, 'FAIL');
+});
+
 test('short values on a boxed form: also found in the layout-aware reading (DIG126)', () => {
   assert.equal(one({ type: 'requiredText', expectedValue: 'YES' }, 'VEHYES NO', { layoutText: 'VEH   YES   NO' }).result, 'PASS');
   assert.equal(one({ type: 'requiredText', expectedValue: 'YES' }, 'VEHYES NO', {}).result, 'FAIL');

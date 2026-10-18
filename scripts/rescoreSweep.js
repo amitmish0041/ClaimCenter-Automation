@@ -29,7 +29,6 @@ const ROOT = path.join(__dirname, '..');
 const BULK_DIR = path.join(ROOT, 'results', 'smartComm', 'bulk');
 const normalizeWs = pdfValidationService.normalizeWs;
 const isShort = (v) => typeof v === 'string' && /^\S{1,4}$/.test(normalizeWs(v)) && /[A-Za-z0-9]/.test(v);
-const asWord = (w, text) => Boolean(text) && pdfValidationService.wholeWord(w).test(text);
 // Only the PDF-text checks (mapping-doc R…, Data Dictionary XP…) go through the whole-word rule — not META (the archive
 // .json), EDIT, LOCK, LAYOUT or DATA rows, which compare other things.
 const PDF_CHECK_ID_RE = /^(R|XP)\d+$/;
@@ -47,6 +46,16 @@ async function pdfTexts(pdfPath) {
     pdfTextCache.set(pdfPath, { text, layout });
   }
   return pdfTextCache.get(pdfPath);
+}
+
+// The PDF text around the first place the value occurs inside other text, so a reviewer can judge the change.
+function whereFound(value, texts) {
+  for (const [name, t] of [['text', texts.text], ['layout', texts.layout]]) {
+    const flat = String(t || '').replace(/\s+/g, ' ');
+    const i = flat.toLowerCase().indexOf(normalizeWs(value).toLowerCase());
+    if (i >= 0) return ` — in the PDF ${name}: "…${flat.slice(Math.max(0, i - 25), i + value.length + 25)}…"`;
+  }
+  return ' — not in the PDF text at all';
 }
 
 // Applies ONLY the 2026-10-18 changes on top of the scenario's saved status — an old run's status isn't recomputed from
@@ -68,11 +77,13 @@ async function rescoreScenario(s) {
     const texts = await pdfTexts(s.pdfPath);
     for (const v of shortPasses) {
       if (!texts) { unverified.push(`${v.id} "${v.expected}" (PDF not on disk)`); continue; }
-      const printed = isShort(v.actual) ? v.actual : v.expected;
-      if (!asWord(printed, texts.text) && !asWord(printed, texts.layout)) {
+      // The live check itself, on this PDF (plain + layout text): whole word, punctuation-blind words, label synonyms.
+      const accepted = isShort(v.actual) && normalizeWs(v.actual).toLowerCase() !== normalizeWs(v.expected).toLowerCase() ? [v.actual] : [];
+      const [now] = pdfValidationService.evaluateRequirements([{ id: v.id, description: v.description, type: 'requiredText', expectedValue: v.expected, alsoAccept: accepted }], texts.text, { layoutText: texts.layout });
+      if (now.result !== 'PASS') {
         v.result = 'FAIL';
         newFail = true;
-        changes.push(`${v.id} "${v.expected}" PASS → FAIL: only found inside another word ("${v.description || ''}")`);
+        changes.push(`${v.id} "${v.expected}" PASS → FAIL: not printed as a word of its own ("${v.description || ''}")${whereFound(v.expected, texts)}`);
       }
     }
   }

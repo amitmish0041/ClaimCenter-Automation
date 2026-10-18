@@ -356,6 +356,23 @@ function evaluateOne(req, haystack, context) {
         if (res.result === 'PASS' && normalizeWs(res.actual).toLowerCase() !== normalizeWs(req.expectedValue).toLowerCase() && !res.reason) {
           res.reason = req.alsoAcceptNote || `Accepted alternative value "${res.actual}".`;
         }
+        if (res.result === 'PASS' || req.wasEditedByTest) return res;
+        // Not printed as a whole word — still a match when it's the same words with punctuation inside a word ("V.I.N."
+        // vs "VIN" — itself a whole-word match), or the same label worded differently ("D/L:" printed as "Date of
+        // Loss:", DIG52 — fieldLabelSynonyms). Both were skipped for short values at first (re-score of 2026-10-18).
+        const layoutText = context && context.layoutText ? context.layoutText : '';
+        if (wordsInOrder(haystack, req.expectedValue) || (layoutText && wordsInOrder(layoutText, req.expectedValue))) {
+          return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Same words; only punctuation differs (e.g. an apostrophe or full stops).' };
+        }
+        for (const synonym of findLabelSynonyms(req.expectedValue)) {
+          const synMatch = isShortValue(synonym) ? (wholeWord(synonym).test(haystack) ? synonym : null) : findPunctuationRelaxedMatch(haystack, synonym);
+          if (synMatch) {
+            return {
+              expected: req.expectedValue, actual: synMatch, result: 'PASS',
+              reason: `The template's own label "${req.expectedValue}" wasn't found verbatim, but its known synonym "${synonym}" was found as "${synMatch}" — same field, worded differently in the rendered document. Treated as a match.`,
+            };
+          }
+        }
         return res;
       }
       const found = normHaystack.includes(normalizeWs(req.expectedValue).toLowerCase());
