@@ -795,6 +795,61 @@ async function readUnlockedContent(frame) {
   });
 }
 
+// Proves (or disproves) that a paragraph readUnlockedContent reported really can be changed: clicks at its start,
+// types one marker character, checks it appeared IN that paragraph, then deletes it and confirms the text is back to
+// what it was (Ctrl+Z as a fallback). Per user direction 2026-10-17 — LOCK1 used to rest on the editor's markup alone
+// (no .th-frag-locked ancestor). Returns { typed, restored, error }.
+const PROBE_CHAR = '§';
+async function probeParagraphEditable(frame, page, text) {
+  // The editor RE-DRAWS a paragraph once it's clicked/typed into (live DIG23DE 2026-10-17: the tagged element was gone
+  // and every read of it timed out), so after typing the document is searched for the probe character instead.
+  const tagged = await frame.evaluate(({ t }) => {
+    const clean = (el) => { const c = el.cloneNode(true); c.querySelectorAll('.th-data-value, .th-data-value-editable, .th-control-code-off').forEach((n) => n.remove()); return (c.textContent || '').replace(/\s+/g, ' ').trim(); };
+    const el = Array.from(document.querySelectorAll('.th-contentEditorBody .th-paragraph'))
+      .find((p) => !p.closest('.th-frag-locked') && clean(p) === t);
+    if (!el) return false;
+    el.setAttribute('data-qa-probe', '1');
+    return true;
+  }, { t: text }).catch(() => false);
+  if (!tagged) return { typed: false, restored: true, error: 'paragraph not found again' };
+  // Where is the probe character now? { count, inTarget } — inTarget = a paragraph holding it reads as the target
+  // text once the character is taken out.
+  const whereIsProbe = () => frame.evaluate(({ ch, t }) => {
+    const clean = (el) => { const c = el.cloneNode(true); c.querySelectorAll('.th-data-value, .th-data-value-editable, .th-control-code-off').forEach((n) => n.remove()); return (c.textContent || '').replace(/\s+/g, ' ').trim(); };
+    const count = document.body.innerText.split(ch).length - 1;
+    const holders = Array.from(document.querySelectorAll('.th-contentEditorBody .th-paragraph')).filter((p) => (p.textContent || '').includes(ch));
+    const inTarget = holders.some((p) => clean(p).split(ch).join('').replace(/\s+/g, ' ').trim() === t);
+    return { count, inTarget };
+  }, { ch: PROBE_CHAR, t: text }).catch(() => ({ count: -1, inTarget: false }));
+  try {
+    const before = (await whereIsProbe()).count;
+    const para = frame.locator('[data-qa-probe="1"]').first();
+    const box = await para.boundingBox({ timeout: 3000 }).catch(() => null);
+    if (!box) return { typed: false, restored: true, error: 'paragraph not visible' };
+    await para.click({ position: { x: 2, y: Math.min(box.height / 2, 8) }, force: true, timeout: 5000 });
+    await page.keyboard.press('Home');
+    await page.keyboard.type(PROBE_CHAR);
+    await page.waitForTimeout(500);
+    const after = await whereIsProbe();
+    if (after.count <= before) return { typed: false, restored: true };
+    const typed = after.inTarget;
+    await page.keyboard.press('Backspace');
+    await page.waitForTimeout(400);
+    let restored = (await whereIsProbe()).count === before;
+    if (!restored) {
+      await page.keyboard.press('Control+z');
+      await page.waitForTimeout(500);
+      restored = (await whereIsProbe()).count === before;
+    }
+    return { typed, restored, ...(typed ? {} : { error: 'typing went into another part of the document' }) };
+  } catch (e) {
+    return { typed: false, restored: false, error: e.message.split('\n')[0] };
+  } finally {
+    await frame.evaluate(() => document.querySelectorAll('[data-qa-probe]').forEach((e) => e.removeAttribute('data-qa-probe'))).catch(() => {});
+    await page.keyboard.press('Escape').catch(() => {});
+  }
+}
+
 // ── 5. Read the Identifier off Document Properties — the S3 lookup key ─────────────────────────────
 async function readDocumentPropertiesIdentifier(page) {
   const row = page.locator('div, tr').filter({ hasText: /^Identifier$/ }).last();
@@ -807,5 +862,5 @@ async function readDocumentPropertiesIdentifier(page) {
 module.exports = {
   clickInteractiveAndWaitForEditor, getEditorFrame, readMergeFields, inspectAndMaybeEdit,
   saveChanges, completeDocument, dismissAnyPopups, readDocumentPropertiesIdentifier, saveDiagnostic,
-  installDialogAutoAccept, selectAllYesNoChoices, readUnlockedContent,
+  installDialogAutoAccept, selectAllYesNoChoices, readUnlockedContent, probeParagraphEditable,
 };

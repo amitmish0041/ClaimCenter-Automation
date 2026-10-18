@@ -665,6 +665,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
       // The SmartCOMM payload itself (ccDocumentCreationRequest) — "raw.*" sources (fieldLabelSynonyms) and the
       // exposure-table checks read it directly.
       raw: rawPayloadRoot,
+      interactiveChecks, // what each edited field showed before the edit — the exposure-table type check uses it
       // Spreads every flat field payloadService already returns (claimNumber,
       // lossDate, policyNumber, policyEffectiveDate/ExpirationDate,
       // underwritingCompany, agentNumber, vehicleYear/Make/Model/Vin/
@@ -1116,15 +1117,46 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     const { total, unlocked } = await interactiveEditService.readUnlockedContent(frame);
     const squash = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const intended = (t) => freeFormSamples.some((s) => squash(s).length >= 8 && (squash(s).includes(squash(t)) || squash(t).includes(squash(s))));
-    const offending = unlocked.filter((t) => !intended(t));
-    lockChecks.push(offending.length
+    const candidates = unlocked.filter((t) => !intended(t));
+    // Each candidate (no locked fragment around it in the editor's markup) is then PROVEN by typing into it — one
+    // character, deleted again straight away (interactiveEditService.probeParagraphEditable). Only paragraphs that
+    // really accepted the typing count as a defect; per user direction 2026-10-17 the markup alone wasn't evidence.
+    const short = (t) => `"${t.length > 90 ? `${t.slice(0, 89)}…` : t}"`;
+    const confirmed = []; const resisted = []; const unverified = [];
+    // Self-check: "typing had no effect" only means something if the probe CAN type. A free-form area the BA made
+    // editable on purpose must accept the probe; if it doesn't, the "resisted" results can't be trusted.
+    const freeForm = unlocked.filter((t) => intended(t));
+    let probeWorks = null;
+    if (freeForm.length) {
+      const self = await interactiveEditService.probeParagraphEditable(frame, page, freeForm[0]);
+      probeWorks = self.typed;
+      log(`LOCK1: probe self-check on the free-form area "${freeForm[0].slice(0, 50)}" — ${self.typed ? 'typing worked' : `typing did NOT work (${self.error || 'no effect'}) — "no effect" results below can't be trusted`}`);
+    }
+    for (const t of candidates.slice(0, 12)) {
+      const p = await interactiveEditService.probeParagraphEditable(frame, page, t);
+      // Typing that landed somewhere else means the editor wouldn't put the cursor in this paragraph — it didn't change.
+      if (p.typed) confirmed.push(t); else if (p.error && !/another part of the document/.test(p.error)) unverified.push(`${t} (${p.error})`); else resisted.push(t);
+      if (p.typed && !p.restored) log(`LOCK1: WARNING — typed a test character into ${short(t)} and couldn't confirm it was removed; check the draft.`);
+    }
+    unverified.push(...candidates.slice(12).map((t) => `${t} (not probed — more than 12 candidates)`));
+    if (probeWorks === false) unverified.push(...resisted.splice(0).map((t) => `${t} (no effect, but the probe couldn't type into the free-form area either)`));
+    const how = `Checked by clicking into each paragraph that has no locked section around it in the editor and typing one character (removed again immediately).`;
+    const notes = [
+      resisted.length ? `${resisted.length} more sit outside a locked section but typing into them had no effect, so they're not counted: ${resisted.map(short).join(' | ')}.` : '',
+      unverified.length ? `Couldn't verify: ${unverified.map(short).join(' | ')}.` : '',
+    ].filter(Boolean).join(' ');
+    lockChecks.push(confirmed.length
       ? {
         id: 'LOCK1', description: 'Template text is locked (users can\'t edit or delete it)', expected: 'All template paragraphs locked',
-        actual: offending.map((t) => `"${t.length > 90 ? `${t.slice(0, 89)}…` : t}"`).join(' | '), result: 'FAIL',
-        reason: `${offending.length} of ${total} template paragraph(s) sit outside a locked fragment in the SmartCOMM editor, so a user can edit or delete them${offending.some((t) => fraudLanguageService.findFraudLanguageInText(t).length || /fraud notice/i.test(t)) ? ' — including fraud language' : ''} (same defect as Jira SMART-1313 / SMART-1339).`,
+        actual: `Editable: ${confirmed.map(short).join(' | ')}`, result: 'FAIL',
+        reason: `${confirmed.length} of ${total} template paragraph(s) accepted typing in the SmartCOMM editor, so a user can change or delete them${confirmed.some((t) => fraudLanguageService.findFraudLanguageInText(t).length || /fraud notice/i.test(t)) ? ' — including fraud language' : ''} (same defect as Jira SMART-1313 / SMART-1339). ${how}${notes ? ` ${notes}` : ''}`,
       }
-      : { id: 'LOCK1', description: 'Template text is locked (users can\'t edit or delete it)', expected: 'All template paragraphs locked', actual: `${total} paragraphs, all locked${unlocked.length ? ` (plus ${unlocked.length} intended free-form area(s))` : ''}`, result: 'PASS' });
-    if (offending.length) log(`LOCK1: ${offending.length} unlocked template paragraph(s): ${offending.map((t) => t.slice(0, 60)).join(' | ')}`);
+      : {
+        id: 'LOCK1', description: 'Template text is locked (users can\'t edit or delete it)', expected: 'All template paragraphs locked',
+        actual: `${total} paragraphs, none editable${unlocked.length - candidates.length ? ` (plus ${unlocked.length - candidates.length} intended free-form area(s))` : ''}`, result: unverified.length ? 'BLOCKED' : 'PASS',
+        ...(candidates.length ? { reason: `${how} ${notes}`.trim() } : {}),
+      });
+    log(`LOCK1: ${candidates.length} paragraph(s) outside a locked section — ${confirmed.length} accepted typing, ${resisted.length} didn't, ${unverified.length} not verified.${confirmed.length ? ` Editable: ${confirmed.map((t) => t.slice(0, 50)).join(' | ')}` : ''}${unverified.length ? ` Not verified: ${unverified.map((t) => t.slice(0, 80)).join(' | ')}` : ''}`);
   } catch (err) {
     log(`LOCK1: couldn't read the editor's fragment locks (${err.message.split('\n')[0]}) — skipped.`);
   }
@@ -1721,10 +1753,20 @@ function annotateInteractiveEditFailures(validations, interactiveChecks) {
     // committedMarker is the plain value actually typed; `after` carries the live editor's own extra bracket
     // decoration ("[[QA-EDIT-18]]") that never appears in the real PDF.
     const editedValue = hits.map((h) => h.committedMarker || h.after).join(' ');
-    v.actual = editedValue;
-    v.result = 'SKIPPED';
-    v.intentionalEdit = true; // report renderers: still show Expected/Actual for this one, unlike a plain SKIPPED
-    v.reason = `Intentionally overwritten with "${editedValue}" (${hits.map((h) => h.id).join(', ')}) as part of the interactive-editable-field test (see the Interactive Session section) — not a template defect.${v.reason ? ` (Original reason: ${v.reason})` : ''}`;
+    // Before AND after the edit (per user direction 2026-10-17): the field must have shown the real value before the
+    // test overwrote it — then the edit must be in the PDF (already established: `edited` only holds verified edits).
+    // Matching what was there before is the same containment as the hit test above.
+    const beforeValues = hits.map((h) => h.before).filter(Boolean);
+    const beforeOk = beforeValues.some((b) => {
+      const bn = normForKnownValueMatch(b);
+      return expectedNorm.length >= minLen && bn.length >= minLen && (expectedNorm.includes(bn) || bn.includes(expectedNorm));
+    });
+    v.intentionalEdit = true; // report renderers: still show Expected/Actual for this one
+    v.actual = `Before edit: "${beforeValues.join(' ')}" → after edit: "${editedValue}"`;
+    v.result = beforeOk ? 'PASS' : 'FAIL';
+    v.reason = beforeOk
+      ? `Showed the expected value before the interactive-edit test overwrote it with "${editedValue}" (${hits.map((h) => h.id).join(', ')}), and the edited value is in the completed PDF — correct before and after the edit.`
+      : `Before the interactive-edit test overwrote it (${hits.map((h) => h.id).join(', ')}), the field showed "${beforeValues.join(' ')}" instead of the expected "${v.expected}"${beforeValues.some((b) => /editable|<</i.test(b)) ? ' — an empty editable placeholder, i.e. no default value' : ''}. The edit itself ("${editedValue}") is in the PDF.`;
   }
 }
 
@@ -1844,6 +1886,9 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
       fieldValue: matchedCheck ? (matchedCheck.committedMarker || matchedCheck.after || matchedCheck.before) : undefined,
       fieldLabel: matchedCheck ? matchedCheck.label : undefined,
       wasEditedByTest: !matchedCheck && editedByTest,
+      // What the edited field(s) showed BEFORE the test's edit — checked against the payload value when the edit consumed
+      // the only printed occurrence (pdfValidationService.editedBeforeResult).
+      editedBefore: !matchedCheck && editedByTest ? (interactiveChecks || []).filter((c) => c.observedChanged === true && (c.dictionaryField === row.attributeName || (String(result.value).length >= 4 && sameText(c.before, result.value)))).map((c) => c.before).filter(Boolean) : undefined,
       docOrder: Number.MAX_SAFE_INTEGER,
     });
   }

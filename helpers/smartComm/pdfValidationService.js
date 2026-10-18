@@ -258,6 +258,21 @@ function dateLossPart(attributeName, value) {
   return { value: String(d.getFullYear()), accept: [String(d.getFullYear())], note };
 }
 
+// A payload value whose only printed occurrence the interactive-edit test overwrote: judged on what the field showed
+// BEFORE the edit (req.editedBefore, from the editor) — it must have been the real value (per user direction
+// 2026-10-17: correct before the edit, and the edit itself is verified in the PDF separately). No recorded "before"
+// → SKIPPED, as it used to be.
+function editedBeforeResult(req, matches) {
+  const before = (req.editedBefore || []).filter(Boolean);
+  if (!before.length) {
+    return { expected: req.expectedValue, actual: 'Not Found', result: 'SKIPPED', reason: 'Not found in the document — this field was overwritten by the test\'s own editable-field check, and its value before the edit wasn\'t recorded.' };
+  }
+  const ok = before.some((b) => matches(String(b)));
+  return ok
+    ? { expected: req.expectedValue, actual: `Before edit: "${before.join(' ')}"`, result: 'PASS', reason: 'The field showed this value before the interactive-edit test overwrote it (the edit is verified in the PDF separately) — correct before and after the edit.' }
+    : { expected: req.expectedValue, actual: `Before edit: "${before.join(' ')}"`, result: 'FAIL', reason: `Before the interactive-edit test overwrote it, the field showed "${before.join(' ')}" instead of "${req.expectedValue}"${before.some((b) => /editable|<</i.test(b)) ? ' — an empty editable placeholder, i.e. no default value' : ''}.` };
+}
+
 function evaluateOne(req, haystack, context) {
   if (req.enabled === false) {
     return { expected: 'N/A', actual: 'SKIPPED', result: 'SKIPPED', reason: req.disabledReason || 'Disabled' };
@@ -271,9 +286,7 @@ function evaluateOne(req, haystack, context) {
         const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const hit = req.wordValues.find((w) => new RegExp(`(^|[^A-Za-z0-9])${esc(w)}(?![A-Za-z0-9])`, 'i').test(haystack));
         if (hit) return { expected: req.expectedValue, actual: hit, result: 'PASS', reason: req.wordNote };
-        if (req.wasEditedByTest) {
-          return { expected: req.expectedValue, actual: 'Not Found', result: 'SKIPPED', reason: 'Not found as a separate word — but this field was itself overwritten by this test\'s own editable-field check, which consumed the only occurrence.' };
-        }
+        if (req.wasEditedByTest) return editedBeforeResult(req, (b) => req.wordValues.some((w) => new RegExp(`(^|[^A-Za-z0-9])${esc(w)}(?![A-Za-z0-9])`, 'i').test(b)));
         return { expected: req.expectedValue, actual: 'Not Found', result: 'FAIL', reason: `"${req.expectedValue}" doesn't appear as a separate word anywhere in the generated document. ${req.wordNote || ''}`.trim() };
       }
       const found = normHaystack.includes(normalizeWs(req.expectedValue).toLowerCase());
@@ -338,12 +351,7 @@ function evaluateOne(req, haystack, context) {
       // document (a letterhead, a signature block) — but for a template where this field's value genuinely
       // only ever appears in that ONE merge field (no such repeat), the test's own edit is what erased it, not
       // a real template defect. Nothing a human could act on, so SKIPPED rather than FAIL.
-      if (req.wasEditedByTest) {
-        return {
-          expected: req.expectedValue, actual: 'Not Found', result: 'SKIPPED',
-          reason: `Not found anywhere in the document — but this field was itself intentionally overwritten by this test's own editable-field check (see the Interactive Session section), and this template doesn't appear to repeat the value elsewhere. Not a template defect, just this test's own edit consuming the only occurrence.`,
-        };
-      }
+      if (req.wasEditedByTest) return editedBeforeResult(req, (b) => normalizeWs(b).toLowerCase().includes(normalizeWs(req.expectedValue).toLowerCase()) || dateVariants(req.expectedValue).some((d) => b.includes(d)));
       // Fallbacks for text that IS printed but the plain text can't show as one phrase (CONFIRMED 2026-10-15, DIG49
       // Application for Benefits — a boxed form):
       const layout = context && context.layoutText ? context.layoutText : '';
@@ -557,11 +565,18 @@ function evaluateOne(req, haystack, context) {
         // The type cell is an editable field the interactive check overwrites (QA-EDIT-n, live DIG26), so a missing type
         // isn't counted when this run's edits are in the document. Types also stay out of `expected`, which the
         // "overwritten by the test" annotation compares against — otherwise a real amount problem would be SKIPPED too.
+        // A type cell the test overwrote is judged on what it showed BEFORE the edit (the editor's own value, per user
+        // direction 2026-10-17): the payload's type must have been there.
+        const editedBefores = ((context && context.interactiveChecks) || []).filter((c) => c.observedChanged === true && c.before).map((c) => normalizeWs(c.before).toLowerCase());
         const typeEditedByTest = /QA-EDIT-\d/.test(haystack);
         exposures.forEach((e, k) => {
           const type = e.type && (e.type.name || e.type);
           const row = [];
-          if (type && !typeEditedByTest && !normHaystack.includes(normalizeWs(String(type)).toLowerCase())) missing.push(`exposure ${k + 1} type "${type}"`);
+          const tn = type ? normalizeWs(String(type)).toLowerCase() : '';
+          if (type && !normHaystack.includes(tn)) {
+            if (!typeEditedByTest) missing.push(`exposure ${k + 1} type "${type}"`);
+            else if (editedBefores.length && !editedBefores.some((b) => b.includes(tn))) missing.push(`exposure ${k + 1} type "${type}" (not in the edited type cells before the edit either: ${[...new Set(editedBefores)].slice(0, 4).map((b) => `"${b}"`).join(', ')})`);
+          }
           for (const [label, field] of COLS) {
             const m = money(e[field]);
             if (!m) continue;
