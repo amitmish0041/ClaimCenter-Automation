@@ -201,7 +201,8 @@ function makeSalutationRequirement(docOrder) {
 // real check and once as a dead-end content requirement.
 // "This field will be selectable in SmartCOMM: ..." (DIG34) is the same kind of note — the user picks the
 // wording in the editor, so there's no single expected value either.
-const BEHAVIORAL_COMMENTARY_RE = /\b(?:is|are)\s+editable\b|selected manually|free form editable|\bselectable in smartcomm\b/i;
+// "Allow (the) user to dynamically select Yes/No…" too (DIG236, 2026-10-17 — was BLOCKED as an unmapped value).
+const BEHAVIORAL_COMMENTARY_RE = /\b(?:is|are)\s+editable\b|selected manually|free form editable|\bselectable in smartcomm\b|\ballow\s+(?:the\s+)?user\s+to\b/i;
 
 // "Dynamic language to display either “Bodily Injury” or “Property Damage” in SmartCOMM." (DIG55) — no single
 // expected value, but exactly one of the named phrases must print; checked as that instead of an unverifiable
@@ -209,7 +210,8 @@ const BEHAVIORAL_COMMENTARY_RE = /\b(?:is|are)\s+editable\b|selected manually|fr
 const EITHER_OR_RE = /\beither\s+[“"']([^”"']+)[”"']\s+or\s+[“"']([^”"']+)[”"']/i;
 
 function makeDynamicRequirement(n, fieldName, value, { conditional = false, conditionReason = '' } = {}) {
-  const field = synonyms.lookup(fieldName);
+  // A BA note after the field name ("From Name - Use Brush Script MT font" — DIG236) doesn't change which field it is.
+  const field = synonyms.lookup(fieldName) || synonyms.lookup(String(fieldName || '').split(/\s+[-–]\s+|\s*\(/)[0]);
   // "Date of Letter" whose comment anchors only part of the sample date (DIG129/190–192: just "2026") is still a
   // date — checked as date-shaped instead of BLOCKED with no shape (2026-10-17).
   const shape = classifyDynamicShape(value) || (/^date of letter$/i.test(String(fieldName || '').trim()) ? 'date' : 'text');
@@ -463,6 +465,9 @@ function classifyResidualFragment(fragment, docOrder, { sampleNames = [] } = {})
   const dear = line.replace(/\s+/g, ' ').match(/^Dear (?:(?:Mr|Mrs|Ms|Miss|Dr)\.? )?(.+?):?$/i);
   if (dear && sampleNames.includes(dear[1].trim().toLowerCase())) return [makeSalutationRequirement(docOrder)];
   if (!line || isBlankField(line) || isNoiseLine(line)) return [];
+  // The ", CITY, ST 12345" tail of a SAMPLE address whose street a comment took (DIG236's ", HARRISBURG, PA 17110",
+  // 2026-10-17) — the real claim's address prints there, so it's not fixed wording.
+  if (/^,\s*[A-Za-z][A-Za-z .'-]*,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\.?$/.test(line)) return [];
   // CONFIRMED live 2026-09-30 (DIG52's own "See Fraud Language sheet for details..."): a plain BODY
   // paragraph (not a tracked comment, so makeDynamicRequirement's own CONDITIONAL_RE never sees it) can
   // ALSO just be the BA's note-to-self pointing at the Fraud Language reference sheet, rather than literal

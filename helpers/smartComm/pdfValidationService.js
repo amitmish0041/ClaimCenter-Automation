@@ -349,7 +349,11 @@ function evaluateOne(req, haystack, context) {
           // this run's own "[QA-EDIT-n]" (or the field's value marker "[") sits where the underscores were.
           let hasBlank = false;
           for (let at = haystack.indexOf(fuzzy); at >= 0 && !hasBlank; at = haystack.indexOf(fuzzy, at + 1)) {
-            if (/_{3,}|\[|QA-EDIT-\d/.test(haystack.slice(at, at + fuzzy.length + 14))) hasBlank = true;
+            // ...or any value this run typed into an edited field there (an "X" in DIG120A's SSN blank, 2026-10-17).
+            const after = haystack.slice(at, at + fuzzy.length + 14);
+            const typedHere = ((context && context.interactiveChecks) || []).some((c) => c.observedChanged === true && c.committedMarker
+              && new RegExp(`(^|[^A-Za-z0-9])${String(c.committedMarker).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z])`).test(after.slice(fuzzy.length)));
+            if (/_{3,}|\[|QA-EDIT-\d/.test(after) || typedHere) hasBlank = true;
           }
           if (!hasBlank) {
             return {
@@ -388,7 +392,8 @@ function evaluateOne(req, haystack, context) {
       // document (a letterhead, a signature block) — but for a template where this field's value genuinely
       // only ever appears in that ONE merge field (no such repeat), the test's own edit is what erased it, not
       // a real template defect. Nothing a human could act on, so SKIPPED rather than FAIL.
-      if (req.wasEditedByTest) return editedBeforeResult(req, (b) => normalizeWs(b).toLowerCase().includes(normalizeWs(req.expectedValue).toLowerCase()) || dateVariants(req.expectedValue).some((d) => b.includes(d)));
+      // The accepted alternatives (e.g. the letter's UTC date, one day off — DIG129 2026-10-17) count too.
+      if (req.wasEditedByTest) return editedBeforeResult(req, (b) => [req.expectedValue, ...(req.alsoAccept || [])].some((x) => normalizeWs(b).toLowerCase().includes(normalizeWs(x).toLowerCase()) || dateVariants(x).some((d) => b.includes(d))));
       // Fallbacks for text that IS printed but the plain text can't show as one phrase (CONFIRMED 2026-10-15, DIG49
       // Application for Benefits — a boxed form):
       const layout = context && context.layoutText ? context.layoutText : '';

@@ -1295,13 +1295,13 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       probeWorks = self.typed;
       log(`LOCK1: probe self-check on the free-form area "${freeForm[0].slice(0, 50)}" — ${self.typed ? 'typing worked' : `typing did NOT work (${self.error || 'no effect'}) — "no effect" results below can't be trusted`}`);
     }
-    for (const t of candidates.slice(0, 12)) {
+    for (const t of candidates.slice(0, 40)) {
       const p = await interactiveEditService.probeParagraphEditable(frame, page, t);
       // Typing that landed somewhere else means the editor wouldn't put the cursor in this paragraph — it didn't change.
       if (p.typed) confirmed.push(t); else if (p.error && !/another part of the document/.test(p.error)) unverified.push(`${t} (${p.error})`); else resisted.push(t);
       if (p.typed && !p.restored) log(`LOCK1: WARNING — typed a test character into ${short(t)} and couldn't confirm it was removed; check the draft.`);
     }
-    unverified.push(...candidates.slice(12).map((t) => `${t} (not probed — more than 12 candidates)`));
+    unverified.push(...candidates.slice(40).map((t) => `${t} (not probed — more than 40 candidates)`));
     if (probeWorks === false) unverified.push(...resisted.splice(0).map((t) => `${t} (no effect, but the probe couldn't type into the free-form area either)`));
     const how = `Checked by clicking into each paragraph that has no locked section around it in the editor and typing one character (removed again immediately).`;
     const notes = [
@@ -1956,6 +1956,18 @@ function annotateInteractiveEditFailures(validations, interactiveChecks) {
   const minLen = 4;
   for (const v of validations) {
     if (v.result !== 'FAIL') continue;
+    // "A date-shaped value must appear" with no date left because the test overwrote every date field (DIG129,
+    // 2026-10-17): judged on the edited fields' values BEFORE the edit — one of them must have shown a date.
+    if (v.expected === '<date>') {
+      const dated = edited.filter((c) => DATE_SHAPED_RE.test(String(c.before || '').replace(/[[\]]/g, '').trim()));
+      if (dated.length) {
+        v.intentionalEdit = true;
+        v.result = 'PASS';
+        v.actual = `Before edit: "${dated.map((c) => c.before).join(' ')}" → after edit: "${dated.map((c) => c.committedMarker).join(' ')}"`;
+        v.reason = `No date is left in the PDF because the interactive-edit test overwrote the date field(s) (${dated.map((c) => c.id).join(', ')}); before the edit they showed a date, and the edits are in the PDF.`;
+      }
+      continue;
+    }
     const desc = (v.description || '').toLowerCase();
     const expectedNorm = normForKnownValueMatch(v.expected);
     const hits = edited.filter((c) => {
@@ -2081,7 +2093,7 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
     // Underwriting Company field, whose label "RECEIVED OF" matches no dictionary row, reported as a FAIL).
     const sameText = (a, b) => pdfValidationService.normalizeWs(a || '').replace(/[[\]]/g, '').trim().toLowerCase() === pdfValidationService.normalizeWs(b || '').trim().toLowerCase();
     const editedByTest = (interactiveChecks || []).some((c) => c.observedChanged === true
-      && (c.dictionaryField === row.attributeName || (String(result.value).length >= 4 && sameText(c.before, result.value))));
+      && (c.dictionaryField === row.attributeName || [result.value, ...(result.alsoAccept || [])].some((x) => String(x).length >= 4 && sameText(c.before, x))));
     const datePart = pdfValidationService.dateLossPart(row.attributeName, result.value);
     // Every template field this attribute belongs to is switched off for THIS scenario (e.g. Agent Number,
     // which prints only for an added additional recipient — DIG239 2026-10-16, user direction): the payload
@@ -2104,7 +2116,7 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
       wasEditedByTest: !matchedCheck && editedByTest,
       // What the edited field(s) showed BEFORE the test's edit — checked against the payload value when the edit consumed
       // the only printed occurrence (pdfValidationService.editedBeforeResult).
-      editedBefore: !matchedCheck && editedByTest ? (interactiveChecks || []).filter((c) => c.observedChanged === true && (c.dictionaryField === row.attributeName || (String(result.value).length >= 4 && sameText(c.before, result.value)))).map((c) => c.before).filter(Boolean) : undefined,
+      editedBefore: !matchedCheck && editedByTest ? (interactiveChecks || []).filter((c) => c.observedChanged === true && (c.dictionaryField === row.attributeName || [result.value, ...(result.alsoAccept || [])].some((x) => String(x).length >= 4 && sameText(c.before, x)))).map((c) => c.before).filter(Boolean) : undefined,
       docOrder: Number.MAX_SAFE_INTEGER,
     });
   }
