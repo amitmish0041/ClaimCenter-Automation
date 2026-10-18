@@ -1604,7 +1604,8 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // fields with their neighbours' values). A field was replaced only if its own typed value is in NO field any more;
   // the value that replaced it then comes from the fields sharing its technical name whose values are still there.
   try {
-    const finalTexts = (await interactiveEditService.readMergeFields(frame)).map((x) => String(x.stripped || x.text || ''));
+    const finalFields = await interactiveEditService.readMergeFields(frame);
+    const finalTexts = finalFields.map((x) => String(x.stripped || x.text || ''));
     const holds = (marker) => {
       const m = String(marker || '').replace(/[[\]]/g, '').trim();
       if (!m) return true;
@@ -1615,7 +1616,13 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       if (c.observedChanged !== true || holds(c.committedMarker || c.after)) continue;
       const kin = interactiveChecks.filter((o) => o !== c && o.observedChanged === true && o.technicalName && o.technicalName === c.technicalName && holds(o.committedMarker || o.after));
       c.replacedBeforeComplete = kin.length ? kin.map((o) => String(o.committedMarker || o.after).replace(/[[\]]/g, '')) : null;
-      log(`${c.id}: its edit "${c.committedMarker}" is no longer in the editor before completing${kin.length ? ` — replaced by ${c.replacedBeforeComplete.join(' / ')} (same field)` : ' — nothing with the same technical name holds a replacement'}`);
+      // No same-named field: what the field with this SAME label holds now (DIG108 "…storage charges starting" /
+      // DIG36 "…deductible in the amount of $" — a later edit typed into this spot as positions shifted while editing).
+      if (!c.replacedBeforeComplete && String(c.labelContext || '').length >= 8) {
+        const sameSpot = finalFields.find((x) => x.labelContext === c.labelContext && x.editable && x.stripped && !/<<|editable/i.test(x.stripped));
+        if (sameSpot) c.replacedBeforeComplete = [String(sameSpot.stripped).replace(/[[\]]/g, '').trim()];
+      }
+      log(`${c.id}: its edit "${c.committedMarker}" is no longer in the editor before completing${c.replacedBeforeComplete ? ` — that spot now holds ${c.replacedBeforeComplete.join(' / ')}${kin.length ? ' (same field)' : ' (same label — a later edit typed here)'}` : ' — no field holds a replacement'}`);
     }
   } catch (e) { log(`couldn't re-read the fields' final values before completing (${e.message.split('\n')[0]})`); }
   try {
@@ -1891,7 +1898,7 @@ function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
     const found = replacement ? true : foundInPdf(c.committedMarker || c.after);
     if (replacement) {
       c.finalShownInPdf = replacement;
-      c.reason = `${c.reason ? `${c.reason} ` : ''}(Typed "${typed}", but a later edit of the same field (shared value) changed it to "${replacement}" before Complete Document; that final value is in the PDF.)`;
+      c.reason = `${c.reason ? `${c.reason} ` : ''}(Typed "${typed}", but before Complete Document that spot held "${replacement}" (a later edit of the same shared field, or a later edit typed into this spot while field positions shifted) — that final value is in the PDF.)`;
     }
     // Split-line sibling: this exact marker isn't in the PDF, but another span of the SAME field (same technical
     // name) is — the field WAS edited; this fragment just lost the merge into the single rendered field.
