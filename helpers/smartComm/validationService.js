@@ -872,7 +872,17 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // meaningful scenario fact), a never-selected Choices question is noise — drop it from the report
     // entirely rather than show a SKIPPED row for every such condition on every scenario.
     const reportableRequirements = scenarioRequirements.filter((r) => !(CHOICE_SELECTED_YES_RE.test(r.fieldName || '') && r.enabled === false));
-    const validations = pdfValidationService.evaluateRequirements([...reportableRequirements, ...fraudRequirements, ...xpathRequirements], text, context);
+    const evaluated = [...reportableRequirements, ...fraudRequirements, ...xpathRequirements];
+    const validations = pdfValidationService.evaluateRequirements(evaluated, text, context);
+    // Opt-in: save this scenario as an offline regression case (see regressionCaseService) — never fails the run.
+    if (/^(1|true|yes)$/i.test(process.env.SMARTCOMM_SAVE_REGRESSION_CASE || '')) {
+      try {
+        require('./regressionCaseService').saveCase({ digNumber: template.digNumber, scenarioId: scenario.scenarioId, requirements: evaluated, text, context, validations, log: (m) => console.log(`[SmartComm] ${scenario.scenarioId}: ${m}`) });
+      } catch (err) { console.log(`[SmartComm] ${scenario.scenarioId}: couldn't save the regression case (${err.message})`); }
+    }
+    // No payload means none of the Data Dictionary value checks above were even built — previously that just meant fewer
+    // checks, with nothing in the report (QA review 2026-10-18). Reported as BLOCKED so the scenario can't read PASS.
+    if (!rawPayloadRoot) validations.push(payloadUnavailableCheck());
     explainFraudLanguageFailures(validations, text, fraudDetails);
     annotateInteractiveEditFailures(validations, interactiveChecks);
     // An overlay form can be pure page images with no text layer (CONFIRMED live 2026-10-14, DIG150MIC: the
@@ -958,11 +968,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
       });
     }
     // Layout against the Word mapping doc — alignment, paragraph breaks, header order (layoutValidationService).
-    try {
-      validations.push(...await layoutValidationService.checkLayout({ docxPath: sourceFile, pdfPath, requirements: reportableRequirements, validations }));
-    } catch (err) {
-      console.log(`[SmartComm] ${scenario.scenarioId}: layout checks skipped (${err.message.split('\n')[0]})`);
-    }
+    validations.push(...await runLayoutChecks({ docxPath: sourceFile, pdfPath, requirements: reportableRequirements, validations }, (m) => console.log(`[SmartComm] ${scenario.scenarioId}: ${m}`)));
     // "Data capture" cross-check (Insured / Claimant / Loss Date / Policy Number / Underwriting Company) compares
     // this tool's own Summary-screen scrape with the payload ClaimCenter sent to SmartCOMM. It says nothing about
     // the template, so it is NOT reported or counted — a mismatch (capture drift) is only logged for whoever is
@@ -975,17 +981,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
       }
     }
 
-    const passed = validations.filter(v => v.result === 'PASS').length;
-    const failed = validations.filter(v => v.result === 'FAIL').length;
-    const blocked = validations.filter(v => v.result === 'BLOCKED').length;
-    const skipped = validations.filter(v => v.result === 'SKIPPED').length;
-    // A dictionary-vs-live-session disagreement (interactiveChecks FAIL) is just as much a genuine defect as a
-    // content-validation FAIL, so it must fail the scenario too — previously only `validations` was consulted
-    // here, so a scenario with editable-field defects but clean content checks silently reported PASS (per
-    // user direction 2026-10-05: "if there are failures in interactive session table...overall status needs
-    // to show as failed").
-    const fieldsFailed = interactiveChecks.filter(c => c.result === 'FAIL').length;
-    const status = (failed > 0 || fieldsFailed > 0) ? 'FAIL' : blocked > 0 ? 'BLOCKED' : 'PASS';
+    const { passed, failed, blocked, skipped, status } = rollUpScenario(validations, interactiveChecks);
 
     console.log(`[SmartComm] ${scenario.scenarioId}: ${status} (${passed} passed, ${failed} failed, ${blocked} blocked, ${skipped} skipped)`);
     // The report is an in-memory buffer, so log each failed check's detail too — otherwise a FAIL count in the
@@ -1043,6 +1039,48 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
       ...(err.choicesApplied ? { conditionalSummary: { choicesAnswered: err.choicesApplied } } : {}),
     };
   }
+}
+
+// Layout checks (layoutValidationService), or one BLOCKED row when they crash: a crash used to be logged only, and the
+// scenario could still read PASS with its layout never checked (QA review 2026-10-18).
+async function runLayoutChecks(args, log = console.log) {
+  try {
+    return await layoutValidationService.checkLayout(args);
+  } catch (err) {
+    const msg = err.message.split('\n')[0];
+    log(`layout checks could not run (${msg})`);
+    return [{ id: 'LAYOUT0', description: 'Layout checks against the Word mapping doc', expected: 'Layout checks run', actual: 'Not run', result: 'BLOCKED', reason: `The layout checks crashed, so alignment / paragraph breaks / header order were not checked: ${msg}` }];
+  }
+}
+
+// No payload means none of the Data Dictionary value checks were even built — previously that just meant fewer checks,
+// with nothing in the report (QA review 2026-10-18). Reported as BLOCKED so the scenario can't read PASS.
+function payloadUnavailableCheck() {
+  return { id: 'PAYLOAD0', description: 'Data Dictionary value checks (payload vs. PDF)', expected: 'SmartCOMM payload available', actual: 'Not available', result: 'BLOCKED', reason: 'The SmartCOMM payload couldn\'t be downloaded or parsed for this scenario, so the Data Dictionary (Xpath) value checks were not run.' };
+}
+
+// The archive filing metadata couldn't be found or read. BLOCKED, not SKIPPED (QA review 2026-10-18): SKIPPED doesn't
+// count toward the scenario's status, so a document whose filing was never checked still read PASS.
+function metadataUnavailableCheck(reason) {
+  return { id: 'META1', description: 'ClaimCenter filing metadata (.json)', result: 'BLOCKED', expected: 'Filing metadata checked', actual: 'Not checked', reason };
+}
+
+// A scenario's counts and status from its checks. Nothing actually checked — no check passed or failed (all SKIPPED, or
+// none built at all) and no editable field tested — adds a BLOCKED NOCHECK0 row: that used to roll up to PASS with
+// 0 passed / 0 failed (QA review 2026-10-18).
+// A dictionary-vs-live-session disagreement (interactiveChecks FAIL) is just as much a genuine defect as a content
+// FAIL, so it fails the scenario too (per user direction 2026-10-05: "if there are failures in interactive session
+// table...overall status needs to show as failed"). interactiveChecks is undefined for an On-Demand template.
+function rollUpScenario(validations, interactiveChecks) {
+  const ran = (x) => x.result === 'PASS' || x.result === 'FAIL';
+  if (!validations.some(ran) && !(interactiveChecks || []).some(ran)) {
+    validations.push({ id: 'NOCHECK0', description: 'At least one check ran against the generated document', expected: 'One or more checks PASS or FAIL', actual: `${validations.length} check(s), none of them run (all skipped or blocked)`, result: 'BLOCKED', reason: 'No check actually ran against this document, so it can\'t be called a PASS — see the skipped/blocked rows for why.' });
+  }
+  const count = (r) => validations.filter((v) => v.result === r).length;
+  const passed = count('PASS'); const failed = count('FAIL'); const blocked = count('BLOCKED'); const skipped = count('SKIPPED');
+  const fieldsFailed = (interactiveChecks || []).filter((c) => c.result === 'FAIL').length;
+  const status = (failed > 0 || fieldsFailed > 0) ? 'FAIL' : blocked > 0 ? 'BLOCKED' : 'PASS';
+  return { passed, failed, blocked, skipped, status };
 }
 
 // Picks the most human-identifiable name for a field, in order of trust. CONFIRMED live 2026-09-30 (65-
@@ -1741,14 +1779,14 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
         : await s3AdminService.downloadArchiveMetadataJson(s3Page, identifier, documentService.DOWNLOAD_DIR, { log });
       if (metaResult.error) {
         log(`archive filing metadata: ${metaResult.error}`);
-        metadataChecks = [{ id: 'META1', description: 'ClaimCenter filing metadata (.json)', result: 'SKIPPED', expected: '', actual: '', reason: metaResult.error }];
+        metadataChecks = [metadataUnavailableCheck(metaResult.error)];
       } else {
         log(`archive filing metadata: ${JSON.stringify(metaResult.metadata)}`);
         metadataChecks = buildMetadataChecks(metaResult.metadata, { template, claimNumber });
       }
     } catch (err) {
-      log(`archive filing metadata fetch failed (${err.message}) — skipping metadata checks for this scenario.`);
-      metadataChecks = [{ id: 'META1', description: 'ClaimCenter filing metadata (.json)', result: 'SKIPPED', expected: '', actual: '', reason: err.message }];
+      log(`archive filing metadata fetch failed (${err.message}) — metadata checks BLOCKED for this scenario.`);
+      metadataChecks = [metadataUnavailableCheck(err.message)];
     }
 
     // CONFIRMED live 2026-09-30: the SAME identifier that finds the PDF above also resolves the ORIGINAL
@@ -2354,4 +2392,10 @@ function buildMetadataChecks(meta, { template, claimNumber }) {
   return checks;
 }
 
-module.exports = { validateTemplate, _test: { recipientRoleFromTechnicalName, knownValueRole, buildMetadataChecks } };
+module.exports = {
+  validateTemplate,
+  _test: {
+    recipientRoleFromTechnicalName, knownValueRole, buildMetadataChecks, buildEditValue, verifyInteractiveEditsInPdf,
+    annotateInteractiveEditFailures, runLayoutChecks, payloadUnavailableCheck, metadataUnavailableCheck, rollUpScenario,
+  },
+};

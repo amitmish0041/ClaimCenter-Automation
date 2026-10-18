@@ -51,8 +51,16 @@ function normalizeLossType(text) {
 
 let cache = null;
 let cachedFilePath = null;
+// Rows to use instead of the sheet, while a saved regression case is replayed (regressionCaseService) — the case
+// carries the rows it was captured with, so it replays the same on a machine without the catalog file.
+let replayRows = null;
+function withFraudLanguageTable(rows, fn) {
+  replayRows = rows;
+  try { return fn(); } finally { replayRows = null; }
+}
 
 function loadFraudLanguageTable({ refresh = false } = {}) {
+  if (replayRows) return replayRows;
   const filePath = catalogService.findFile(catalogService.DATA_DIR, /^Claims_Documents_Index.*\.xlsx$/i);
   if (!filePath) {
     throw new Error(`fraudLanguageService: no Claims_Documents_Index*.xlsx found under "${catalogService.DATA_DIR}"`);
@@ -196,4 +204,4 @@ function extractFraudLanguageFromText(text) {
   return out.length > 1500 ? `${out.slice(0, 1500)}…` : out;
 }
 
-module.exports = { getExpectedFraudLanguage, findFraudLanguageInText, extractFraudLanguageFromText, conditionMatches, normalizeLossType, loadFraudLanguageTable, STATE_NAME_TO_CODE };
+module.exports = { getExpectedFraudLanguage, findFraudLanguageInText, extractFraudLanguageFromText, conditionMatches, normalizeLossType, loadFraudLanguageTable, withFraudLanguageTable, STATE_NAME_TO_CODE };

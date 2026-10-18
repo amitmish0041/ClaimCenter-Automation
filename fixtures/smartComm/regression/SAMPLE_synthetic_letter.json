@@ -1,0 +1,163 @@
+{
+ "digNumber": "SAMPLE",
+ "scenarioId": "synthetic_letter",
+ "capturedAt": "2026-10-18T13:05:03.656Z",
+ "requirements": [
+  {
+   "id": "R1",
+   "description": "Static content must appear: \"We have received your claim.\"",
+   "type": "requiredText",
+   "expectedValue": "We have received your claim."
+  },
+  {
+   "id": "R2",
+   "description": "Static content must appear: \"Please return the enclosed form…\"",
+   "type": "requiredText",
+   "expectedValue": "Please return the enclosed form within thirty days."
+  },
+  {
+   "id": "R3",
+   "description": "Static content must appear: \"You must not drive…\"",
+   "type": "requiredText",
+   "expectedValue": "You must not drive the vehicle to an approved shop."
+  },
+  {
+   "id": "R4",
+   "description": "Static content must appear: \"Workers compensation…\"",
+   "type": "requiredText",
+   "expectedValue": "Workers compensation benefits are not affected."
+  },
+  {
+   "id": "R5",
+   "description": "Salutation has no fixed honorific",
+   "type": "salutation"
+  },
+  {
+   "id": "XP1",
+   "description": "Value for \"Claim Number\" must match the SmartCOMM payload",
+   "type": "requiredText",
+   "expectedValue": "PA-000123"
+  },
+  {
+   "id": "XP2",
+   "description": "Value for \"Date of Loss\" must match the SmartCOMM payload",
+   "type": "requiredText",
+   "expectedValue": "August 06, 2026"
+  },
+  {
+   "id": "XP3",
+   "description": "Value for \"Loss State\" must match the SmartCOMM payload",
+   "type": "requiredText",
+   "expectedValue": "MI"
+  },
+  {
+   "id": "XP4",
+   "description": "Value for \"Attorney Represented\" must match the SmartCOMM payload",
+   "type": "requiredText",
+   "expectedValue": "Yes"
+  },
+  {
+   "id": "R6",
+   "description": "Value for \"From Name\" must match testData.adjusterName",
+   "type": "dynamicValueMatch",
+   "expectedSource": "testData.adjusterName"
+  },
+  {
+   "id": "R7",
+   "description": "Static content must appear: \"This sentence is missing…\"",
+   "type": "requiredText",
+   "expectedValue": "This sentence is missing from the letter."
+  },
+  {
+   "id": "R8",
+   "description": "Static content must appear: \"Copy to agent\"",
+   "type": "requiredText",
+   "expectedValue": "Copy to agent",
+   "enabled": false,
+   "disabledReason": "Only when an additional recipient is added"
+  }
+ ],
+ "text": "October 18, 2026\n\nDear ROBERT CHARLES:\n\nRE: Claim Number PA-000123  Date of Loss: 08/06/2026\nLoss state: MI\n\nWe have received your claim. Please return the enclosed forms within thirty days.\nYou must drive the vehicle to an approved shop.\nWorker's compensation benefits are not affected.\n\nSincerely,\nJane Adjuster",
+ "context": {
+  "testData": {
+   "adjusterName": "Jane Adjuster"
+  },
+  "recipient": {
+   "name": "ROBERT CHARLES"
+  }
+ },
+ "expected": [
+  {
+   "id": "R1",
+   "description": "Static content must appear: \"We have received your claim.\"",
+   "result": "PASS",
+   "actual": "We have received your claim."
+  },
+  {
+   "id": "R2",
+   "description": "Static content must appear: \"Please return the enclosed form…\"",
+   "result": "FAIL",
+   "actual": "Please return the enclosed forms within thirty days."
+  },
+  {
+   "id": "R3",
+   "description": "Static content must appear: \"You must not drive…\"",
+   "result": "FAIL",
+   "actual": "You must drive the vehicle to an approved shop."
+  },
+  {
+   "id": "R4",
+   "description": "Static content must appear: \"Workers compensation…\"",
+   "result": "PASS",
+   "actual": "Workers compensation benefits are not affected."
+  },
+  {
+   "id": "R5",
+   "description": "Salutation has no fixed honorific",
+   "result": "PASS",
+   "actual": "Dear ROBERT CHARLES:"
+  },
+  {
+   "id": "XP1",
+   "description": "Value for \"Claim Number\" must match the SmartCOMM payload",
+   "result": "PASS",
+   "actual": "PA-000123"
+  },
+  {
+   "id": "XP2",
+   "description": "Value for \"Date of Loss\" must match the SmartCOMM payload",
+   "result": "PASS",
+   "actual": "08/06/2026"
+  },
+  {
+   "id": "XP3",
+   "description": "Value for \"Loss State\" must match the SmartCOMM payload",
+   "result": "PASS",
+   "actual": "MI"
+  },
+  {
+   "id": "XP4",
+   "description": "Value for \"Attorney Represented\" must match the SmartCOMM payload",
+   "result": "FAIL",
+   "actual": "Not Found"
+  },
+  {
+   "id": "R6",
+   "description": "Value for \"From Name\" must match testData.adjusterName",
+   "result": "PASS",
+   "actual": "Jane Adjuster"
+  },
+  {
+   "id": "R7",
+   "description": "Static content must appear: \"This sentence is missing…\"",
+   "result": "FAIL",
+   "actual": "Not Found"
+  },
+  {
+   "id": "R8",
+   "description": "Static content must appear: \"Copy to agent\"",
+   "result": "SKIPPED",
+   "actual": "SKIPPED"
+  }
+ ]
+}

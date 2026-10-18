@@ -315,6 +315,14 @@ function editedBeforeResult(req, matches) {
     : { expected: req.expectedValue, actual: `Before edit: "${before.join(' ')}"`, result: 'FAIL', reason: `Before the interactive-edit test overwrote it, the field showed "${before.join(' ')}" instead of "${req.expectedValue}"${before.some((b) => /editable|<</i.test(b)) ? ' — an empty editable placeholder, i.e. no default value' : ''}.` };
 }
 
+// A value of 1-4 characters with no space ("MI", "Yes", "PA", "N", "123") only counts as a whole word: as a plain
+// substring "MI" passed on "Michael" and "Yes" on "Yesterday" (QA review 2026-10-18), so a wrong or missing short value
+// could never fail.
+function isShortValue(value) {
+  const v = normalizeWs(value);
+  return /^\S{1,4}$/.test(v) && /[A-Za-z0-9]/.test(v);
+}
+
 function evaluateOne(req, haystack, context) {
   if (req.enabled === false) {
     return { expected: 'N/A', actual: 'SKIPPED', result: 'SKIPPED', reason: req.disabledReason || 'Disabled' };
@@ -330,6 +338,14 @@ function evaluateOne(req, haystack, context) {
         if (hit) return { expected: req.expectedValue, actual: hit, result: 'PASS', reason: req.wordNote };
         if (req.wasEditedByTest) return editedBeforeResult(req, (b) => req.wordValues.some((w) => new RegExp(`(^|[^A-Za-z0-9])${esc(w)}(?![A-Za-z0-9])`, 'i').test(b)));
         return { expected: req.expectedValue, actual: 'Not Found', result: 'FAIL', reason: `"${req.expectedValue}" doesn't appear as a separate word anywhere in the generated document. ${req.wordNote || ''}`.trim() };
+      }
+      if (isShortValue(req.expectedValue)) {
+        const wordValues = [req.expectedValue, ...(req.alsoAccept || []).filter(isShortValue)].map((w) => normalizeWs(w));
+        const res = evaluateOne({ ...req, wordValues }, haystack, context);
+        if (res.result === 'PASS' && normalizeWs(res.actual).toLowerCase() !== normalizeWs(req.expectedValue).toLowerCase() && !res.reason) {
+          res.reason = req.alsoAcceptNote || `Accepted alternative value "${res.actual}".`;
+        }
+        return res;
       }
       const found = normHaystack.includes(normalizeWs(req.expectedValue).toLowerCase());
       if (found) return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS' };
@@ -561,6 +577,7 @@ function evaluateOne(req, haystack, context) {
       // 2024"), so compare the part, as a whole word.
       const part = dateLossPart(req.fieldName, expected);
       if (part) return evaluateOne({ ...req, type: 'requiredText', expectedValue: part.value, wordValues: part.accept, wordNote: part.note }, haystack, context);
+      if (isShortValue(expected)) return evaluateOne({ ...req, type: 'requiredText', expectedValue: String(expected), wordValues: [normalizeWs(expected)] }, haystack, context);
       const found = normHaystack.includes(normalizeWs(expected).toLowerCase());
       if (found) return { expected, actual: expected, result: 'PASS' };
       // A claim with several claimants: the letter prints the claimant of the exposure it's about ("Jimmy Claimant"),
