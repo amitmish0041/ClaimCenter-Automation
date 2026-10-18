@@ -1156,14 +1156,16 @@ function editedCopyOf(field, editableValues) {
   const value = String(field.stripped != null ? field.stripped : field.text || '').replace(/\s+/g, ' ').trim();
   if (!/[A-Za-z0-9]/.test(value) || /<<|>>|editable\s*field|_{2,}/i.test(value) || /^x$/i.test(value)) return null;
   if (/-edited[.,;:!?]*$|QA-EDIT-\d|[[\]]/i.test(value) || value.length > 80) return null;
-  const lc = value.toLowerCase();
-  const others = editableValues.map((v) => String(v || '').replace(/\s+/g, ' ').trim().toLowerCase());
+  // Compared without trailing punctuation: "Smith," and "Smith" would both become "...Smith-edited".
+  const [, core, punct] = value.match(/^(.*?)([.,;:!?]*)$/);
+  const key = (v) => String(v || '').replace(/\s+/g, ' ').trim().replace(/[.,;:!?]+$/, '').toLowerCase();
+  const lc = key(core);
+  const others = editableValues.map(key);
   // The field's own value is in the list once, so a second identical one is a clash.
   const sameCount = others.filter((o) => o === lc).length;
   const endsAnother = others.some((o) => o.length > lc.length && o.endsWith(lc) && !/[a-z0-9]/.test(o[o.length - lc.length - 1]));
   if (sameCount > 1 || endsAnother) return null;
   // Trailing punctuation stays at the end ("Smith," -> "Smith-edited,", user direction 2026-10-18).
-  const [, core, punct] = value.match(/^(.*?)([.,;:!?]*)$/);
   return `${core}-edited${punct}`;
 }
 
