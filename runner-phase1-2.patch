@@ -1,0 +1,1122 @@
+diff --git a/Playwright Projects/Commercial Line Performance test/runner/index.html b/Playwright Projects/Commercial Line Performance test/runner/index.html
+index 2ce2323..68e4ad3 100644
+--- a/Playwright Projects/Commercial Line Performance test/runner/index.html	
++++ b/Playwright Projects/Commercial Line Performance test/runner/index.html	
+@@ -2,7 +2,10 @@
+ <html lang="en">
+ <head>
+ <meta charset="utf-8" />
+-<title>Playwright Test Runner</title>
++<title>ClaimCenter Runner</title>
++<link rel="preconnect" href="https://fonts.googleapis.com" />
++<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" />
++<script>try { if (localStorage.getItem('runnerTheme') === 'light') document.documentElement.setAttribute('data-theme', 'light'); } catch (_) {}</script>
+ <meta name="viewport" content="width=device-width, initial-scale=1" />
+ <style>
+   :root {
+@@ -17,56 +20,116 @@
+     --green: #4ade80;
+     --red: #f87171;
+     --amber: #fbbf24;
+-    --mono: 'Cascadia Code', 'Consolas', 'SFMono-Regular', Menlo, monospace;
++    --mono: 'IBM Plex Mono', 'Cascadia Code', 'Consolas', 'SFMono-Regular', Menlo, monospace;
++    --sans: 'IBM Plex Sans', 'Segoe UI', -apple-system, Roboto, Helvetica, Arial, sans-serif;
++    --field-bg: #0b0d12;
++    --output-bg: #0a0c10;
++    --tooltip-bg: #11141a;
++    --disabled-bg: #2b3242;
++    --on-accent: #ffffff;
++    --accent-strong: #7c6cf0;
++    --link: #c4b5fd;
++    --shadow: 0 1px 2px rgba(0,0,0,0.25);
++  }
++  /* Light theme (top-bar toggle, remembered per person) — same tokens, light values. */
++  html[data-theme="light"] {
++    --bg: #f5f6f8;
++    --panel: #ffffff;
++    --panel-2: #eef0f4;
++    --border: #dde1e8;
++    --text: #151922;
++    --muted: #525b69;
++    --accent: #6d5ce8;
++    --accent-2: #5646c9;
++    --green: #0b7a4b;
++    --red: #b42318;
++    --amber: #8a5a00;
++    --field-bg: #f8f9fb;
++    --output-bg: #f8f9fb;
++    --tooltip-bg: #1f2430;
++    --disabled-bg: #e3e6ec;
++    --accent-strong: #6d5ce8;
++    --link: #5646c9;
++    --shadow: 0 1px 2px rgba(16,24,40,0.06);
+   }
+   * { box-sizing: border-box; }
+   body {
+     margin: 0;
+-    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+-    background: radial-gradient(1100px 520px at 78% -8%, rgba(167,139,250,0.08), transparent 60%), var(--bg);
++    font-family: var(--sans);
++    background: var(--bg);
+     background-attachment: fixed;
+     color: var(--text);
+   }
+-  header {
+-    padding: 18px 24px 14px;
+-    border-bottom: 1px solid var(--border);
+-    display: flex;
+-    align-items: baseline;
+-    justify-content: space-between;
+-    gap: 16px;
+-    background: linear-gradient(180deg, rgba(167,139,250,0.07), transparent);
+-  }
+-  header h1 { font-size: 19px; margin: 0; font-weight: 700; letter-spacing: -.01em; }
+-  header .sub { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
++  /* Top bar: product name + where you are, find-a-tool, connection, theme. Stays put while the page scrolls. */
++  header.topbar {
++    position: sticky; top: 0; z-index: 20;
++    display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
++    padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
++  }
++  .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
++  .brand .logo { width: 32px; height: 32px; border-radius: 8px; background: var(--accent-strong); display: flex; align-items: center; justify-content: center; flex: none; }
++  .brand-name { font-size: 16px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; margin: 0; }
++  .crumb-sep { color: var(--muted); opacity: .7; }
++  .crumb { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
++  .search-btn {
++    flex: 1 1 240px; max-width: 400px; min-height: 36px; display: flex; align-items: center; gap: 8px;
++    padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2);
++    color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; text-align: left;
++  }
++  .search-btn:hover { border-color: var(--accent); }
++  .search-btn span { flex: 1; }
++  kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius: 5px; border: 1px solid var(--border); color: var(--muted); }
++  .top-right { display: flex; align-items: center; gap: 12px; }
++  .icon-btn {
++    width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center;
++    border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer;
++  }
++  .icon-btn:hover { background: var(--panel-2); }
++  html[data-theme="light"] .icon-btn .moon, html:not([data-theme="light"]) .icon-btn .sun { display: none; }
++  .avatar { width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 700; background: var(--panel-2); border: 1px solid var(--border); }
+   #conn { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+   #conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); display: inline-block; }
+   #conn.up .dot { background: var(--green); }
+ 
+-  .layout { display: flex; align-items: stretch; min-height: calc(100vh - 66px); }
++  .layout { display: flex; align-items: stretch; min-height: calc(100vh - 92px); }
+   .sidebar {
+-    flex: 0 0 236px; width: 236px; padding: 10px 10px 28px;
+-    align-self: flex-start; position: sticky; top: 0; max-height: 100vh; overflow-y: auto;
+-  }
++    flex: 0 0 244px; width: 244px; padding: 12px 10px 28px;
++    align-self: flex-start; position: sticky; top: 57px; max-height: calc(100vh - 57px); overflow-y: auto;
++    transition: width .15s, flex-basis .15s;
++  }
++  .collapse-btn {
++    display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 0 12px; margin-bottom: 4px;
++    border-radius: 8px; border: 1px dashed var(--border); background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer;
++  }
++  .collapse-btn:hover { color: var(--text); }
++  .tab-btn svg, .collapse-btn svg { flex: none; }
++  .tab-label { overflow: hidden; text-overflow: ellipsis; }
++  /* Collapsed menu: icons only (labels show as tooltips), more room for results. */
++  body.nav-collapsed .sidebar { flex-basis: 68px; width: 68px; }
++  body.nav-collapsed .sidebar .tab-label { display: none; }
++  body.nav-collapsed .sidebar .tab-btn, body.nav-collapsed .collapse-btn { justify-content: center; padding: 0; }
++  body.nav-collapsed .nav-group { font-size: 0; padding: 8px 0 4px; margin: 6px 10px 0; border-top: 1px solid var(--border); }
+   .nav-group {
+     font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted);
+     padding: 16px 12px 6px;
+   }
+   .nav-group:first-child { padding-top: 8px; }
+   .tab-btn {
+-    display: block; width: 100%; text-align: left;
+-    background: transparent; border: 1px solid transparent;
+-    color: var(--muted); padding: 9px 12px; font-size: 13.5px; cursor: pointer;
++    display: flex; align-items: center; gap: 11px; width: 100%; min-height: 40px; text-align: left;
++    background: transparent; border: 1px solid transparent; font: inherit;
++    color: var(--muted); padding: 7px 12px; font-size: 13.5px; cursor: pointer;
+     border-radius: 8px; margin-bottom: 2px; line-height: 1.3;
+   }
+   .tab-btn:hover { color: var(--text); background: var(--panel-2); }
+   .tab-btn.active {
+     color: var(--text); background: var(--panel); border-color: var(--border);
+-    box-shadow: inset 3px 0 0 var(--accent); font-weight: 600;
++    box-shadow: inset 3px 0 0 var(--accent-strong); font-weight: 600;
+   }
+   .content { flex: 1; min-width: 0; border-left: 1px solid var(--border); }
+   @media (max-width: 860px) {
+     .layout { flex-direction: column; }
+-    .sidebar { position: static; width: 100%; flex-basis: auto; max-height: none; border-bottom: 1px solid var(--border); }
++    .sidebar, body.nav-collapsed .sidebar { position: static; width: 100%; flex-basis: auto; max-height: none; border-bottom: 1px solid var(--border); }
++    header.topbar { position: static; }
+     .content { border-left: none; }
+   }
+ 
+@@ -80,7 +143,7 @@
+     border-radius: 10px;
+     padding: 18px 20px;
+     margin-bottom: 16px;
+-    box-shadow: 0 1px 2px rgba(0,0,0,0.25);
++    box-shadow: var(--shadow);
+   }
+   .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent-2); margin: 0 0 12px; font-weight: 600; }
+   .field-label { font-size: 12px; color: var(--muted); margin: 14px 0 8px; }
+@@ -99,8 +162,10 @@
+     transition: border-color .12s, background .12s;
+   }
+   .chip:hover { border-color: var(--accent-2); }
+-  .chip.selected { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
++  .chip.selected { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); font-weight: 600; }
+   .chip.disabled { opacity: .4; cursor: not-allowed; }
++  button.chip { font: inherit; font-size: 13px; line-height: normal; }
++  .chip:focus-visible, .tab-btn:focus-visible, .run-item:focus-visible, .scenario-chip:focus-visible, .tool-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+   .chip.disabled:hover { border-color: var(--border); }
+ 
+   /* Tools a user can't use (not granted yet, or not shipped in this build) are hidden via inline display:none
+@@ -125,7 +190,7 @@
+     font-family: var(--mono);
+     font-size: 12px;
+     color: var(--muted);
+-    background: #0b0d12;
++    background: var(--field-bg);
+     border: 1px solid var(--border);
+     border-radius: 7px;
+     padding: 10px 12px;
+@@ -139,12 +204,12 @@
+     border: none; border-radius: 7px; padding: 10px 20px; font-size: 13.5px; font-weight: 600;
+     cursor: pointer;
+   }
+-  button.run { background: var(--accent); color: #fff; transition: background .12s, box-shadow .12s; }
++  button.run { background: var(--accent-strong); color: var(--on-accent); transition: background .12s, box-shadow .12s; }
+   button.run:hover:not(:disabled) { background: var(--accent-2); box-shadow: 0 2px 12px rgba(167,139,250,0.35); }
+-  button.run:disabled { background: #2b3242; color: var(--muted); cursor: not-allowed; }
++  button.run:disabled { background: var(--disabled-bg); color: var(--muted); cursor: not-allowed; }
+   button.stop { background: var(--red); color: #fff; transition: background .12s; }
+   button.stop:hover:not(:disabled) { background: #ff7580; }
+-  button.stop:disabled { background: #2b3242; color: var(--muted); cursor: not-allowed; }
++  button.stop:disabled { background: var(--disabled-bg); color: var(--muted); cursor: not-allowed; }
+   .error-msg { color: var(--red); font-size: 12.5px; margin-top: 8px; }
+ 
+   .stats-row { display: flex; gap: 12px; flex-wrap: wrap; }
+@@ -190,7 +255,7 @@
+   #progressLabel { font-size: 11.5px; color: var(--muted); margin-top: 6px; font-family: var(--mono); }
+ 
+   #output {
+-    background: #0a0c10;
++    background: var(--output-bg);
+     border: 1px solid var(--border);
+     border-radius: 8px;
+     padding: 12px 14px;
+@@ -233,7 +298,7 @@
+   .info-dot:hover, .info-dot:focus { border-color: var(--accent-2); outline: none; }
+   .info-dot .tooltip-bubble {
+     display: none; position: absolute; left: 0; top: 130%; z-index: 20;
+-    width: max-content; max-width: 320px; background: #11141a; color: var(--text);
++    width: max-content; max-width: 320px; background: var(--tooltip-bg); color: #eef0f5;
+     border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px;
+     font-size: 11.5px; font-weight: 400; line-height: 1.5; white-space: normal; text-align: left;
+     box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+@@ -288,45 +353,229 @@
+   .stats-table .num { text-align: right; font-family: var(--mono); color: var(--accent-2); white-space: nowrap; }
+   .stats-table .when { color: var(--muted); white-space: nowrap; }
+   .stats-empty { color: var(--muted); font-size: 12.5px; }
++
++  /* Page header on every tool: what it is, in one line. */
++  .page-head { margin: 4px 0 18px; }
++  .page-head h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.015em; }
++  .page-head p { margin: 6px 0 0; color: var(--muted); font-size: 13.5px; max-width: 720px; line-height: 1.5; }
++
++  /* Home */
++  .home-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
++  .home-kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; box-shadow: var(--shadow); }
++  .home-kpi .l { font-size: 12.5px; color: var(--muted); }
++  .home-kpi .n { font-family: var(--mono); font-size: 26px; font-weight: 500; margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .tool-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
++  .tool-tile {
++    display: flex; align-items: flex-start; gap: 12px; padding: 14px; min-height: 64px; text-align: left;
++    border-radius: 10px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font: inherit; cursor: pointer;
++  }
++  .tool-tile:hover { border-color: var(--accent); }
++  .linkish { background: none; border: none; padding: 0; color: var(--link); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; text-decoration: none; }
++  .linkish:hover { text-decoration: underline; }
++  .preset { display: inline-flex; align-items: center; }
++  .preset .chip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
++  .preset-remove { min-height: 100%; align-self: stretch; padding: 0 10px; border: 1px solid var(--border); border-left: none; border-radius: 0 999px 999px 0; background: var(--panel-2); color: var(--muted); font: inherit; cursor: pointer; }
++  .preset-remove:hover { color: var(--red); }
++  .preset-save { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
++  .preset-save input { max-width: 320px !important; }
++
++  /* Form alignment: one standard field width (small purpose-sized fields keep theirs), readable labels, hints in
++     the same place under every field, and each tool's Run/Stop row pinned to the bottom while its form scrolls. */
++  .tab-panel input[type=text], .tab-panel input[type=email], .tab-panel input[type=password], .tab-panel select { max-width: 520px !important; min-height: 38px; }
++  .tab-panel input[style*="max-width:70px"] { max-width: 70px !important; }
++  .tab-panel input[style*="max-width:120px"] { max-width: 120px !important; }
++  .tab-panel input[style*="max-width:260px"], .tab-panel input[style*="max-width:280px"] { max-width: 280px !important; }
++  .field-label { font-size: 12.5px; font-weight: 600; color: var(--text); margin: 18px 0 6px; }
++  /* A label that opens a wrapper block (Environment, Claim #, …) keeps its gap from the hint above it; only the very
++     first label under a card heading sits tight. */
++  .tab-panel div > .field-label:first-child { margin-top: 18px; }
++  .tab-panel .card > h2 + .field-label, .tab-panel .card > h2 + div > .field-label:first-child { margin-top: 4px; }
++  .hint { font-size: 12px; margin-top: 6px; line-height: 1.45; }
++  .tab-panel .card > .actions { position: sticky; bottom: 0; z-index: 4; margin: 16px -20px 0; padding: 12px 20px; background: var(--panel); border-top: 1px solid var(--border); }
++  .tool-tile svg { color: var(--accent-2); flex: none; margin-top: 1px; }
++  .tool-tile strong { display: block; font-size: 13.5px; }
++  .tool-tile small { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; line-height: 1.4; }
++  @media (max-width: 720px) { .home-kpis { grid-template-columns: minmax(0, 1fr); } }
++
++  /* Status bar */
++  footer.statusbar {
++    display: flex; gap: 18px; flex-wrap: wrap; padding: 7px 20px; font-family: var(--mono); font-size: 11.5px;
++    color: var(--muted); background: var(--panel); border-top: 1px solid var(--border);
++  }
++  footer.statusbar .right { margin-left: auto; }
++  .save-bar {
++    position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
++    margin: 16px 0 0; padding: 12px 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
++    box-shadow: 0 -6px 18px rgba(0,0,0,0.18);
++  }
++  .save-bar .hint { margin: 0; }
++  .btn-secondary {
++    min-height: 38px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2);
++    color: var(--text); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
++  }
++  .btn-secondary:hover { border-color: var(--accent); }
++  /* Access table: tool names wrap instead of being cut off. */
++  #adminGrants th { white-space: normal; vertical-align: bottom; min-width: 96px; line-height: 1.35; }
++  #adminGrants th:first-child { min-width: 220px; }
++  #adminGrants td { vertical-align: middle; }
++  footer.statusbar .appver { margin: 0; font-size: inherit; }
++
++  /* Find a tool (Ctrl+K) */
++  #quickSwitch { border: 1px solid var(--border); border-radius: 12px; padding: 0; width: min(520px, calc(100vw - 32px)); background: var(--panel); color: var(--text); box-shadow: 0 20px 60px rgba(0,0,0,0.45); }
++  #quickSwitch::backdrop { background: rgba(10,12,16,0.55); }
++  #quickSwitchInput { width: 100%; max-width: none; border: none; border-bottom: 1px solid var(--border); border-radius: 12px 12px 0 0; padding: 14px 16px; font: inherit; font-size: 15px; background: transparent; color: var(--text); }
++  #quickSwitchInput:focus { box-shadow: none; }
++  #quickSwitchList { list-style: none; margin: 0; padding: 6px; max-height: 340px; overflow-y: auto; }
++  #quickSwitchList button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 12px; border: none; border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
++  #quickSwitchList li:first-child button, #quickSwitchList button:hover, #quickSwitchList button:focus { background: var(--panel-2); outline: none; }
++  #quickSwitchList .empty { padding: 12px; color: var(--muted); font-size: 13px; }
++
++  /* Status pills — the same colours everywhere (Results, Home). */
++  .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; letter-spacing: .03em; white-space: nowrap; }
++  .pill.PASS { background: #0f3a2a; color: #6ee7b7; }
++  .pill.FAIL { background: #45161b; color: #fca5a5; }
++  .pill.BLOCKED { background: #3d2c0b; color: #fcd34d; }
++  .pill.SKIPPED { background: #262a33; color: #c2c8d2; }
++  .pill.ERROR { background: #2f1d4d; color: #d8b4fe; }
++  html[data-theme="light"] .pill.PASS { background: #dcf5e9; color: #0b6b45; }
++  html[data-theme="light"] .pill.FAIL { background: #fde2e2; color: #a4161a; }
++  html[data-theme="light"] .pill.BLOCKED { background: #fdf0cf; color: #8a5a00; }
++  html[data-theme="light"] .pill.SKIPPED { background: #eceef2; color: #4b5360; }
++  html[data-theme="light"] .pill.ERROR { background: #efe5fd; color: #6b21a8; }
++  .tag { display: inline-block; padding: 2px 7px; border-radius: 5px; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; }
++  .tag.NEW { background: #0c3b5e; color: #bae0fd; }
++  .tag.FIXED { background: #0f3a2a; color: #6ee7b7; }
++  html[data-theme="light"] .tag.NEW { background: #dbeafe; color: #0b4a80; }
++  html[data-theme="light"] .tag.FIXED { background: #dcf5e9; color: #0b6b45; }
++
++  /* Results page */
++  .results-layout { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
++  .results-runs { flex: 1 1 280px; max-width: 360px; min-width: 0; margin-bottom: 0; }
++  .results-detail { flex: 999 1 560px; min-width: 0; margin-bottom: 0; }
++  .run-item {
++    display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 10px 12px; margin-bottom: 6px; text-align: left;
++    border-radius: 10px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font: inherit; cursor: pointer;
++  }
++  .run-item:hover { border-color: var(--accent); }
++  .run-item.selected { border-color: var(--accent-strong); box-shadow: inset 3px 0 0 var(--accent-strong); }
++  .run-item .top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
++  .run-item .when { font-family: var(--mono); font-size: 12px; color: var(--muted); }
++  .run-item .what { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .run-item .counts { font-size: 11.5px; color: var(--muted); }
++  .res-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
++  .res-head h2 { text-transform: none; letter-spacing: -.01em; color: var(--text); font-size: 17px; margin: 0; }
++  .res-meta { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 4px; }
++  .res-sum { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
++  .res-sum > div { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
++  .res-sum .n { font-family: var(--mono); font-size: 22px; }
++  .res-sum .l { font-size: 12px; color: var(--muted); }
++  .scenario-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
++  .scenario-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
++  .scenario-chip.selected { border-color: var(--accent-strong); background: var(--panel); font-weight: 600; }
++  .res-tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 10px 0 12px; }
++  .seg { display: inline-flex; padding: 3px; gap: 3px; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--border); }
++  .seg button { min-height: 32px; padding: 0 12px; border-radius: 7px; border: none; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
++  .seg button[aria-pressed="true"] { background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
++  .res-info { font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
++  .res-reason { font-size: 13px; padding: 10px 12px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--border); margin: 8px 0 12px; }
++  table.checks { width: 100%; border-collapse: collapse; font-size: 13px; }
++  table.checks th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; padding: 8px; border-bottom: 1px solid var(--border); }
++  table.checks td { padding: 9px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
++  table.checks td.id { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
++  table.checks td.ea { font-family: var(--mono); font-size: 12px; color: var(--muted); word-break: break-word; }
++  table.checks tr.check-row { cursor: pointer; }
++  table.checks tr.check-row:hover td { background: var(--panel-2); }
++  table.checks tr.why td { background: var(--panel-2); color: var(--text); font-size: 12.5px; line-height: 1.5; }
++  .check-section { font-size: 11.5px; color: var(--muted); }
++  @media (max-width: 720px) { .res-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); } .results-runs { max-width: none; } }
+ </style>
+ </head>
+ <body>
+ 
+-<header>
+-  <div>
+-    <h1>Playwright Test Runner</h1>
+-    <div class="sub">Test automation tools — policy, ClaimCenter, migration, SmartCOMM and reporting</div>
++<header class="topbar">
++  <div class="brand">
++    <span class="logo" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"/></svg></span>
++    <h1 class="brand-name">ClaimCenter Runner</h1>
++    <span class="crumb-sep" aria-hidden="true">/</span>
++    <span class="crumb" id="crumbTool">Home</span>
+   </div>
+-  <div style="text-align:right;">
++  <button type="button" class="search-btn" id="quickSwitchBtn" aria-label="Find a tool (Ctrl+K)">
++    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
++    <span>Find a tool…</span><kbd>Ctrl K</kbd>
++  </button>
++  <div class="top-right">
+     <div id="conn"><span class="dot"></span><span id="connLabel">connecting…</span></div>
+-    <div id="appVersion" class="appver"></div>
++    <button type="button" class="icon-btn" id="themeToggle" aria-label="Switch between light and dark mode" title="Light / dark mode">
++      <svg class="moon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
++      <svg class="sun" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
++    </button>
++    <span class="avatar" id="userAvatar" style="display:none"></span>
+   </div>
+ </header>
+ 
+ <div class="layout">
+ <nav class="sidebar" aria-label="Tools">
++  <button type="button" class="collapse-btn" id="navCollapse" aria-label="Collapse or expand the menu" aria-expanded="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="tab-label">Collapse menu</span></button>
++  <div class="nav-group">Overview</div>
++  <button class="tab-btn active" data-tab="home" title="Home"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span class="tab-label">Home</span></button>
++  <button class="tab-btn" data-tab="results" title="Results"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6v3H9zM7 5H5v16h14V5h-2M9 14l2 2 4-4"/></svg><span class="tab-label">Results</span></button>
+   <div class="nav-group">Policy</div>
+-  <button class="tab-btn active" data-tab="policy">Policy Tests (BOP / Package / CA)</button>
++  <button class="tab-btn" data-tab="policy" title="Policy Tests (BOP / Package / CA)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg><span class="tab-label">Policy Tests (BOP / Package / CA)</span></button>
+   <div class="nav-group">ClaimCenter</div>
+-  <button class="tab-btn" data-tab="claims">Claims (ClaimCenter)</button>
+-  <button class="tab-btn" data-tab="reconciliation">Migration Reconciliation</button>
+-  <button class="tab-btn" data-tab="updateValidation">Data Update &amp; Dropdown Validation</button>
++  <button class="tab-btn" data-tab="claims" title="Claims (ClaimCenter)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg><span class="tab-label">Claims (ClaimCenter)</span></button>
++  <button class="tab-btn" data-tab="reconciliation" title="Migration Reconciliation"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h13l-3-3M20 17H7l3 3"/></svg><span class="tab-label">Migration Reconciliation</span></button>
++  <button class="tab-btn" data-tab="updateValidation" title="Data Update &amp; Dropdown Validation"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg><span class="tab-label">Data Update &amp; Dropdown Validation</span></button>
+   <div class="nav-group">Documents</div>
+-  <button class="tab-btn" data-tab="pdfCompare">PDF Compare</button>
+-  <button class="tab-btn" data-tab="smartComm">SmartCOMM Validator</button>
++  <button class="tab-btn" data-tab="pdfCompare" title="PDF Compare"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3h7l4 4v10H8zM5 7v14h10"/></svg><span class="tab-label">PDF Compare</span></button>
++  <button class="tab-btn" data-tab="smartComm" title="SmartCOMM Validator"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM9 14l2 2 4-4"/></svg><span class="tab-label">SmartCOMM Validator</span></button>
+   <div class="nav-group">Reporting</div>
+-  <button class="tab-btn" data-tab="jiraReport">Jira Sprint Report</button>
+-  <button class="tab-btn" data-tab="stats">Usage Stats</button>
++  <button class="tab-btn" data-tab="jiraReport" title="Jira Sprint Report"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M2 20h20"/></svg><span class="tab-label">Jira Sprint Report</span></button>
++  <button class="tab-btn" data-tab="stats" title="Usage Stats"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9h-9z"/></svg><span class="tab-label">Usage Stats</span></button>
+   <div class="nav-group">Account</div>
+-  <button class="tab-btn" data-tab="settings">Settings</button>
+-  <button class="tab-btn" data-tab="admin" id="adminNavBtn" style="display:none">Admin</button>
++  <button class="tab-btn" data-tab="settings" title="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4"/></svg><span class="tab-label">Settings</span></button>
++  <button class="tab-btn" data-tab="admin" id="adminNavBtn" style="display:none" title="Admin"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4"/></svg><span class="tab-label">Admin</span></button>
+ </nav>
+ <div class="content">
+ 
+ <main>
+ 
++  <!-- ── Home (overview; never entitlement-gated) ───────────────────────── -->
++  <div class="tab-panel active" id="tab-home">
++    <div class="page-head"><h1>Home</h1><p>Your tools, and recent activity across the team.</p></div>
++    <div class="home-kpis">
++      <div class="home-kpi"><div class="l">Total runs</div><div class="n" id="homeTotalRuns">—</div></div>
++      <div class="home-kpi"><div class="l">People using it</div><div class="n" id="homeUsers">—</div></div>
++      <div class="home-kpi"><div class="l">Most-used tool</div><div class="n" id="homeTopTool" style="font-family: var(--sans); font-size: 18px; font-weight: 600; margin-top: 12px">—</div></div>
++    </div>
++    <div class="card">
++      <div class="out-toolbar"><h2 style="margin:0">Recent SmartCOMM runs</h2><button id="homeAllResultsBtn">All results</button></div>
++      <div id="homeRuns" style="margin-top: 12px"><span class="stats-empty">Loading…</span></div>
++    </div>
++    <div class="card">
++      <h2>Open a tool</h2>
++      <div class="tool-grid" id="homeTools"></div>
++    </div>
++    <div class="card">
++      <div class="out-toolbar"><h2 style="margin:0">Recent activity</h2><button id="homeRefreshBtn">Refresh</button></div>
++      <div id="homeRecent" style="margin-top: 12px"><span class="stats-empty">Loading…</span></div>
++    </div>
++  </div>
++
++  <!-- ── Results (saved SmartCOMM runs; never entitlement-gated) ─────────── -->
++  <div class="tab-panel" id="tab-results">
++    <div class="page-head"><h1>Results</h1><p>Every saved SmartCOMM run — what passed, what failed and why, and what changed since the previous run.</p></div>
++    <div class="results-layout">
++      <div class="card results-runs">
++        <div class="out-toolbar"><h2 style="margin:0">Runs</h2><button id="resultsRefreshBtn">Refresh</button></div>
++        <div id="resultsRunList" style="margin-top:12px"><span class="stats-empty">Loading…</span></div>
++      </div>
++      <div class="card results-detail" id="resultsDetail"><span class="stats-empty">Pick a run on the left.</span></div>
++    </div>
++  </div>
++
+   <!-- ── Policy tab ─────────────────────────────────────────────────────── -->
+-  <div class="tab-panel active" id="tab-policy">
++  <div class="tab-panel" id="tab-policy">
++    <div class="page-head"><h1>Policy Tests</h1><p>Run the BOP, Package and Commercial Auto policy workflows for the states and environment you pick.</p></div>
+     <div class="card">
+       <h2>Configure run</h2>
+ 
+@@ -352,6 +601,7 @@
+ 
+   <!-- ── Claims tab ─────────────────────────────────────────────────────── -->
+   <div class="tab-panel" id="tab-claims">
++    <div class="page-head"><h1>Claims (ClaimCenter)</h1><p>Run a ClaimCenter test on a policy number, by line of business, platform and tier.</p></div>
+     <div class="card">
+       <h2>Configure run</h2>
+ 
+@@ -380,6 +630,7 @@
+ 
+   <!-- ── Migration Reconciliation tab ───────────────────────────────────── -->
+   <div class="tab-panel" id="tab-reconciliation">
++    <div class="page-head"><h1>Migration Reconciliation</h1><p>Compare a claim between on-prem and cloud ClaimCenter — one claim number, or a file of claims in bulk.</p></div>
+     <div class="card">
+       <h2>Configure run</h2>
+ 
+@@ -412,6 +663,7 @@
+ 
+   <!-- ── Data Update & Dropdown Validation tab ───────────────────────────── -->
+   <div class="tab-panel" id="tab-updateValidation">
++    <div class="page-head"><h1>Data Update &amp; Dropdown Validation</h1><p>Re-save claim sections on both platforms and compare their dropdown options. Writes to real claims.</p></div>
+     <div class="card">
+       <div class="warn-banner">
+         <b>This test WRITES to real claims.</b> For every section it finds, it opens Edit, compares dropdown/enum
+@@ -450,6 +702,7 @@
+ 
+   <!-- ── PDF Compare tab ─────────────────────────────────────────────────── -->
+   <div class="tab-panel" id="tab-pdfCompare">
++    <div class="page-head"><h1>PDF Compare</h1><p>Compare pairs of PDFs from a folder and write the differences to a report.</p></div>
+     <div class="card">
+       <div class="warn-banner" id="pdfCompareScriptWarn" style="display:none">
+         <b>compare_insurance_pdfs.py not found</b> on the server at
+@@ -492,9 +745,20 @@
+ 
+   <!-- ── SmartCOMM Template Validator tab ──────────────────────────────────── -->
+   <div class="tab-panel" id="tab-smartComm">
++    <div class="page-head"><h1>SmartCOMM Validator</h1><p>Generate a template on a test claim and check the PDF against its mapping doc, the payload and the Data Dictionary.</p></div>
+     <div class="card">
+       <h2>Configure run</h2>
+ 
++      <div id="smartCommPresetsBlock">
++        <div class="field-label">My usual runs</div>
++        <div class="chips" id="smartCommPresetChips"></div>
++        <div class="preset-save">
++          <input type="text" id="smartCommPresetName" placeholder="Name this setup, e.g. PA Auto weekly" autocomplete="off" aria-label="Preset name" />
++          <button type="button" class="btn-secondary" id="smartCommPresetSave">Save as preset</button>
++        </div>
++        <div class="hint" id="smartCommPresetHint">Saves the selected templates, environment, claim # and scenario count in this browser — click a preset to fill the form again.</div>
++      </div>
++
+       <div class="field-label">Validation type</div>
+       <div class="chips" id="smartCommModeChips"></div>
+       <div class="hint" id="smartCommModeHint"></div>
+@@ -579,6 +843,7 @@
+ 
+   <!-- ── Jira Sprint Report tab ─────────────────────────────────────────────── -->
+   <div class="tab-panel" id="tab-jiraReport">
++    <div class="page-head"><h1>Jira Sprint Report</h1><p>Pull the selected tracks from Jira and email the sprint / pending-work workbook or status deck.</p></div>
+     <div class="card">
+       <div class="warn-banner" id="jiraReportConfigWarn" style="display:none">
+         <b>Jira isn't set up yet</b> — enter your Jira email and API token on the <b>Settings</b> tab
+@@ -666,6 +931,7 @@
+ 
+   <!-- ── Settings tab (packaged build: per-install name/email/SmartCOMM data dir) ── -->
+   <div class="tab-panel" id="tab-settings">
++    <div class="page-head"><h1>Settings</h1><p>Your name and email for this tool, plus your Jira and SmartCOMM settings.</p></div>
+     <div class="card">
+       <h2>Your info</h2>
+       <p class="hint">Identifies you to this tool (same as typing your email into a Report Email field) and is used to look up which tools you're approved for.</p>
+@@ -738,6 +1004,7 @@
+ 
+   <!-- ── Usage Stats tab (visible to everyone) ──────────────────────────── -->
+   <div class="tab-panel" id="tab-stats">
++    <div class="page-head"><h1>Usage Stats</h1><p>Who has used which tool, and when — shared across the team.</p></div>
+     <div class="card">
+       <div class="out-toolbar"><h2 style="margin:0">Usage stats</h2><button id="statsRefreshBtn">Refresh</button></div>
+       <div class="stats-row" style="margin-top:14px">
+@@ -763,6 +1030,7 @@
+   <!-- ── Shared status + output (one queue/process on the server) ─────────── -->
+   <!-- ── Admin tab (owner-only; /api/admin is gated server-side too) ─────────── -->
+   <div class="tab-panel" id="tab-admin">
++    <div class="page-head"><h1>Admin</h1><p>Tool access and team-wide settings. Changes reach every installed copy.</p></div>
+     <div class="warn-banner">⚠ Admin settings affect <b>everyone</b> using the tool. They save to the shared team drive and reach all installed copies within a couple of minutes.</div>
+     <div class="card">
+       <h2>Tool access</h2>
+@@ -771,7 +1039,7 @@
+       <div class="field-label">Add a person (email), then tick their tools above</div>
+       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+         <input type="email" id="adminNewUser" placeholder="person@donegalgroup.com" style="max-width:300px" />
+-        <button id="adminAddUserBtn" class="chip">Add person</button>
++        <button id="adminAddUserBtn" class="btn-secondary">Add person</button>
+       </div>
+     </div>
+     <div class="card">
+@@ -798,9 +1066,9 @@
+       <div class="field-label">Login email</div><input type="email" id="adminS3Login" style="max-width:360px" />
+       <div class="field-label">Session owner (named in the "session expired" message)</div><input type="text" id="adminS3Owner" style="max-width:360px" />
+     </div>
+-    <div class="actions">
++    <div class="save-bar">
++      <span id="adminSaveMsg" class="hint">Changes apply to everyone once saved.</span>
+       <button class="run" id="adminSaveBtn">Save admin settings</button>
+-      <span id="adminSaveMsg" class="hint"></span>
+     </div>
+   </div>
+ 
+@@ -842,6 +1110,16 @@
+ </main>
+ </div>
+ </div>
++<footer class="statusbar" aria-label="Status">
++  <span id="appVersion" class="appver"></span>
++  <span id="footerUser"></span>
++  <span class="right" id="footerTool"></span>
++</footer>
++
++<dialog id="quickSwitch" aria-label="Find a tool">
++  <input type="text" id="quickSwitchInput" placeholder="Type a tool name…" autocomplete="off" aria-label="Tool name" />
++  <ul id="quickSwitchList"></ul>
++</dialog>
+ 
+ <script>
+ (function () {
+@@ -852,7 +1130,7 @@
+   // before the normal switch, so a gated tab's real panel (and the job-submitting controls in it) never
+   // renders; the shared #tab-blocked panel is shown instead (see applyTabLocks()/showBlockedPanel() below).
+   document.querySelectorAll('.tab-btn[data-tab]').forEach(function (btn) {
+-    btn.dataset.baseLabel = btn.textContent;
++    btn.dataset.baseLabel = (btn.querySelector('.tab-label') || btn).textContent.trim();
+     btn.addEventListener('click', function () {
+       if (btn.classList.contains('locked') || btn.classList.contains('comingSoon')) {
+         showBlockedPanel(btn);
+@@ -862,7 +1140,10 @@
+       document.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.remove('active'); });
+       btn.classList.add('active');
+       document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+-      setRunPanelsVisible(btn.dataset.tab !== 'settings' && btn.dataset.tab !== 'stats' && btn.dataset.tab !== 'admin');
++      setRunPanelsVisible(btn.dataset.tab !== 'home' && btn.dataset.tab !== 'results' && btn.dataset.tab !== 'settings' && btn.dataset.tab !== 'stats' && btn.dataset.tab !== 'admin');
++      setCrumb(btn.dataset.baseLabel);
++      if (btn.dataset.tab === 'home') loadHome();
++      if (btn.dataset.tab === 'results') loadResults();
+       if (btn.dataset.tab === 'stats') loadStats();
+       if (btn.dataset.tab === 'admin') loadAdmin();
+       try { localStorage.setItem('runnerActiveTab', btn.dataset.tab); } catch (_) { /* ignore */ }
+@@ -874,6 +1155,13 @@
+     var el = document.getElementById('runPanels');
+     if (el) el.style.display = show ? '' : 'none';
+   }
++  // Top bar breadcrumb + status bar: the tool you're on.
++  function setCrumb(label) {
++    var c = document.getElementById('crumbTool'); if (c) c.textContent = label || '';
++    var f = document.getElementById('footerTool'); if (f) f.textContent = label || '';
++  }
++  setRunPanelsVisible(false); // Home (the default tab) has no run to show
++  setCrumb('Home');
+   try {
+     var savedTab = localStorage.getItem('runnerActiveTab');
+     var savedBtn = savedTab && document.querySelector('.tab-btn[data-tab="' + savedTab + '"]');
+@@ -924,10 +1212,28 @@
+     var val = (settingsInput && settingsInput.value.trim()) || (scInput && scInput.value.trim()) || (jrInput && jrInput.value.trim()) || '';
+     var changed = val.toLowerCase() !== myEmail;
+     myEmail = val.toLowerCase();
++    showIdentity();
+     setRunning(runningList());
+     if (changed) refreshEntitlements();
+   }
+ 
++  function showIdentity() {
++    var nameEl = document.getElementById('settingsName');
++    var name = (nameEl && nameEl.value.trim()) || '';
++    var av = document.getElementById('userAvatar');
++    var fu = document.getElementById('footerUser');
++    var who = name || myEmail;
++    if (av) {
++      var parts = name.split(/\s+/).filter(Boolean);
++      var initials = parts.length ? (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')) : (myEmail ? myEmail[0] : '');
++      av.textContent = initials.toUpperCase();
++      av.title = who ? 'Signed in as ' + who : '';
++      av.setAttribute('aria-label', av.title);
++      av.style.display = initials ? '' : 'none';
++    }
++    if (fu) fu.textContent = who ? 'Signed in as ' + who : 'Not signed in — enter your email on Settings';
++  }
++
+   function refreshEntitlements() {
+     var url = '/api/entitlements' + (isValidEmail(myEmail) ? ('?email=' + encodeURIComponent(myEmail)) : '');
+     fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+@@ -936,7 +1242,7 @@
+       myComingSoon = Array.isArray(d.comingSoon) ? d.comingSoon : [];
+       ownerEmail = d.ownerEmail || ownerEmail;
+       var adminBtn = document.getElementById('adminNavBtn');
+-      if (adminBtn) adminBtn.style.display = d.admin ? 'block' : 'none';
++      if (adminBtn) adminBtn.style.display = d.admin ? '' : 'none';
+       applyTabLocks();
+     }).catch(function () { /* stay with whatever we last knew - network hiccup, not fatal */ });
+   }
+@@ -950,12 +1256,12 @@
+   function applyTabLocks() {
+     document.querySelectorAll('.tab-btn[data-tab]').forEach(function (btn) {
+       var tab = btn.dataset.tab;
+-      if (tab === 'settings' || tab === 'stats' || tab === 'admin') return; // Settings/Stats/Admin are never entitlement-gated
++      if (tab === 'home' || tab === 'results' || tab === 'settings' || tab === 'stats' || tab === 'admin') return; // Home/Results/Settings/Stats/Admin are never entitlement-gated
+       var comingSoon = myComingSoon.indexOf(tab) !== -1;
+       var locked = packagedBuild && myAllowedTabs && myAllowedTabs.indexOf(tab) === -1 && !comingSoon;
+       btn.classList.toggle('locked', locked);
+       btn.classList.toggle('comingSoon', comingSoon);
+-      btn.textContent = btn.dataset.baseLabel;
++      var lbl = btn.querySelector('.tab-label'); if (lbl) lbl.textContent = btn.dataset.baseLabel; // keeps the icon
+       // Hidden outright (set inline so it beats the .active rule) whenever the user can't use the tool:
+       // locked = not granted yet (an admin grant un-hides it on the next refresh); comingSoon = not shipped in
+       // this build. '' restores the default display when neither applies.
+@@ -978,6 +1284,7 @@
+     // If the tab the user is on is now hidden (grant revoked mid-session, or a saved "coming soon" tab that's
+     // no longer shown), move them to an available tool rather than leaving a dead hidden-tab panel showing.
+     // SmartCOMM is always allowed, so it's the natural landing spot; the blocked panel is only a last resort.
++    renderHomeTools(); // the Home shortcuts list only the tools this person can use
+     var activeBtn = document.querySelector('.tab-btn.active');
+     if (activeBtn && (activeBtn.classList.contains('locked') || activeBtn.classList.contains('comingSoon'))) {
+       var scBtn2 = document.querySelector('.tab-btn[data-tab="smartComm"]');
+@@ -994,6 +1301,7 @@
+     document.getElementById('tab-blocked').classList.add('active');
+     setRunPanelsVisible(false);
+     document.getElementById('blockedTitle').textContent = btn.dataset.baseLabel;
++    setCrumb(btn.dataset.baseLabel);
+     var requestLink = document.getElementById('blockedRequestLink');
+     if (comingSoon) {
+       document.getElementById('blockedMessage').textContent = 'This tool isn\'t available in this build yet - it\'s planned for a future release.';
+@@ -1010,7 +1318,10 @@
+   }
+ 
+   function chip(label, selected, disabled, title) {
+-    var el = document.createElement('div');
++    var el = document.createElement('button');
++    el.type = 'button';
++    el.setAttribute('aria-pressed', selected ? 'true' : 'false');
++    if (disabled) el.setAttribute('aria-disabled', 'true');
+     el.className = 'chip' + (selected ? ' selected' : '') + (disabled ? ' disabled' : '');
+     el.textContent = label;
+     if (title) el.title = title;
+@@ -1091,6 +1402,292 @@
+   }
+   document.getElementById('statsRefreshBtn').addEventListener('click', loadStats);
+ 
++  // ── Home: tool shortcuts (only the tools this person can use) + team activity from /api/stats ──
++  var TOOL_BLURBS = {
++    policy: 'BOP, Package and CA workflows', claims: 'ClaimCenter test on a policy', reconciliation: 'On-prem vs cloud claim compare',
++    updateValidation: 'Re-save sections, compare dropdowns', pdfCompare: 'Compare PDF pairs from a folder',
++    smartComm: 'Validate templates against their spec', jiraReport: 'Sprint and pending-work reports'
++  };
++  function renderHomeTools() {
++    var grid = document.getElementById('homeTools');
++    if (!grid || !TOOL_BLURBS) return; // a saved Home tab is restored before this list is defined; the final loadHome() fills it
++    grid.innerHTML = '';
++    document.querySelectorAll('.tab-btn[data-tab]').forEach(function (btn) {
++      var tab = btn.dataset.tab;
++      if (!TOOL_BLURBS[tab] || btn.style.display === 'none') return;
++      var tile = document.createElement('button');
++      tile.type = 'button';
++      tile.className = 'tool-tile';
++      var svg = btn.querySelector('svg');
++      tile.innerHTML = (svg ? svg.outerHTML : '') + '<span><strong>' + escapeHtml(btn.dataset.baseLabel) + '</strong><small>' + escapeHtml(TOOL_BLURBS[tab]) + '</small></span>';
++      tile.addEventListener('click', function () { btn.click(); });
++      grid.appendChild(tile);
++    });
++  }
++  function loadHome() {
++    renderHomeTools();
++    loadHomeRuns();
++    fetch('/api/stats').then(function (r) { return r.json(); }).then(function (s) {
++      document.getElementById('homeTotalRuns').textContent = s.totalRuns || 0;
++      document.getElementById('homeUsers').textContent = s.distinctUsers || 0;
++      var top = (s.tools && s.tools.length) ? s.tools.slice().sort(function (a, b) { return b.runs - a.runs; })[0] : null;
++      document.getElementById('homeTopTool').textContent = top ? top.label + ' (' + top.runs + ')' : '—';
++      var recent = (s.recent || []).slice(0, 8);
++      document.getElementById('homeRecent').innerHTML = recent.length
++        ? '<table class="stats-table"><thead><tr><th class="when">When</th><th>Who</th><th>Tool</th></tr></thead><tbody>' +
++          recent.map(function (r) { return '<tr><td class="when">' + fmtWhen(r.ts) + '</td><td>' + escapeHtml(r.name || r.email || 'unknown') + '</td><td>' + escapeHtml(r.tool || '') + (r.mode ? ' · ' + escapeHtml(r.mode) : '') + '</td></tr>'; }).join('') + '</tbody></table>'
++        : '<span class="stats-empty">No runs recorded yet — activity shows here as people use the tools.</span>';
++    }).catch(function () {
++      document.getElementById('homeRecent').innerHTML = '<span class="stats-empty">Could not load recent activity (the shared usage log may be unreachable).</span>';
++    });
++  }
++  document.getElementById('homeRefreshBtn').addEventListener('click', loadHome);
++
++  // ── Results (saved SmartCOMM runs via /api/results/*) ──
++  var results = { runs: [], runId: null, run: null, compare: null, scenarioKey: null, filter: 'all', query: '', showCompare: true, open: {} };
++  function pill(status) { var s = String(status || '').toUpperCase(); return '<span class="pill ' + escapeHtml(s) + '">' + escapeHtml(s || '—') + '</span>'; }
++  function runTitle(r) {
++    var t = (r.templates || []).map(function (x) { return x.digNumber; }).filter(Boolean);
++    return t.length ? (t.slice(0, 3).join(', ') + (t.length > 3 ? ' +' + (t.length - 3) : '')) : '(no templates)';
++  }
++  function runCounts(r) {
++    var c = r.counts || {};
++    return r.scenarioCount + ' scenario' + (r.scenarioCount === 1 ? '' : 's') + ' · ' + (c.PASS || 0) + ' passed · ' + (c.FAIL || 0) + ' failed · ' + (c.BLOCKED || 0) + ' blocked' + (c.ERROR ? ' · ' + c.ERROR + ' error' : '');
++  }
++  function resultsError(el, e) { el.innerHTML = '<span class="stats-empty">' + escapeHtml(e) + '</span>'; }
++  function fetchJson(url) { return fetch(url).then(function (r) { return r.json().then(function (b) { if (!r.ok) throw new Error(b.error || ('HTTP ' + r.status)); return b; }); }); }
++
++  function loadHomeRuns() {
++    var box = document.getElementById('homeRuns');
++    fetchJson('/api/results/runs?limit=5').then(function (d) {
++      if (!d.runs.length) { box.innerHTML = '<span class="stats-empty">No saved runs yet — results show here after the next SmartCOMM run.</span>'; return; }
++      box.innerHTML = '<div style="overflow-x:auto"><table class="stats-table"><thead><tr><th class="when">When</th><th>Templates</th><th>Result</th><th>Scenarios</th></tr></thead><tbody>' +
++        d.runs.map(function (r) { return '<tr><td class="when">' + fmtWhen(r.startedAt) + '</td><td><button type="button" class="linkish" data-run="' + escapeHtml(r.id) + '">' + escapeHtml(runTitle(r)) + '</button></td><td>' + pill(r.overall) + '</td><td>' + escapeHtml(runCounts(r)) + '</td></tr>'; }).join('') +
++        '</tbody></table></div>';
++      box.querySelectorAll('button[data-run]').forEach(function (b) { b.addEventListener('click', function () { openResults(b.getAttribute('data-run')); }); });
++    }).catch(function (e) { resultsError(box, e.message); });
++  }
++  function openResults(runId) {
++    if (runId) results.runId = runId;
++    var btn = document.querySelector('.tab-btn[data-tab="results"]');
++    if (btn) btn.click();
++  }
++  document.getElementById('homeAllResultsBtn').addEventListener('click', function () { openResults(null); });
++
++  function loadResults() {
++    var list = document.getElementById('resultsRunList');
++    fetchJson('/api/results/runs?limit=50').then(function (d) {
++      results.runs = d.runs;
++      if (!d.runs.length) {
++        list.innerHTML = '<span class="stats-empty">No saved runs yet.</span>';
++        document.getElementById('resultsDetail').innerHTML = '<span class="stats-empty">Results show here after the next SmartCOMM run.</span>';
++        return;
++      }
++      if (!results.runId || !d.runs.some(function (r) { return r.id === results.runId; })) results.runId = d.runs[0].id;
++      renderRunList();
++      loadRun(results.runId);
++    }).catch(function (e) { resultsError(list, e.message); document.getElementById('resultsDetail').innerHTML = ''; });
++  }
++  function renderRunList() {
++    var list = document.getElementById('resultsRunList');
++    list.innerHTML = results.runs.map(function (r) {
++      return '<button type="button" class="run-item' + (r.id === results.runId ? ' selected' : '') + '" data-run="' + escapeHtml(r.id) + '" aria-pressed="' + (r.id === results.runId) + '">' +
++        '<span class="top"><span class="when">' + escapeHtml(fmtWhen(r.startedAt)) + '</span>' + pill(r.overall) + '</span>' +
++        '<span class="what">' + escapeHtml(runTitle(r)) + (r.source === 'bulk' ? ' <span class="check-section">· bulk</span>' : '') + '</span>' +
++        '<span class="counts">' + escapeHtml(runCounts(r)) + '</span></button>';
++    }).join('');
++    list.querySelectorAll('button[data-run]').forEach(function (b) {
++      b.addEventListener('click', function () { results.runId = b.getAttribute('data-run'); results.scenarioKey = null; renderRunList(); loadRun(results.runId); });
++    });
++  }
++  function loadRun(id) {
++    var box = document.getElementById('resultsDetail');
++    box.innerHTML = '<span class="stats-empty">Loading…</span>';
++    fetchJson('/api/results/runs/' + encodeURIComponent(id)).then(function (d) {
++      if (id !== results.runId) return; // a newer click won
++      results.run = d.run; results.compare = d.compare; results.open = {};
++      var scs = allScenarios();
++      if (!results.scenarioKey || !scs.some(function (s) { return s.key === results.scenarioKey; })) {
++        var firstBad = scs.filter(function (s) { return s.sc.status === 'FAIL'; })[0] || scs[0];
++        results.scenarioKey = firstBad ? firstBad.key : null;
++      }
++      renderRun();
++    }).catch(function (e) { resultsError(box, e.message); });
++  }
++  function allScenarios() {
++    var out = [];
++    ((results.run && results.run.templates) || []).forEach(function (t) {
++      (t.scenarios || []).forEach(function (sc) { out.push({ key: t.digNumber + '|' + sc.scenarioId, t: t, sc: sc }); });
++    });
++    return out;
++  }
++  // Content checks plus the editor's field checks, in one list.
++  function checksOf(sc) {
++    var rows = (sc.validations || []).map(function (v) {
++      return { id: v.id || '', section: sectionOf(v.id), check: v.description || '', result: v.result, expected: v.expected, actual: v.actual, why: v.reason || '', jira: v.jira || v.jiraKey || null };
++    });
++    // Editor field checks: expected = what the Data Dictionary says (when the field matched a row), actual = what the
++    // live editor did (expectedEditable is the editor's own editable/locked state; observedChanged = an edit took).
++    (sc.interactiveChecks || []).forEach(function (c) {
++      var name = c.dictionaryField && c.label && c.dictionaryField !== c.label ? c.dictionaryField + ' (' + c.label + ')' : (c.dictionaryField || c.label || 'Field');
++      var dict = c.dictionaryEditable === true ? 'Editable' : c.dictionaryEditable === false ? 'Locked' : null;
++      var seen = c.expectedEditable === false ? 'Locked' : 'Editable';
++      rows.push({ id: c.id || '', section: 'Editor', result: c.result,
++        check: name + (dict ? ' should be ' + dict.toLowerCase() + ' (Data Dictionary)' : ' — editable or locked in the editor'),
++        expected: dict || seen,
++        actual: seen + (c.observedChanged && c.committedMarker ? ' · edited to ' + c.committedMarker : ''),
++        why: c.reason || '' });
++    });
++    return rows;
++  }
++  function sectionOf(id) {
++    id = String(id || '');
++    if (/^XP/.test(id)) return 'Payload';
++    if (/^META/.test(id)) return 'Filing metadata';
++    if (/^EDIT/.test(id)) return 'Edited fields';
++    if (/^(LAYOUT|LOCK)/.test(id)) return 'Layout & locking';
++    if (/^FL/.test(id)) return 'Fraud language';
++    if (/^(PAYLOAD|NOCHECK|DATA|CHOICE)/.test(id)) return 'Run';
++    return 'Template content';
++  }
++  function fmtVal(x) { return x === undefined || x === null || x === '' ? '—' : String(x); }
++  function renderRun() {
++    var box = document.getElementById('resultsDetail');
++    var r = results.run;
++    if (!r) return;
++    var scs = allScenarios();
++    var counts = r.counts || {};
++    var cmp = results.compare || { newFailures: 0, fixed: 0, scenarios: {} };
++    var html = '<div class="res-head"><div><h2>' + escapeHtml((r.templates || []).map(function (t) { return t.digNumber + (t.templateName && t.templateName !== t.digNumber ? ' · ' + t.templateName : ''); }).join('  ·  ') || 'Run') + '</h2>' +
++      '<div class="res-meta">' + escapeHtml(fmtWhen(r.startedAt)) + (r.env ? ' · ' + escapeHtml(r.env) : '') + ' · ' + escapeHtml(r.source === 'bulk' ? 'bulk run' : 'single run') + (r.requestedBy ? ' · ' + escapeHtml(r.requestedBy) : '') + '</div></div>' +
++      '<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="resCompare"' + (results.showCompare ? ' checked' : '') + '> Compare with the previous run' +
++      ' <span class="check-section">(' + cmp.newFailures + ' new · ' + cmp.fixed + ' fixed)</span></label></div>';
++    html += '<div class="res-sum"><div><div class="n">' + (counts.PASS || 0) + '</div><div class="l">Scenarios passed</div></div><div><div class="n">' + (counts.FAIL || 0) + '</div><div class="l">Failed</div></div>' +
++      '<div><div class="n">' + (counts.BLOCKED || 0) + '</div><div class="l">Blocked</div></div><div><div class="n">' + (counts.ERROR || 0) + '</div><div class="l">Errors</div></div></div>';
++    if (!scs.length) {
++      var reasons = (r.templates || []).map(function (t) { return t.reason ? t.digNumber + ': ' + t.reason : ''; }).filter(Boolean);
++      box.innerHTML = html + '<div class="res-reason">' + escapeHtml(reasons.join(' · ') || 'This run has no scenarios.') + '</div>';
++      bindRunControls();
++      return;
++    }
++    html += '<div class="scenario-chips" role="group" aria-label="Scenarios">' + scs.map(function (s) {
++      return '<button type="button" class="scenario-chip' + (s.key === results.scenarioKey ? ' selected' : '') + '" data-sc="' + escapeHtml(s.key) + '" aria-pressed="' + (s.key === results.scenarioKey) + '">' + escapeHtml(s.sc.scenarioId) + ' ' + pill(s.sc.status) + '</button>';
++    }).join('') + '</div>';
++    var cur = scs.filter(function (s) { return s.key === results.scenarioKey; })[0] || scs[0];
++    var sc = cur.sc;
++    var sCmp = (cmp.scenarios || {})[cur.key] || { checks: {} };
++    html += '<div class="res-info">Claim ' + escapeHtml(fmtVal(sc.claimNumber)) + (sc.lob ? ' · ' + escapeHtml(sc.lob) : '') + (sc.state ? ' · ' + escapeHtml(sc.state) : '') + (sc.creationMode ? ' · ' + escapeHtml(sc.creationMode) : '') +
++      (results.showCompare ? ' · ' + (sCmp.previousRunId ? 'compared with ' + escapeHtml(fmtWhen(sCmp.previousStartedAt)) : 'no earlier run of this scenario to compare with') : '') + '</div>';
++    if (sc.reason) html += '<div class="res-reason">' + escapeHtml(sc.reason) + '</div>';
++    var rows = checksOf(sc);
++    var nFail = rows.filter(function (x) { return x.result === 'FAIL'; }).length;
++    var nOther = rows.filter(function (x) { return x.result === 'BLOCKED' || x.result === 'SKIPPED'; }).length;
++    html += '<div class="res-tools"><div class="seg" role="group" aria-label="Filter checks">' +
++      [['all', 'All (' + rows.length + ')'], ['fail', 'Failures (' + nFail + ')'], ['other', 'Blocked & skipped (' + nOther + ')']].map(function (f) {
++        return '<button type="button" data-filter="' + f[0] + '" aria-pressed="' + (results.filter === f[0]) + '">' + escapeHtml(f[1]) + '</button>';
++      }).join('') + '</div>' +
++      '<input type="text" id="resSearch" placeholder="Search checks, values…" aria-label="Search checks" value="' + escapeHtml(results.query) + '" style="max-width:280px" />' +
++      (sc.pdfPath ? '<a class="linkish" target="_blank" rel="noopener" href="/api/results/runs/' + encodeURIComponent(r.id) + '/pdf?dig=' + encodeURIComponent(cur.t.digNumber) + '&scenario=' + encodeURIComponent(sc.scenarioId) + '">Open PDF</a>' : '') + '</div>';
++    var q = results.query.trim().toLowerCase();
++    var shown = rows.filter(function (x) {
++      if (results.filter === 'fail' && x.result !== 'FAIL') return false;
++      if (results.filter === 'other' && x.result !== 'BLOCKED' && x.result !== 'SKIPPED') return false;
++      if (q && (x.id + ' ' + x.check + ' ' + fmtVal(x.expected) + ' ' + fmtVal(x.actual) + ' ' + x.why).toLowerCase().indexOf(q) === -1) return false;
++      return true;
++    });
++    html += '<div style="overflow-x:auto"><table class="checks"><thead><tr><th>#</th><th>Check</th><th>Result</th><th>Expected → Actual</th></tr></thead><tbody>' +
++      (shown.length ? shown.map(function (x, i) {
++        var ch = results.showCompare && sCmp.checks[x.id || x.check] && sCmp.checks[x.id || x.check].change;
++        var key = x.section + '|' + x.id + '|' + i;
++        var open = !!results.open[key];
++        return '<tr class="check-row" data-key="' + escapeHtml(key) + '" tabindex="0" aria-expanded="' + open + '"><td class="id">' + escapeHtml(x.id) + '</td>' +
++          '<td>' + escapeHtml(x.check) + '<div class="check-section">' + escapeHtml(x.section) + (x.jira ? ' · Jira ' + escapeHtml(typeof x.jira === 'string' ? x.jira : (x.jira.key || x.jira.label || '')) : '') + '</div></td>' +
++          '<td>' + pill(x.result) + (ch ? ' <span class="tag ' + ch + '">' + ch + '</span>' : '') + '</td>' +
++          '<td class="ea">' + escapeHtml(fmtVal(x.expected)) + ' → ' + escapeHtml(fmtVal(x.actual)) + '</td></tr>' +
++          (open ? '<tr class="why"><td></td><td colspan="3">' + escapeHtml(x.why || 'No further detail recorded for this check.') + '</td></tr>' : '');
++      }).join('') : '<tr><td colspan="4" class="stats-empty">No checks match.</td></tr>') + '</tbody></table></div>';
++    box.innerHTML = html;
++    bindRunControls();
++    box.querySelectorAll('button[data-sc]').forEach(function (b) { b.addEventListener('click', function () { results.scenarioKey = b.getAttribute('data-sc'); results.open = {}; renderRun(); }); });
++    box.querySelectorAll('button[data-filter]').forEach(function (b) { b.addEventListener('click', function () { results.filter = b.getAttribute('data-filter'); renderRun(); }); });
++    var search = document.getElementById('resSearch');
++    search.addEventListener('input', function () { results.query = this.value; var pos = this.selectionStart; renderRun(); var s2 = document.getElementById('resSearch'); s2.focus(); s2.setSelectionRange(pos, pos); });
++    box.querySelectorAll('tr.check-row').forEach(function (tr) {
++      function toggle() { var k = tr.getAttribute('data-key'); results.open[k] = !results.open[k]; renderRun(); }
++      tr.addEventListener('click', toggle);
++      tr.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
++    });
++  }
++  function bindRunControls() {
++    var c = document.getElementById('resCompare');
++    if (c) c.addEventListener('change', function () { results.showCompare = this.checked; renderRun(); });
++  }
++  document.getElementById('resultsRefreshBtn').addEventListener('click', loadResults);
++
++  // ── Theme (light / dark, remembered per person) ──
++  document.getElementById('themeToggle').addEventListener('click', function () {
++    var light = document.documentElement.getAttribute('data-theme') !== 'light';
++    if (light) document.documentElement.setAttribute('data-theme', 'light'); else document.documentElement.removeAttribute('data-theme');
++    try { localStorage.setItem('runnerTheme', light ? 'light' : 'dark'); } catch (_) { /* ignore */ }
++  });
++
++  // ── Collapsible menu (remembered per person) ──
++  function setNavCollapsed(on) {
++    document.body.classList.toggle('nav-collapsed', on);
++    var b = document.getElementById('navCollapse');
++    b.setAttribute('aria-expanded', on ? 'false' : 'true');
++    b.querySelector('.tab-label').textContent = on ? 'Expand menu' : 'Collapse menu';
++    b.title = on ? 'Expand menu' : 'Collapse menu';
++  }
++  document.getElementById('navCollapse').addEventListener('click', function () {
++    var on = !document.body.classList.contains('nav-collapsed');
++    setNavCollapsed(on);
++    try { localStorage.setItem('runnerNavCollapsed', on ? '1' : '0'); } catch (_) { /* ignore */ }
++  });
++  try { if (localStorage.getItem('runnerNavCollapsed') === '1') setNavCollapsed(true); } catch (_) { /* ignore */ }
++
++  // ── Find a tool (Ctrl+K / the top-bar search box) ──
++  var qs = document.getElementById('quickSwitch');
++  var qsInput = document.getElementById('quickSwitchInput');
++  var qsList = document.getElementById('quickSwitchList');
++  function qsMatches() {
++    var q = qsInput.value.trim().toLowerCase();
++    var out = [];
++    document.querySelectorAll('.tab-btn[data-tab]').forEach(function (btn) {
++      if (btn.style.display === 'none') return;
++      if (!q || btn.dataset.baseLabel.toLowerCase().indexOf(q) !== -1) out.push(btn);
++    });
++    return out;
++  }
++  function qsRender() {
++    var m = qsMatches();
++    qsList.innerHTML = '';
++    if (!m.length) { qsList.innerHTML = '<li class="empty">No tool matches.</li>'; return; }
++    m.forEach(function (btn) {
++      var li = document.createElement('li');
++      var b = document.createElement('button');
++      b.type = 'button';
++      var svg = btn.querySelector('svg');
++      b.innerHTML = (svg ? svg.outerHTML : '') + '<span>' + escapeHtml(btn.dataset.baseLabel) + '</span>';
++      b.addEventListener('click', function () { qs.close(); btn.click(); });
++      li.appendChild(b);
++      qsList.appendChild(li);
++    });
++  }
++  function qsOpen() { if (qs.open) return; qsInput.value = ''; qsRender(); qs.showModal(); qsInput.focus(); }
++  document.getElementById('quickSwitchBtn').addEventListener('click', qsOpen);
++  qsInput.addEventListener('input', qsRender);
++  qsInput.addEventListener('keydown', function (e) {
++    if (e.key === 'Enter') { var m = qsMatches(); if (m.length) { e.preventDefault(); qs.close(); m[0].click(); } }
++  });
++  qs.addEventListener('click', function (e) { if (e.target === qs) qs.close(); }); // click outside closes
++  document.addEventListener('keydown', function (e) {
++    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); qsOpen(); }
++  });
++
++  showIdentity();
++  if (document.getElementById('tab-home').classList.contains('active')) loadHome();
++
+   // ── Admin tab (owner-only; reads/writes the shared admin config on V: via /api/admin) ──
+   var adminState = { suites: [], grants: {}, defaultTools: [], envUrls: {} };
+   function loadAdmin() {
+@@ -1538,6 +2135,7 @@
+   }
+ 
+   function renderSmartCommMode() {
++    renderSmartCommPresets();
+     var box = document.getElementById('smartCommModeChips');
+     box.innerHTML = '';
+     SMARTCOMM_MODES.forEach(function (m) {
+@@ -1580,6 +2178,64 @@
+     updateSmartCommPreview();
+   }
+ 
++  // ── SmartCOMM presets ("My usual runs") — Template-content setups saved per browser ──
++  function loadSmartCommPresets() {
++    try { var p = JSON.parse(localStorage.getItem('smartCommPresets') || '[]'); return Array.isArray(p) ? p : []; } catch (_) { return []; }
++  }
++  function saveSmartCommPresets(list) { try { localStorage.setItem('smartCommPresets', JSON.stringify(list)); } catch (_) { /* ignore */ } }
++  function renderSmartCommPresets() {
++    var block = document.getElementById('smartCommPresetsBlock');
++    if (!block) return;
++    block.style.display = smartComm.mode === 'template' ? '' : 'none';
++    var box = document.getElementById('smartCommPresetChips');
++    var list = loadSmartCommPresets();
++    box.innerHTML = list.length ? '' : '<span class="stats-empty">No presets yet.</span>';
++    list.forEach(function (p, i) {
++      var wrap = document.createElement('span');
++      wrap.className = 'preset';
++      var b = document.createElement('button');
++      b.type = 'button';
++      b.className = 'chip';
++      b.textContent = p.name;
++      b.title = (p.templateIds || []).join(', ') + ' · ' + String(p.tier || '').toUpperCase() + (p.claimNumber ? ' · claim ' + p.claimNumber : '');
++      b.addEventListener('click', function () { applySmartCommPreset(p); });
++      var x = document.createElement('button');
++      x.type = 'button';
++      x.className = 'preset-remove';
++      x.textContent = '×';
++      x.setAttribute('aria-label', 'Remove preset ' + p.name);
++      x.addEventListener('click', function () { var l = loadSmartCommPresets(); l.splice(i, 1); saveSmartCommPresets(l); renderSmartCommPresets(); });
++      wrap.appendChild(b); wrap.appendChild(x);
++      box.appendChild(wrap);
++    });
++    var ready = smartComm.templateIds.size > 0 && !!smartComm.tier;
++    document.getElementById('smartCommPresetSave').disabled = !ready;
++  }
++  function applySmartCommPreset(p) {
++    smartComm.mode = 'template';
++    smartComm.templateIds = new Set(p.templateIds || []);
++    smartComm.templateId = null;
++    if (p.tier) smartComm.tier = p.tier;
++    document.getElementById('smartCommClaimNumber').value = p.claimNumber || '';
++    document.getElementById('smartCommMaxScenarios').value = p.maxScenarios || '';
++    renderSmartCommTiers();
++    renderSmartCommMode();
++    renderSmartCommSelectedTemplates();
++    updateSmartCommPreview();
++    document.getElementById('smartCommPresetHint').textContent = 'Filled from "' + p.name + '" — check it, then press Validate.';
++  }
++  document.getElementById('smartCommPresetSave').addEventListener('click', function () {
++    var nameEl = document.getElementById('smartCommPresetName');
++    var name = nameEl.value.trim() || Array.from(smartComm.templateIds).join(', ');
++    var list = loadSmartCommPresets().filter(function (p) { return p.name !== name; });
++    list.push({ name: name, templateIds: Array.from(smartComm.templateIds), tier: smartComm.tier,
++      claimNumber: document.getElementById('smartCommClaimNumber').value.trim(), maxScenarios: document.getElementById('smartCommMaxScenarios').value });
++    saveSmartCommPresets(list);
++    nameEl.value = '';
++    document.getElementById('smartCommPresetHint').textContent = 'Saved "' + name + '".';
++    renderSmartCommPresets();
++  });
++
+   function renderSmartCommTiers() {
+     var box = document.getElementById('smartCommTierChips');
+     box.innerHTML = '';
+@@ -1765,6 +2421,7 @@
+   }
+ 
+   function updateSmartCommPreview() {
++    renderSmartCommPresets();
+     var jobs = smartCommJobsToRun();
+     var box = document.getElementById('smartCommPreview');
+     var btn = document.getElementById('smartCommRunBtn');
+diff --git a/Playwright Projects/Commercial Line Performance test/runner/server.js b/Playwright Projects/Commercial Line Performance test/runner/server.js
+index c2edb8b..41fbde0 100644
+--- a/Playwright Projects/Commercial Line Performance test/runner/server.js	
++++ b/Playwright Projects/Commercial Line Performance test/runner/server.js	
+@@ -1331,6 +1331,37 @@ app.post('/api/run', (req, res) => {
+ });
+ 
+ // Team-wide usage stats for the Stats tab (shown to everyone) - aggregates the shared usage log.
++// ── SmartCOMM results (the Results page) — read from ClaimCenter-Automation's results store ─────────────────
++// (helpers/smartComm/resultsStore.js: results/smartComm/bulk + runs). Required per request so a `git pull` of
++// ClaimCenter-Automation is picked up without restarting; an older checkout without the store gets a clear 501.
++function resultsStore() {
++  try { return require(path.join(CLAIMS_DIR, 'helpers', 'smartComm', 'resultsStore')); } catch (e) { return null; }
++}
++const RESULTS_NOT_AVAILABLE = 'Results need a newer ClaimCenter-Automation (git pull in that folder).';
++app.get('/api/results/runs', (req, res) => {
++  const store = resultsStore();
++  if (!store) return res.status(501).json({ error: RESULTS_NOT_AVAILABLE });
++  try {
++    res.json({ runs: store.listRuns({ limit: Math.max(1, Math.min(200, parseInt(req.query.limit, 10) || 50)) }) });
++  } catch (e) { res.status(500).json({ error: e.message }); }
++});
++app.get('/api/results/runs/:id', (req, res) => {
++  const store = resultsStore();
++  if (!store) return res.status(501).json({ error: RESULTS_NOT_AVAILABLE });
++  try {
++    const run = store.getRun(req.params.id);
++    if (!run) return res.status(404).json({ error: 'Run not found' });
++    res.json({ run, compare: store.compareWithPrevious(req.params.id) });
++  } catch (e) { res.status(500).json({ error: e.message }); }
++});
++app.get('/api/results/runs/:id/pdf', (req, res) => {
++  const store = resultsStore();
++  if (!store) return res.status(501).json({ error: RESULTS_NOT_AVAILABLE });
++  const p = store.pdfPathFor(req.params.id, String(req.query.dig || ''), String(req.query.scenario || ''));
++  if (!p) return res.status(404).json({ error: 'PDF not found (it may have been replaced by a later run)' });
++  res.type('application/pdf').sendFile(p);
++});
++
+ app.get('/api/stats', (req, res) => {
+   const recs = readUsage();
+   const byTool = {};
