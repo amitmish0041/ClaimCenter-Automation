@@ -573,6 +573,10 @@ function classifyResidualFragment(fragment, docOrder, { sampleNames = [] } = {})
   return [{ id: 'R0', description: staticContentDescription(line), type: 'requiredText', expectedValue: line, docOrder }];
 }
 
+const CUT_BEFORE = '\u0002';
+const CUT_AFTER = '\u0003';
+const CUT_MARKS_RE = /[\u0002\u0003]/g;
+
 function buildRequirementsFromComments(paragraphs, anchors, comments) {
   const requirements = [];
   let n = 0;
@@ -677,7 +681,8 @@ function buildRequirementsFromComments(paragraphs, anchors, comments) {
     if (end > 0 && /[A-Za-z]/.test(residual[end - 1] || '') && /[a-z]/.test(residual[end] || '')) {
       while (end < residual.length && /[A-Za-z]/.test(residual[end])) end++;
     }
-    residual = residual.slice(0, startIdx) + '\n' + residual.slice(end);
+    // CUT_BEFORE / CUT_AFTER mark the cut's two sides, so a fragment knows it touched a dynamic value (see below).
+    residual = residual.slice(0, startIdx) + CUT_BEFORE + '\n' + CUT_AFTER + residual.slice(end);
   }
 
   // Character offset into the residual text, matching the scale dynamic
@@ -712,7 +717,13 @@ function buildRequirementsFromComments(paragraphs, anchors, comments) {
     if (!fieldBySample.has(key) || /\bto name\b/i.test(anchor.comment.fullText)) fieldBySample.set(key, anchor.comment.fullText);
   }
   let offset = 0;
-  for (const frag of residual.split('\n')) {
+  for (const marked of residual.split('\n')) {
+    const frag = marked.replace(CUT_MARKS_RE, '');
+    // A few digits/symbols glued straight onto a dynamic value — a comment that anchored only part of a number
+    // ("=1" + "0" + "% of NADA value", ")/1" + "00,000"; DIG168, 2026-10-19). Not wording, and as a short value it
+    // must stand alone as a whole word, which it never does with the real value right against it — so it could only fail.
+    const glued = (marked.startsWith(CUT_AFTER) && /^\S/.test(marked.slice(1))) || (marked.endsWith(CUT_BEFORE) && /\S$/.test(marked.slice(0, -1)));
+    if (glued && !/[A-Za-z]/.test(frag) && frag.trim().length <= 4) { offset += frag.length + 1; continue; }
     for (let req of classifyResidualFragment(frag, offset, { sampleNames })) {
       const sampleOf = req.type === 'requiredText' && fieldBySample.get(sampleKey(req.expectedValue));
       if (sampleOf) {
@@ -873,15 +884,6 @@ async function getRequirements(template, dataDir) {
   // DIG39 (2026-10-19): read as plain text, its sample claim number and "I, Rachel Derliunas, …" were checked as
   // fixed wording on every claim although the BA had marked both as dynamic.
   if (localPath.toLowerCase().endsWith('.doc')) {
-    // Only when the BA commented it: a .doc without comments keeps the text reading below, which its checks were
-    // tuned on (DIG26's tab-separated labels and exposure table come through word-extractor, not the .docx reader).
-    const converted = convertDocToDocx(localPath);
-    const fromCopy = converted && quietly(() => readDocx(converted, template));
-    if (fromCopy && fromCopy.mode === 'comments') {
-      console.log(`[SmartComm] templateRequirementService: ${template.digNumber} is a legacy .doc — using the BA's Word comments from its converted .docx copy (${converted})`);
-      return { ...fromCopy, sourceFile: converted, convertedFrom: localPath };
-    }
-    // No comments, or no converter: the text alone, through the same heuristic classifier a comments-less .docx uses.
     if (!WordExtractor) throw new Error('word-extractor is not installed — run npm install in ClaimCenter-Automation');
     let extracted;
     try {
@@ -896,8 +898,23 @@ async function getRequirements(template, dataDir) {
     // a .doc can't be re-read synchronously there, and "Line of Business:\tAuto" became a value check whose label
     // text never reached the requirements (DIG26, 2026-10-17 — a false "label not in the mapping doc").
     LEGACY_DOC_TEXT.set(localPath, [extracted.getHeaders(), extracted.getBody(), extracted.getFooters(), extracted.getAnnotations && extracted.getAnnotations()].filter(Boolean).join('\n'));
-    console.log(`[SmartComm] templateRequirementService: ${template.digNumber} is a legacy .doc ${converted ? 'with no Word comments' : "that couldn't be converted (so its Word comments can't be used)"} — using word-extractor + the heuristic classifier (${paragraphs.length} paragraphs)`);
-    return { requirements: buildRequirementsHeuristic(paragraphs), sourceFile: localPath, mode: 'heuristic-doc', mentionsFraudLanguage };
+    const fromText = buildRequirementsHeuristic(paragraphs);
+
+    // The BA's comments, from a converted .docx copy — used unless the doc has none, or the text reading found an
+    // exposure financials table: those checks (one per exposure row, the totals, the column sums) exist only in the
+    // text reading, and DIG26's comments sit on each SAMPLE row's figures and names instead (2026-10-19 comparison:
+    // the comments reading lost all three table checks and asserted "(Test Test1246)" / "(john doe)" as fixed text).
+    const converted = convertDocToDocx(localPath);
+    const fromCopy = converted && quietly(() => readDocx(converted, template));
+    const hasExposureTable = fromText.some((r) => r.type === 'exposureTable');
+    if (fromCopy && fromCopy.mode === 'comments' && !hasExposureTable) {
+      console.log(`[SmartComm] templateRequirementService: ${template.digNumber} is a legacy .doc — using the BA's Word comments from its converted .docx copy (${converted})`);
+      return { ...fromCopy, sourceFile: converted, convertedFrom: localPath };
+    }
+    const why = hasExposureTable && fromCopy && fromCopy.mode === 'comments' ? 'has an exposure table (checked from its text, not its comments)'
+      : converted ? 'has no Word comments' : "couldn't be converted (so its Word comments can't be used)";
+    console.log(`[SmartComm] templateRequirementService: ${template.digNumber} is a legacy .doc that ${why} — using word-extractor + the heuristic classifier (${paragraphs.length} paragraphs)`);
+    return { requirements: fromText, sourceFile: localPath, mode: 'heuristic-doc', mentionsFraudLanguage };
   }
   if (!localPath.toLowerCase().endsWith('.docx')) {
     console.log(`[SmartComm] templateRequirementService: ${localPath} is not a .docx (likely an overlay PDF form) — generic parsing doesn't apply yet; skipping`);

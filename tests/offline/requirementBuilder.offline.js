@@ -64,3 +64,15 @@ test('"User can …" editor-mechanics notes are not checked as values', async ()
   assert.equal(status.enabled, false, 'but it is switched off');
   assert.match(status.disabledReason, /editor's own mechanics/);
 });
+
+test('digits glued onto a commented part of a number are not fixed wording (DIG168)', async () => {
+  const { requirements } = await requirementsFor(
+    [['=1', [0, '0'], '% of NADA value'], ['=(100,000-', [1, '12,500'], ')/1', [2, '00,000']], ['Modifier ', [3, '0.75'], ' (41% - 55%)']],
+    { 0: 'NADA Percent', 1: 'Mileage Amount', 2: 'Mileage Base', 3: 'Damage Modifier' },
+  );
+  const fixed = statics(requirements);
+  for (const piece of ['=1', ')/1']) assert.ok(!fixed.includes(piece), `"${piece}" is not checked: ${JSON.stringify(fixed)}`);
+  assert.ok(fixed.includes('% of NADA value'), 'wording glued to a value is still checked');
+  assert.ok(fixed.includes('=(100,000-'), 'longer pieces are still checked');
+  assert.ok(fixed.includes('Modifier') && fixed.includes('(41% - 55%)'), 'pieces separated by a space are unchanged');
+});

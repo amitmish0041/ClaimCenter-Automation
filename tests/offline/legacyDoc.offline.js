@@ -136,3 +136,19 @@ test('a legacy .doc with no comments keeps the plain-text reading it had before'
   assert.equal(r.mode, 'heuristic-doc');
   assert.ok(r.sourceFile.endsWith('.doc'));
 });
+
+test('a commented .doc whose text has an exposure table keeps the text reading (DIG26)', { skip: !SOFFICE && 'LibreOffice not installed' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'legacydoc-exp-'));
+  const templatesDir = path.join(dir, 'Templates', 'ClaimCenter');
+  fs.mkdirSync(templatesDir, { recursive: true });
+  const src = path.join(dir, 'DIG26_Claim_Status_Report.docx');
+  writeDocx(src, {
+    paragraphs: [['Claim Status Report as of ', [0, '05/12/2026']], ['Type  Reserves  Paid  Expenses  Recoveries  Net Incurred'],
+      [[1, 'Bodily Injury Liability'], '  $100.00  $0.00  $0.00  $0.00  $100.00'], ['Total  $100.00  $0.00  $0.00  $0.00  $100.00']],
+    comments: { 0: 'Date of Letter', 1: 'Exposure Type' },
+  });
+  childProcess.execFileSync(SOFFICE, ['--headless', `-env:UserInstallation=file://${dir}/profile`, '--convert-to', 'doc:MS Word 97', '--outdir', templatesDir, src], { stdio: 'pipe', timeout: 120000 });
+  const r = await quietly(() => trs.getRequirements({ digNumber: 'DIG26', templateMappingDoc: 'DIG26_Claim_Status_Report.doc' }, dir));
+  assert.equal(r.mode, 'heuristic-doc');
+  assert.ok(r.requirements.some((q) => q.type === 'exposureTable') && r.requirements.some((q) => q.type === 'exposureColumnTotals'));
+});
