@@ -1455,7 +1455,13 @@
     return r.scenarioCount + ' scenario' + (r.scenarioCount === 1 ? '' : 's') + ' · ' + (c.PASS || 0) + ' passed · ' + (c.FAIL || 0) + ' failed · ' + (c.BLOCKED || 0) + ' blocked' + (c.ERROR ? ' · ' + c.ERROR + ' error' : '');
   }
   function resultsError(el, e) { el.innerHTML = '<span class="stats-empty">' + escapeHtml(e) + '</span>'; }
-  function fetchJson(url) { return fetch(url).then(function (r) { return r.json().then(function (b) { if (!r.ok) throw new Error(b.error || ('HTTP ' + r.status)); return b; }); }); }
+  // A Runner server started before server.js gained these routes answers with an HTML page, not JSON — say so plainly.
+  function fetchJson(url) {
+    return fetch(url).then(function (r) {
+      if (!/json/i.test(r.headers.get('content-type') || '')) throw new Error('The Runner server is running older code — stop it (Ctrl+C, and quit the installed Runner app) and run "npm run runner" again.');
+      return r.json().then(function (b) { if (!r.ok) throw new Error(b.error || ('HTTP ' + r.status)); return b; });
+    });
+  }
 
   function loadHomeRuns() {
     var box = document.getElementById('homeRuns');
