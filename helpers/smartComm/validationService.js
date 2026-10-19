@@ -908,14 +908,32 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
       const fixedFailed = fixed.filter((v) => v.result === 'FAIL');
       const valuesFound = validations.filter((v) => /^R\d/.test(v.id || '') && /^Value for /.test(v.description || '') && v.result === 'PASS').length;
       if (fixed.length >= 8 && fixedFailed.length / fixed.length >= 0.6 && valuesFound >= 2) {
+        // Read the page by OCR (Windows' own renderer + OCR engine — pdfOcrService): wording it finds is confirmed;
+        // wording it can't find stays BLOCKED (an OCR miss isn't proof the wording is missing). No OCR → all BLOCKED.
+        const ocrText = await require('./pdfOcrService').ocrPdfText(pdfPath).catch(() => null);
+        const { ocrContains } = require('./pdfOcrService');
+        let ocrConfirmed = 0;
         for (const v of fixedFailed) {
+          if (ocrText && ocrContains(ocrText, v.expected)) {
+            ocrConfirmed++;
+            v.result = 'PASS';
+            v.actual = `${v.expected} (read by OCR)`;
+            v.reason = 'Confirmed by OCR: the form draws its printed wording as graphics, not text, so it was read from a rendered image of the page.';
+            continue;
+          }
           v.result = 'BLOCKED';
-          v.reason = 'This fixed wording isn\'t in the PDF\'s text layer — the form\'s printed wording is drawn as images, so it can\'t be checked as text. See DATA3: check the form visually.';
+          v.reason = ocrText
+            ? 'This fixed wording isn\'t in the PDF\'s text layer (the form\'s wording is drawn as graphics) and OCR couldn\'t confirm it either — check this line visually. See DATA3.'
+            : 'This fixed wording isn\'t in the PDF\'s text layer — the form\'s printed wording is drawn as graphics, so it can\'t be checked as text. See DATA3: check the form visually.';
         }
+        const ocrLeft = fixedFailed.length - ocrConfirmed;
         validations.push({
-          id: 'DATA3', description: 'The form\'s fixed wording can be read from the PDF as text', expected: 'Fixed wording present as text',
-          actual: `${fixedFailed.length} of ${fixed.length} fixed-wording lines not in the text layer; ${valuesFound} filled-in values found`, result: 'BLOCKED',
-          reason: `Most of the form's printed wording is images in the PDF (only the filled-in values are text), so ${fixedFailed.length} wording checks are reported BLOCKED instead of FAIL. Open the PDF and confirm the form wording is printed.`,
+          id: 'DATA3', description: 'The form\'s fixed wording can be read from the PDF', expected: 'Fixed wording present',
+          actual: `${fixedFailed.length} of ${fixed.length} fixed-wording lines are drawn as graphics, not text; ${ocrText ? `${ocrConfirmed} confirmed by OCR, ${ocrLeft} not` : 'OCR not available'}`,
+          result: ocrText && !ocrLeft ? 'PASS' : 'BLOCKED',
+          reason: ocrText
+            ? `Most of the form's printed wording is drawn as graphics in the PDF (only the filled-in values are text), so it was read by OCR: ${ocrConfirmed} of ${fixedFailed.length} lines confirmed${ocrLeft ? `; ${ocrLeft} couldn't be confirmed and are BLOCKED — check those visually` : ''}.`
+            : `Most of the form's printed wording is drawn as graphics in the PDF (only the filled-in values are text) and OCR wasn't available, so ${fixedFailed.length} wording checks are BLOCKED instead of FAIL. Open the PDF and confirm the form wording is printed.`,
         });
       }
     }
