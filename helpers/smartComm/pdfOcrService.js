@@ -43,6 +43,10 @@ function editDistance(a, b) {
 // within one OCR slip.
 function ocrContains(ocrText, expected) {
   const want = String(expected || '').replace(/_{2,}/g, ' ');
+  // A list number on its own ("2.", "4.", "(a)" — DIG47's question numbers): that token at the start of an OCR line or
+  // after a space.
+  const num = want.trim().match(/^\(?([0-9]{1,2}|[a-z])[.)]$/i);
+  if (num) return new RegExp(`(^|\\s)\\(?${num[1]}[.)]`, 'im').test(String(ocrText || ''));
   const whole = fold(want);
   if (whole.length < 2) return false;
   const hay = fold(ocrText);
