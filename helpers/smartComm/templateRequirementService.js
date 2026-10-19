@@ -24,7 +24,9 @@
  */
 'use strict';
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const childProcess = require('child_process');
 let AdmZip;
 try { AdmZip = require('adm-zip'); } catch (_) { /* reported lazily in extractDocxParagraphs */ }
 let WordExtractor;
@@ -857,18 +859,29 @@ const LEGACY_DOC_TEXT = new Map();
 function getLegacyDocText(docPath) { return LEGACY_DOC_TEXT.get(docPath) || ''; }
 
 async function getRequirements(template, dataDir) {
-  const localPath = resolveLocalTemplatePath(template, dataDir);
+  let localPath = resolveLocalTemplatePath(template, dataDir);
+  // A .docx saved next to the old .doc (same name) is the BA's newer copy — read that one.
+  if (localPath && /\.doc$/i.test(localPath) && fs.existsSync(`${localPath}x`)) localPath = `${localPath}x`;
   if (!localPath) {
     console.log(`[SmartComm] templateRequirementService: no local Word doc found for ${template.digNumber} (mapped: "${template.templateMappingDoc}")`);
     return { requirements: [], sourceFile: null, mode: null };
   }
-  // A legacy .doc (pre-2007 binary Word format — CONFIRMED live for DIG15/DIG26/DIG125/DIG167/DIG168/DIG175,
-  // see resolveLocalTemplatePath's own note) is a REAL, readable template, not an overlay PDF form — it was
-  // previously lumped in with genuinely-unparseable files and silently produced zero requirements. AdmZip
-  // can't read it (.doc isn't a ZIP), so it goes through word-extractor instead, straight into the SAME
-  // heuristic classifier a comments-less .docx already uses — .doc has no BA-comment equivalent, so the
-  // comment-driven path is never available for it.
+  // A legacy .doc (pre-2007 binary Word format — CONFIRMED live for DIG15/DIG26/DIG39/DIG125/DIG167/DIG168/DIG175,
+  // see resolveLocalTemplatePath's own note) keeps its BA comments too — Word shows them — but nothing here can read
+  // comment anchors out of the binary format. So it's converted to a .docx copy first (Word on the PC, else
+  // LibreOffice — see convertDocToDocx) and read exactly like any other .docx; the BA's file is never touched.
+  // DIG39 (2026-10-19): read as plain text, its sample claim number and "I, Rachel Derliunas, …" were checked as
+  // fixed wording on every claim although the BA had marked both as dynamic.
   if (localPath.toLowerCase().endsWith('.doc')) {
+    // Only when the BA commented it: a .doc without comments keeps the text reading below, which its checks were
+    // tuned on (DIG26's tab-separated labels and exposure table come through word-extractor, not the .docx reader).
+    const converted = convertDocToDocx(localPath);
+    const fromCopy = converted && quietly(() => readDocx(converted, template));
+    if (fromCopy && fromCopy.mode === 'comments') {
+      console.log(`[SmartComm] templateRequirementService: ${template.digNumber} is a legacy .doc — using the BA's Word comments from its converted .docx copy (${converted})`);
+      return { ...fromCopy, sourceFile: converted, convertedFrom: localPath };
+    }
+    // No comments, or no converter: the text alone, through the same heuristic classifier a comments-less .docx uses.
     if (!WordExtractor) throw new Error('word-extractor is not installed — run npm install in ClaimCenter-Automation');
     let extracted;
     try {
@@ -883,13 +896,23 @@ async function getRequirements(template, dataDir) {
     // a .doc can't be re-read synchronously there, and "Line of Business:\tAuto" became a value check whose label
     // text never reached the requirements (DIG26, 2026-10-17 — a false "label not in the mapping doc").
     LEGACY_DOC_TEXT.set(localPath, [extracted.getHeaders(), extracted.getBody(), extracted.getFooters(), extracted.getAnnotations && extracted.getAnnotations()].filter(Boolean).join('\n'));
-    console.log(`[SmartComm] templateRequirementService: ${template.digNumber} is a legacy .doc — using word-extractor + the heuristic classifier (${paragraphs.length} paragraphs)`);
+    console.log(`[SmartComm] templateRequirementService: ${template.digNumber} is a legacy .doc ${converted ? 'with no Word comments' : "that couldn't be converted (so its Word comments can't be used)"} — using word-extractor + the heuristic classifier (${paragraphs.length} paragraphs)`);
     return { requirements: buildRequirementsHeuristic(paragraphs), sourceFile: localPath, mode: 'heuristic-doc', mentionsFraudLanguage };
   }
   if (!localPath.toLowerCase().endsWith('.docx')) {
     console.log(`[SmartComm] templateRequirementService: ${localPath} is not a .docx (likely an overlay PDF form) — generic parsing doesn't apply yet; skipping`);
     return { requirements: [], sourceFile: localPath, mode: null };
   }
+  return { ...readDocx(localPath, template), sourceFile: localPath };
+}
+
+function quietly(fn) {
+  const log = console.log;
+  console.log = () => {};
+  try { return fn(); } catch (_) { return null; } finally { console.log = log; }
+}
+
+function readDocx(localPath, template) {
   if (!AdmZip) throw new Error('adm-zip is not installed — run npm install in ClaimCenter-Automation');
 
   const zip = new AdmZip(localPath);
@@ -905,12 +928,92 @@ async function getRequirements(template, dataDir) {
     const anchors = parseCommentAnchors(documentXml);
     if (anchors.length) {
       console.log(`[SmartComm] templateRequirementService: ${template.digNumber} using comment-driven requirements (${anchors.length} BA-annotated fields)`);
-      return { requirements: buildRequirementsFromComments(paragraphs, anchors, comments), sourceFile: localPath, mode: 'comments', mentionsFraudLanguage };
+      return { requirements: buildRequirementsFromComments(paragraphs, anchors, comments), mode: 'comments', mentionsFraudLanguage };
     }
   }
 
   console.log(`[SmartComm] templateRequirementService: ${template.digNumber} has no usable Word comments — using heuristic classifier`);
-  return { requirements: buildRequirementsHeuristic(paragraphs), sourceFile: localPath, mode: 'heuristic', mentionsFraudLanguage };
+  return { requirements: buildRequirementsHeuristic(paragraphs), mode: 'heuristic', mentionsFraudLanguage };
+}
+
+// ── .doc → .docx ────────────────────────────────────────────────────────────
+// A converted copy per .doc, cached by the original's size + modified time, so each file is converted once (a few
+// seconds) until the BA changes it. Kept in the system temp folder — never next to the BA's file on the share.
+// Word (on the team's PCs) is tried first, through its own automation interface: a hidden, separate Word process
+// that opens the file read-only and saves a copy — it doesn't touch any Word window already open. LibreOffice is
+// the fallback (and what the offline tests use). SMARTCOMM_DOC_CONVERT=0 turns conversion off.
+const DOC_CACHE_DIR = path.join(os.tmpdir(), 'smartcomm-doc-cache');
+const WORD_SAVE_AS_DOCX = `
+$ErrorActionPreference = 'Stop'
+$word = New-Object -ComObject Word.Application
+try {
+  $word.Visible = $false
+  $word.DisplayAlerts = 0
+  $doc = $word.Documents.Open($env:SC_DOC_SRC, $false, $true, $false)
+  try { $doc.SaveAs2($env:SC_DOC_DST, 16) } finally { $doc.Close($false) }
+} finally {
+  if ($word.Documents.Count -eq 0) { $word.Quit() }
+  [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($word)
+}`;
+
+function convertWithWord(src, dst) {
+  if (process.platform !== 'win32') return false;
+  childProcess.execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', WORD_SAVE_AS_DOCX], {
+    env: { ...process.env, SC_DOC_SRC: src, SC_DOC_DST: dst }, timeout: 120000, windowsHide: true, stdio: 'pipe',
+  });
+  return fs.existsSync(dst);
+}
+
+function findLibreOffice() {
+  const candidates = process.platform === 'win32'
+    ? ['C:\\Program Files\\LibreOffice\\program\\soffice.exe', 'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe']
+    : ['/usr/bin/soffice', '/usr/local/bin/soffice', '/Applications/LibreOffice.app/Contents/MacOS/soffice'];
+  return candidates.find((c) => fs.existsSync(c)) || null;
+}
+
+function convertWithLibreOffice(src, dst) {
+  const soffice = findLibreOffice();
+  if (!soffice) return false;
+  const outDir = fs.mkdtempSync(path.join(DOC_CACHE_DIR, 'lo-'));
+  try {
+    // Its own profile folder, so it runs even while the user has LibreOffice open.
+    childProcess.execFileSync(soffice, ['--headless', `-env:UserInstallation=file:///${outDir.replace(/\\/g, '/').replace(/^\//, '')}/profile`,
+      '--convert-to', 'docx', '--outdir', outDir, src], { timeout: 120000, windowsHide: true, stdio: 'pipe' });
+    const out = path.join(outDir, `${path.basename(src, path.extname(src))}.docx`);
+    if (!fs.existsSync(out)) return false;
+    fs.copyFileSync(out, dst);
+    return true;
+  } finally {
+    fs.rmSync(outDir, { recursive: true, force: true });
+  }
+}
+
+const DEFAULT_DOC_CONVERTERS = [['Word', convertWithWord], ['LibreOffice', convertWithLibreOffice]];
+let docConverters = DEFAULT_DOC_CONVERTERS;
+
+function convertDocToDocx(docPath) {
+  if (/^(0|false|no)$/i.test(process.env.SMARTCOMM_DOC_CONVERT || '')) return null;
+  let stat;
+  try { stat = fs.statSync(docPath); } catch (_) { return null; }
+  // <cache>/<name>-<size>-<modified>/<name>.docx — the copy keeps the BA's file name (it's attached to the report email).
+  const stem = path.basename(docPath, path.extname(docPath)).replace(/[^\w.-]+/g, '_');
+  const folder = path.join(DOC_CACHE_DIR, `${stem}-${stat.size}-${Math.round(stat.mtimeMs)}`);
+  const cached = path.join(folder, `${stem}.docx`);
+  if (fs.existsSync(cached)) return cached;
+  fs.mkdirSync(folder, { recursive: true });
+  const tmp = `${cached}.${process.pid}.tmp.docx`;
+  for (const [name, convert] of docConverters) {
+    try {
+      if (convert(path.resolve(docPath), tmp)) {
+        fs.renameSync(tmp, cached);
+        return cached;
+      }
+    } catch (e) {
+      console.log(`[SmartComm] templateRequirementService: converting ${path.basename(docPath)} with ${name} failed (${String(e.message || e).split('\n')[0]})`);
+    }
+    fs.rmSync(tmp, { force: true });
+  }
+  return null;
 }
 
 module.exports = {
@@ -919,4 +1022,6 @@ module.exports = {
   extractDocxParagraphs,
   buildRequirements: buildRequirementsHeuristic, // back-compat name
   resolveLocalTemplatePath,
+  convertDocToDocx,
+  _test: { setDocConverters: (list) => { docConverters = list || DEFAULT_DOC_CONVERTERS; }, DOC_CACHE_DIR },
 };
