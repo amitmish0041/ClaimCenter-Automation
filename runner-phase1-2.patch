@@ -1,5 +1,5 @@
 diff --git a/Playwright Projects/Commercial Line Performance test/runner/index.html b/Playwright Projects/Commercial Line Performance test/runner/index.html
-index 2ce2323..ab30f43 100644
+index 2ce2323..182e8c3 100644
 --- a/Playwright Projects/Commercial Line Performance test/runner/index.html	
 +++ b/Playwright Projects/Commercial Line Performance test/runner/index.html	
 @@ -2,7 +2,10 @@
@@ -218,7 +218,7 @@ index 2ce2323..ab30f43 100644
      border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px;
      font-size: 11.5px; font-weight: 400; line-height: 1.5; white-space: normal; text-align: left;
      box-shadow: 0 6px 20px rgba(0,0,0,0.4);
-@@ -288,45 +353,229 @@
+@@ -288,47 +353,233 @@
    .stats-table .num { text-align: right; font-family: var(--mono); color: var(--accent-2); white-space: nowrap; }
    .stats-table .when { color: var(--muted); white-space: nowrap; }
    .stats-empty { color: var(--muted); font-size: 12.5px; }
@@ -245,8 +245,10 @@ index 2ce2323..ab30f43 100644
 +  .preset .chip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
 +  .preset-remove { min-height: 100%; align-self: stretch; padding: 0 10px; border: 1px solid var(--border); border-left: none; border-radius: 0 999px 999px 0; background: var(--panel-2); color: var(--muted); font: inherit; cursor: pointer; }
 +  .preset-remove:hover { color: var(--red); }
-+  .preset-save { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
-+  .preset-save input { max-width: 320px !important; }
++  .preset-save { display: inline-flex; gap: 8px; flex-wrap: nowrap; align-items: center; margin-left: auto; min-width: 0; }
++  .preset-save input { width: 240px !important; max-width: 240px !important; margin: 0 !important; }
++  .preset-save button { margin: 0 !important; flex: none; }
++  .preset-save .hint { margin: 0; }
 +
 +  /* Form alignment: one standard field width (small purpose-sized fields keep theirs), readable labels, hints in
 +     the same place under every field, and each tool's Run/Stop row pinned to the bottom while its form scrolls. */
@@ -258,6 +260,7 @@ index 2ce2323..ab30f43 100644
 +  /* A label that opens a wrapper block (Environment, Claim #, …) keeps its gap from the hint above it; only the very
 +     first label under a card heading sits tight. */
 +  .tab-panel div > .field-label:first-child { margin-top: 18px; }
++  .tab-panel .card > .field-label:first-child { margin-top: 0; }
 +  .tab-panel .card > h2 + .field-label, .tab-panel .card > h2 + div > .field-label:first-child { margin-top: 4px; }
 +  .hint { font-size: 12px; margin-top: 6px; line-height: 1.45; }
 +  .tab-panel .card > .actions { position: sticky; bottom: 0; z-index: 4; margin: 16px -20px 0; padding: 12px 20px; background: var(--panel); border-top: 1px solid var(--border); }
@@ -463,24 +466,30 @@ index 2ce2323..ab30f43 100644
 +  <div class="tab-panel" id="tab-policy">
 +    <div class="page-head"><h1>Policy Tests</h1><p>Run the BOP, Package and Commercial Auto policy workflows for the states and environment you pick.</p></div>
      <div class="card">
-       <h2>Configure run</h2>
+-      <h2>Configure run</h2>
  
-@@ -352,6 +601,7 @@
+       <div class="field-label">Line of Business (select one or more)</div>
+       <div class="chips" id="policyLobChips"></div>
+@@ -352,8 +603,8 @@
  
    <!-- ── Claims tab ─────────────────────────────────────────────────────── -->
    <div class="tab-panel" id="tab-claims">
 +    <div class="page-head"><h1>Claims (ClaimCenter)</h1><p>Run a ClaimCenter test on a policy number, by line of business, platform and tier.</p></div>
      <div class="card">
-       <h2>Configure run</h2>
+-      <h2>Configure run</h2>
  
-@@ -380,6 +630,7 @@
+       <div class="field-label">Line of Business (select one)</div>
+       <div class="chips" id="claimsLobChips"></div>
+@@ -380,8 +631,8 @@
  
    <!-- ── Migration Reconciliation tab ───────────────────────────────────── -->
    <div class="tab-panel" id="tab-reconciliation">
 +    <div class="page-head"><h1>Migration Reconciliation</h1><p>Compare a claim between on-prem and cloud ClaimCenter — one claim number, or a file of claims in bulk.</p></div>
      <div class="card">
-       <h2>Configure run</h2>
+-      <h2>Configure run</h2>
  
+       <div class="field-label">Tier (select one)</div>
+       <div class="chips" id="reconTierChips"></div>
 @@ -412,6 +663,7 @@
  
    <!-- ── Data Update & Dropdown Validation tab ───────────────────────────── -->
@@ -489,7 +498,15 @@ index 2ce2323..ab30f43 100644
      <div class="card">
        <div class="warn-banner">
          <b>This test WRITES to real claims.</b> For every section it finds, it opens Edit, compares dropdown/enum
-@@ -450,6 +702,7 @@
+@@ -419,7 +671,6 @@
+         (pre-migration) claim data still saves cleanly, so a save failure here is a real finding, not a mistake.
+         Only point it at claims/tiers you're prepared to have re-saved.
+       </div>
+-      <h2>Configure run</h2>
+ 
+       <div class="field-label">Tier (select one)</div>
+       <div class="chips" id="uvTierChips"></div>
+@@ -450,12 +701,12 @@
  
    <!-- ── PDF Compare tab ─────────────────────────────────────────────────── -->
    <div class="tab-panel" id="tab-pdfCompare">
@@ -497,28 +514,46 @@ index 2ce2323..ab30f43 100644
      <div class="card">
        <div class="warn-banner" id="pdfCompareScriptWarn" style="display:none">
          <b>compare_insurance_pdfs.py not found</b> on the server at
-@@ -492,9 +745,20 @@
+         <code>tools/pdf-compare/compare_insurance_pdfs.py</code> — copy it there before running this tab.
+       </div>
+-      <h2>Configure run</h2>
+ 
+       <div class="field-label">Input folder (on the machine running this server)</div>
+       <input type="text" id="pdfInputDir" placeholder="e.g. C:\Users\amitmish\Desktop\New folder\CPPProposalParallel" autocomplete="off" style="max-width:600px" />
+@@ -492,13 +743,18 @@
  
    <!-- ── SmartCOMM Template Validator tab ──────────────────────────────────── -->
    <div class="tab-panel" id="tab-smartComm">
 +    <div class="page-head"><h1>SmartCOMM Validator</h1><p>Generate a template on a test claim and check the PDF against its mapping doc, the payload and the Data Dictionary.</p></div>
      <div class="card">
-       <h2>Configure run</h2>
+-      <h2>Configure run</h2>
  
-+      <div id="smartCommPresetsBlock">
-+        <div class="field-label">My usual runs</div>
-+        <div class="chips" id="smartCommPresetChips"></div>
-+        <div class="preset-save">
-+          <input type="text" id="smartCommPresetName" placeholder="Name this setup, e.g. PA Auto weekly" autocomplete="off" aria-label="Preset name" />
-+          <button type="button" class="btn-secondary" id="smartCommPresetSave">Save as preset</button>
-+        </div>
-+        <div class="hint" id="smartCommPresetHint">Saves the selected templates, environment, claim # and scenario count in this browser — click a preset to fill the form again.</div>
-+      </div>
-+
        <div class="field-label">Validation type</div>
        <div class="chips" id="smartCommModeChips"></div>
        <div class="hint" id="smartCommModeHint"></div>
-@@ -579,6 +843,7 @@
+ 
++      <div id="smartCommPresetsBlock" style="display:none">
++        <div class="field-label">My usual runs</div>
++        <div class="chips" id="smartCommPresetChips"></div>
++      </div>
++
+       <div id="smartCommTemplateBlock">
+       <div class="field-label" id="smartCommTemplateLabel" style="margin-top:14px">Template</div>
+       <input type="text" id="smartCommTemplateFilter" placeholder="Type to filter by ID or name (e.g. DIG52)" autocomplete="off" style="margin-bottom:6px;" />
+@@ -571,6 +827,12 @@
+       <div class="actions">
+         <button class="run" id="smartCommRunBtn" disabled>Validate Template</button>
+         <button class="stop" id="smartCommStopBtn" disabled>Stop</button>
++        <span class="preset-save" id="smartCommPresetWrap">
++          <button type="button" class="btn-secondary" id="smartCommPresetOpen" title="Save the selected templates, environment, claim # and scenario count">Save as preset</button>
++          <input type="text" id="smartCommPresetName" placeholder="Preset name, e.g. PA Auto weekly" autocomplete="off" aria-label="Preset name" hidden />
++          <button type="button" class="btn-secondary" id="smartCommPresetSave" hidden>Save</button>
++          <span class="hint" id="smartCommPresetHint" role="status"></span>
++        </span>
+       </div>
+       <div class="error-msg" id="smartCommError"></div>
+       <div class="report-links" id="smartCommReportLinks"></div>
+@@ -579,6 +841,7 @@
  
    <!-- ── Jira Sprint Report tab ─────────────────────────────────────────────── -->
    <div class="tab-panel" id="tab-jiraReport">
@@ -526,7 +561,7 @@ index 2ce2323..ab30f43 100644
      <div class="card">
        <div class="warn-banner" id="jiraReportConfigWarn" style="display:none">
          <b>Jira isn't set up yet</b> — enter your Jira email and API token on the <b>Settings</b> tab
-@@ -666,6 +931,7 @@
+@@ -666,6 +929,7 @@
  
    <!-- ── Settings tab (packaged build: per-install name/email/SmartCOMM data dir) ── -->
    <div class="tab-panel" id="tab-settings">
@@ -534,7 +569,7 @@ index 2ce2323..ab30f43 100644
      <div class="card">
        <h2>Your info</h2>
        <p class="hint">Identifies you to this tool (same as typing your email into a Report Email field) and is used to look up which tools you're approved for.</p>
-@@ -738,6 +1004,7 @@
+@@ -738,6 +1002,7 @@
  
    <!-- ── Usage Stats tab (visible to everyone) ──────────────────────────── -->
    <div class="tab-panel" id="tab-stats">
@@ -542,7 +577,7 @@ index 2ce2323..ab30f43 100644
      <div class="card">
        <div class="out-toolbar"><h2 style="margin:0">Usage stats</h2><button id="statsRefreshBtn">Refresh</button></div>
        <div class="stats-row" style="margin-top:14px">
-@@ -763,6 +1030,7 @@
+@@ -763,6 +1028,7 @@
    <!-- ── Shared status + output (one queue/process on the server) ─────────── -->
    <!-- ── Admin tab (owner-only; /api/admin is gated server-side too) ─────────── -->
    <div class="tab-panel" id="tab-admin">
@@ -550,7 +585,7 @@ index 2ce2323..ab30f43 100644
      <div class="warn-banner">⚠ Admin settings affect <b>everyone</b> using the tool. They save to the shared team drive and reach all installed copies within a couple of minutes.</div>
      <div class="card">
        <h2>Tool access</h2>
-@@ -771,7 +1039,7 @@
+@@ -771,7 +1037,7 @@
        <div class="field-label">Add a person (email), then tick their tools above</div>
        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
          <input type="email" id="adminNewUser" placeholder="person@donegalgroup.com" style="max-width:300px" />
@@ -559,7 +594,7 @@ index 2ce2323..ab30f43 100644
        </div>
      </div>
      <div class="card">
-@@ -798,9 +1066,9 @@
+@@ -798,9 +1064,9 @@
        <div class="field-label">Login email</div><input type="email" id="adminS3Login" style="max-width:360px" />
        <div class="field-label">Session owner (named in the "session expired" message)</div><input type="text" id="adminS3Owner" style="max-width:360px" />
      </div>
@@ -571,7 +606,7 @@ index 2ce2323..ab30f43 100644
      </div>
    </div>
  
-@@ -842,6 +1110,16 @@
+@@ -842,6 +1108,16 @@
  </main>
  </div>
  </div>
@@ -588,7 +623,7 @@ index 2ce2323..ab30f43 100644
  
  <script>
  (function () {
-@@ -852,7 +1130,7 @@
+@@ -852,7 +1128,7 @@
    // before the normal switch, so a gated tab's real panel (and the job-submitting controls in it) never
    // renders; the shared #tab-blocked panel is shown instead (see applyTabLocks()/showBlockedPanel() below).
    document.querySelectorAll('.tab-btn[data-tab]').forEach(function (btn) {
@@ -597,7 +632,7 @@ index 2ce2323..ab30f43 100644
      btn.addEventListener('click', function () {
        if (btn.classList.contains('locked') || btn.classList.contains('comingSoon')) {
          showBlockedPanel(btn);
-@@ -862,7 +1140,10 @@
+@@ -862,7 +1138,10 @@
        document.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.remove('active'); });
        btn.classList.add('active');
        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
@@ -609,7 +644,7 @@ index 2ce2323..ab30f43 100644
        if (btn.dataset.tab === 'stats') loadStats();
        if (btn.dataset.tab === 'admin') loadAdmin();
        try { localStorage.setItem('runnerActiveTab', btn.dataset.tab); } catch (_) { /* ignore */ }
-@@ -874,6 +1155,13 @@
+@@ -874,6 +1153,13 @@
      var el = document.getElementById('runPanels');
      if (el) el.style.display = show ? '' : 'none';
    }
@@ -623,7 +658,7 @@ index 2ce2323..ab30f43 100644
    try {
      var savedTab = localStorage.getItem('runnerActiveTab');
      var savedBtn = savedTab && document.querySelector('.tab-btn[data-tab="' + savedTab + '"]');
-@@ -924,10 +1212,28 @@
+@@ -924,10 +1210,28 @@
      var val = (settingsInput && settingsInput.value.trim()) || (scInput && scInput.value.trim()) || (jrInput && jrInput.value.trim()) || '';
      var changed = val.toLowerCase() !== myEmail;
      myEmail = val.toLowerCase();
@@ -652,7 +687,7 @@ index 2ce2323..ab30f43 100644
    function refreshEntitlements() {
      var url = '/api/entitlements' + (isValidEmail(myEmail) ? ('?email=' + encodeURIComponent(myEmail)) : '');
      fetch(url).then(function (r) { return r.json(); }).then(function (d) {
-@@ -936,7 +1242,7 @@
+@@ -936,7 +1240,7 @@
        myComingSoon = Array.isArray(d.comingSoon) ? d.comingSoon : [];
        ownerEmail = d.ownerEmail || ownerEmail;
        var adminBtn = document.getElementById('adminNavBtn');
@@ -661,7 +696,7 @@ index 2ce2323..ab30f43 100644
        applyTabLocks();
      }).catch(function () { /* stay with whatever we last knew - network hiccup, not fatal */ });
    }
-@@ -950,12 +1256,12 @@
+@@ -950,12 +1254,12 @@
    function applyTabLocks() {
      document.querySelectorAll('.tab-btn[data-tab]').forEach(function (btn) {
        var tab = btn.dataset.tab;
@@ -676,7 +711,7 @@ index 2ce2323..ab30f43 100644
        // Hidden outright (set inline so it beats the .active rule) whenever the user can't use the tool:
        // locked = not granted yet (an admin grant un-hides it on the next refresh); comingSoon = not shipped in
        // this build. '' restores the default display when neither applies.
-@@ -978,6 +1284,7 @@
+@@ -978,6 +1282,7 @@
      // If the tab the user is on is now hidden (grant revoked mid-session, or a saved "coming soon" tab that's
      // no longer shown), move them to an available tool rather than leaving a dead hidden-tab panel showing.
      // SmartCOMM is always allowed, so it's the natural landing spot; the blocked panel is only a last resort.
@@ -684,7 +719,7 @@ index 2ce2323..ab30f43 100644
      var activeBtn = document.querySelector('.tab-btn.active');
      if (activeBtn && (activeBtn.classList.contains('locked') || activeBtn.classList.contains('comingSoon'))) {
        var scBtn2 = document.querySelector('.tab-btn[data-tab="smartComm"]');
-@@ -994,6 +1301,7 @@
+@@ -994,6 +1299,7 @@
      document.getElementById('tab-blocked').classList.add('active');
      setRunPanelsVisible(false);
      document.getElementById('blockedTitle').textContent = btn.dataset.baseLabel;
@@ -692,7 +727,7 @@ index 2ce2323..ab30f43 100644
      var requestLink = document.getElementById('blockedRequestLink');
      if (comingSoon) {
        document.getElementById('blockedMessage').textContent = 'This tool isn\'t available in this build yet - it\'s planned for a future release.';
-@@ -1010,7 +1318,10 @@
+@@ -1010,7 +1316,10 @@
    }
  
    function chip(label, selected, disabled, title) {
@@ -704,7 +739,7 @@ index 2ce2323..ab30f43 100644
      el.className = 'chip' + (selected ? ' selected' : '') + (disabled ? ' disabled' : '');
      el.textContent = label;
      if (title) el.title = title;
-@@ -1091,6 +1402,298 @@
+@@ -1091,6 +1400,298 @@
    }
    document.getElementById('statsRefreshBtn').addEventListener('click', loadStats);
  
@@ -1003,7 +1038,7 @@ index 2ce2323..ab30f43 100644
    // ── Admin tab (owner-only; reads/writes the shared admin config on V: via /api/admin) ──
    var adminState = { suites: [], grants: {}, defaultTools: [], envUrls: {} };
    function loadAdmin() {
-@@ -1538,6 +2141,7 @@
+@@ -1538,6 +2139,7 @@
    }
  
    function renderSmartCommMode() {
@@ -1011,7 +1046,7 @@ index 2ce2323..ab30f43 100644
      var box = document.getElementById('smartCommModeChips');
      box.innerHTML = '';
      SMARTCOMM_MODES.forEach(function (m) {
-@@ -1580,6 +2184,64 @@
+@@ -1580,6 +2182,80 @@
      updateSmartCommPreview();
    }
  
@@ -1023,10 +1058,12 @@ index 2ce2323..ab30f43 100644
 +  function renderSmartCommPresets() {
 +    var block = document.getElementById('smartCommPresetsBlock');
 +    if (!block) return;
-+    block.style.display = smartComm.mode === 'template' ? '' : 'none';
-+    var box = document.getElementById('smartCommPresetChips');
 +    var list = loadSmartCommPresets();
-+    box.innerHTML = list.length ? '' : '<span class="stats-empty">No presets yet.</span>';
++    var templateMode = smartComm.mode === 'template';
++    block.style.display = templateMode && list.length ? '' : 'none';
++    document.getElementById('smartCommPresetWrap').style.display = templateMode ? '' : 'none';
++    var box = document.getElementById('smartCommPresetChips');
++    box.innerHTML = '';
 +    list.forEach(function (p, i) {
 +      var wrap = document.createElement('span');
 +      wrap.className = 'preset';
@@ -1046,7 +1083,14 @@ index 2ce2323..ab30f43 100644
 +      box.appendChild(wrap);
 +    });
 +    var ready = smartComm.templateIds.size > 0 && !!smartComm.tier;
++    document.getElementById('smartCommPresetOpen').disabled = !ready;
 +    document.getElementById('smartCommPresetSave').disabled = !ready;
++  }
++  function setPresetNaming(on) {
++    document.getElementById('smartCommPresetOpen').hidden = on;
++    document.getElementById('smartCommPresetName').hidden = !on;
++    document.getElementById('smartCommPresetSave').hidden = !on;
++    if (on) { document.getElementById('smartCommPresetHint').textContent = ''; document.getElementById('smartCommPresetName').focus(); }
 +  }
 +  function applySmartCommPreset(p) {
 +    smartComm.mode = 'template';
@@ -1061,7 +1105,7 @@ index 2ce2323..ab30f43 100644
 +    updateSmartCommPreview();
 +    document.getElementById('smartCommPresetHint').textContent = 'Filled from "' + p.name + '" — check it, then press Validate.';
 +  }
-+  document.getElementById('smartCommPresetSave').addEventListener('click', function () {
++  function saveCurrentSmartCommPreset() {
 +    var nameEl = document.getElementById('smartCommPresetName');
 +    var name = nameEl.value.trim() || Array.from(smartComm.templateIds).join(', ');
 +    var list = loadSmartCommPresets().filter(function (p) { return p.name !== name; });
@@ -1069,14 +1113,21 @@ index 2ce2323..ab30f43 100644
 +      claimNumber: document.getElementById('smartCommClaimNumber').value.trim(), maxScenarios: document.getElementById('smartCommMaxScenarios').value });
 +    saveSmartCommPresets(list);
 +    nameEl.value = '';
-+    document.getElementById('smartCommPresetHint').textContent = 'Saved "' + name + '".';
++    setPresetNaming(false);
++    document.getElementById('smartCommPresetHint').textContent = 'Saved "' + name + '" — find it under My usual runs.';
 +    renderSmartCommPresets();
++  }
++  document.getElementById('smartCommPresetOpen').addEventListener('click', function () { setPresetNaming(true); });
++  document.getElementById('smartCommPresetSave').addEventListener('click', saveCurrentSmartCommPreset);
++  document.getElementById('smartCommPresetName').addEventListener('keydown', function (e) {
++    if (e.key === 'Enter') { e.preventDefault(); saveCurrentSmartCommPreset(); }
++    if (e.key === 'Escape') { this.value = ''; setPresetNaming(false); }
 +  });
 +
    function renderSmartCommTiers() {
      var box = document.getElementById('smartCommTierChips');
      box.innerHTML = '';
-@@ -1765,6 +2427,7 @@
+@@ -1765,6 +2441,7 @@
    }
  
    function updateSmartCommPreview() {
@@ -1085,7 +1136,7 @@ index 2ce2323..ab30f43 100644
      var box = document.getElementById('smartCommPreview');
      var btn = document.getElementById('smartCommRunBtn');
 diff --git a/Playwright Projects/Commercial Line Performance test/runner/server.js b/Playwright Projects/Commercial Line Performance test/runner/server.js
-index c2edb8b..41fbde0 100644
+index c2edb8b..d75d25c 100644
 --- a/Playwright Projects/Commercial Line Performance test/runner/server.js	
 +++ b/Playwright Projects/Commercial Line Performance test/runner/server.js	
 @@ -1331,6 +1331,37 @@ app.post('/api/run', (req, res) => {
@@ -1126,3 +1177,42 @@ index c2edb8b..41fbde0 100644
  app.get('/api/stats', (req, res) => {
    const recs = readUsage();
    const byTool = {};
+@@ -1572,12 +1603,36 @@ function processQueue(suite) {
+ // sets RUNNER_HOST=0.0.0.0 to listen on the network (2026-10-14: the team's URL stopped working when the
+ // default became loopback). Never on in the packaged app.
+ const HOST = !PACKAGED && process.env.RUNNER_HOST ? process.env.RUNNER_HOST : '127.0.0.1';
+-app.listen(PORT, HOST, () => {
++// Started from source while another Runner still answers on this port (an old window, or one left running for days):
++// on Windows the new listen can still "succeed" while the browser keeps reaching the old server — so check first, and
++// say so instead of looking started. The installed app manages its own server, so this is for source runs only.
++function startListening() {
++  app.listen(PORT, HOST, onListening).on('error', (e) => {
++    if (e.code === 'EADDRINUSE') { console.error(portInUseMessage()); process.exit(1); }
++    throw e;
++  });
++}
++function portInUseMessage() {
++  return `\nPort ${PORT} is already in use — another Runner (or something else) is answering on it, so this one would never be reached.\n` +
++    `Stop it first. In PowerShell:  Get-NetTCPConnection -LocalPort ${PORT} -State Listen | Select-Object OwningProcess\n` +
++    `then:  Stop-Process -Id <that number>   — and run "npm run runner" again. (Or quit the installed ClaimCenter Runner app.)\n`;
++}
++if (PACKAGED) startListening();
++else {
++  const probe = require('http').get({ host: '127.0.0.1', port: PORT, path: '/api/config', timeout: 1500 }, (r) => {
++    r.resume();
++    console.error(portInUseMessage());
++    process.exit(1);
++  });
++  probe.on('timeout', () => probe.destroy());
++  probe.on('error', () => startListening()); // nothing answering: the port is free
++}
++function onListening() {
+   console.log(`Test runner UI: http://localhost:${PORT}` + (HOST === '127.0.0.1' ? ' (this PC only)' : ` (network: http://${require('os').hostname()}:${PORT})`));
+   console.log(`  Policy suite dir: ${POLICY_DIR}`);
+   console.log(`  Claims suite dir: ${CLAIMS_DIR}`);
+   console.log(`  Reconciliation project dir: ${RECON_DIR}`);
+   if (PACKAGED) console.log(`  Packaged build - bundled Node: ${BUNDLED_NODE_EXEC}`);
+-});
++}
+ 
+ module.exports = { app };

@@ -376,8 +376,10 @@
   .preset .chip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
   .preset-remove { min-height: 100%; align-self: stretch; padding: 0 10px; border: 1px solid var(--border); border-left: none; border-radius: 0 999px 999px 0; background: var(--panel-2); color: var(--muted); font: inherit; cursor: pointer; }
   .preset-remove:hover { color: var(--red); }
-  .preset-save { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
-  .preset-save input { max-width: 320px !important; }
+  .preset-save { display: inline-flex; gap: 8px; flex-wrap: nowrap; align-items: center; margin-left: auto; min-width: 0; }
+  .preset-save input { width: 240px !important; max-width: 240px !important; margin: 0 !important; }
+  .preset-save button { margin: 0 !important; flex: none; }
+  .preset-save .hint { margin: 0; }
 
   /* Form alignment: one standard field width (small purpose-sized fields keep theirs), readable labels, hints in
      the same place under every field, and each tool's Run/Stop row pinned to the bottom while its form scrolls. */
@@ -389,6 +391,7 @@
   /* A label that opens a wrapper block (Environment, Claim #, …) keeps its gap from the hint above it; only the very
      first label under a card heading sits tight. */
   .tab-panel div > .field-label:first-child { margin-top: 18px; }
+  .tab-panel .card > .field-label:first-child { margin-top: 0; }
   .tab-panel .card > h2 + .field-label, .tab-panel .card > h2 + div > .field-label:first-child { margin-top: 4px; }
   .hint { font-size: 12px; margin-top: 6px; line-height: 1.45; }
   .tab-panel .card > .actions { position: sticky; bottom: 0; z-index: 4; margin: 16px -20px 0; padding: 12px 20px; background: var(--panel); border-top: 1px solid var(--border); }
@@ -577,7 +580,6 @@
   <div class="tab-panel" id="tab-policy">
     <div class="page-head"><h1>Policy Tests</h1><p>Run the BOP, Package and Commercial Auto policy workflows for the states and environment you pick.</p></div>
     <div class="card">
-      <h2>Configure run</h2>
 
       <div class="field-label">Line of Business (select one or more)</div>
       <div class="chips" id="policyLobChips"></div>
@@ -603,7 +605,6 @@
   <div class="tab-panel" id="tab-claims">
     <div class="page-head"><h1>Claims (ClaimCenter)</h1><p>Run a ClaimCenter test on a policy number, by line of business, platform and tier.</p></div>
     <div class="card">
-      <h2>Configure run</h2>
 
       <div class="field-label">Line of Business (select one)</div>
       <div class="chips" id="claimsLobChips"></div>
@@ -632,7 +633,6 @@
   <div class="tab-panel" id="tab-reconciliation">
     <div class="page-head"><h1>Migration Reconciliation</h1><p>Compare a claim between on-prem and cloud ClaimCenter — one claim number, or a file of claims in bulk.</p></div>
     <div class="card">
-      <h2>Configure run</h2>
 
       <div class="field-label">Tier (select one)</div>
       <div class="chips" id="reconTierChips"></div>
@@ -671,7 +671,6 @@
         (pre-migration) claim data still saves cleanly, so a save failure here is a real finding, not a mistake.
         Only point it at claims/tiers you're prepared to have re-saved.
       </div>
-      <h2>Configure run</h2>
 
       <div class="field-label">Tier (select one)</div>
       <div class="chips" id="uvTierChips"></div>
@@ -708,7 +707,6 @@
         <b>compare_insurance_pdfs.py not found</b> on the server at
         <code>tools/pdf-compare/compare_insurance_pdfs.py</code> — copy it there before running this tab.
       </div>
-      <h2>Configure run</h2>
 
       <div class="field-label">Input folder (on the machine running this server)</div>
       <input type="text" id="pdfInputDir" placeholder="e.g. C:\Users\amitmish\Desktop\New folder\CPPProposalParallel" autocomplete="off" style="max-width:600px" />
@@ -747,21 +745,15 @@
   <div class="tab-panel" id="tab-smartComm">
     <div class="page-head"><h1>SmartCOMM Validator</h1><p>Generate a template on a test claim and check the PDF against its mapping doc, the payload and the Data Dictionary.</p></div>
     <div class="card">
-      <h2>Configure run</h2>
-
-      <div id="smartCommPresetsBlock">
-        <div class="field-label">My usual runs</div>
-        <div class="chips" id="smartCommPresetChips"></div>
-        <div class="preset-save">
-          <input type="text" id="smartCommPresetName" placeholder="Name this setup, e.g. PA Auto weekly" autocomplete="off" aria-label="Preset name" />
-          <button type="button" class="btn-secondary" id="smartCommPresetSave">Save as preset</button>
-        </div>
-        <div class="hint" id="smartCommPresetHint">Saves the selected templates, environment, claim # and scenario count in this browser — click a preset to fill the form again.</div>
-      </div>
 
       <div class="field-label">Validation type</div>
       <div class="chips" id="smartCommModeChips"></div>
       <div class="hint" id="smartCommModeHint"></div>
+
+      <div id="smartCommPresetsBlock" style="display:none">
+        <div class="field-label">My usual runs</div>
+        <div class="chips" id="smartCommPresetChips"></div>
+      </div>
 
       <div id="smartCommTemplateBlock">
       <div class="field-label" id="smartCommTemplateLabel" style="margin-top:14px">Template</div>
@@ -835,6 +827,12 @@
       <div class="actions">
         <button class="run" id="smartCommRunBtn" disabled>Validate Template</button>
         <button class="stop" id="smartCommStopBtn" disabled>Stop</button>
+        <span class="preset-save" id="smartCommPresetWrap">
+          <button type="button" class="btn-secondary" id="smartCommPresetOpen" title="Save the selected templates, environment, claim # and scenario count">Save as preset</button>
+          <input type="text" id="smartCommPresetName" placeholder="Preset name, e.g. PA Auto weekly" autocomplete="off" aria-label="Preset name" hidden />
+          <button type="button" class="btn-secondary" id="smartCommPresetSave" hidden>Save</button>
+          <span class="hint" id="smartCommPresetHint" role="status"></span>
+        </span>
       </div>
       <div class="error-msg" id="smartCommError"></div>
       <div class="report-links" id="smartCommReportLinks"></div>
@@ -2192,10 +2190,12 @@
   function renderSmartCommPresets() {
     var block = document.getElementById('smartCommPresetsBlock');
     if (!block) return;
-    block.style.display = smartComm.mode === 'template' ? '' : 'none';
-    var box = document.getElementById('smartCommPresetChips');
     var list = loadSmartCommPresets();
-    box.innerHTML = list.length ? '' : '<span class="stats-empty">No presets yet.</span>';
+    var templateMode = smartComm.mode === 'template';
+    block.style.display = templateMode && list.length ? '' : 'none';
+    document.getElementById('smartCommPresetWrap').style.display = templateMode ? '' : 'none';
+    var box = document.getElementById('smartCommPresetChips');
+    box.innerHTML = '';
     list.forEach(function (p, i) {
       var wrap = document.createElement('span');
       wrap.className = 'preset';
@@ -2215,7 +2215,14 @@
       box.appendChild(wrap);
     });
     var ready = smartComm.templateIds.size > 0 && !!smartComm.tier;
+    document.getElementById('smartCommPresetOpen').disabled = !ready;
     document.getElementById('smartCommPresetSave').disabled = !ready;
+  }
+  function setPresetNaming(on) {
+    document.getElementById('smartCommPresetOpen').hidden = on;
+    document.getElementById('smartCommPresetName').hidden = !on;
+    document.getElementById('smartCommPresetSave').hidden = !on;
+    if (on) { document.getElementById('smartCommPresetHint').textContent = ''; document.getElementById('smartCommPresetName').focus(); }
   }
   function applySmartCommPreset(p) {
     smartComm.mode = 'template';
@@ -2230,7 +2237,7 @@
     updateSmartCommPreview();
     document.getElementById('smartCommPresetHint').textContent = 'Filled from "' + p.name + '" — check it, then press Validate.';
   }
-  document.getElementById('smartCommPresetSave').addEventListener('click', function () {
+  function saveCurrentSmartCommPreset() {
     var nameEl = document.getElementById('smartCommPresetName');
     var name = nameEl.value.trim() || Array.from(smartComm.templateIds).join(', ');
     var list = loadSmartCommPresets().filter(function (p) { return p.name !== name; });
@@ -2238,8 +2245,15 @@
       claimNumber: document.getElementById('smartCommClaimNumber').value.trim(), maxScenarios: document.getElementById('smartCommMaxScenarios').value });
     saveSmartCommPresets(list);
     nameEl.value = '';
-    document.getElementById('smartCommPresetHint').textContent = 'Saved "' + name + '".';
+    setPresetNaming(false);
+    document.getElementById('smartCommPresetHint').textContent = 'Saved "' + name + '" — find it under My usual runs.';
     renderSmartCommPresets();
+  }
+  document.getElementById('smartCommPresetOpen').addEventListener('click', function () { setPresetNaming(true); });
+  document.getElementById('smartCommPresetSave').addEventListener('click', saveCurrentSmartCommPreset);
+  document.getElementById('smartCommPresetName').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); saveCurrentSmartCommPreset(); }
+    if (e.key === 'Escape') { this.value = ''; setPresetNaming(false); }
   });
 
   function renderSmartCommTiers() {
