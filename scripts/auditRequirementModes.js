@@ -17,6 +17,9 @@
  *   node scripts/auditRequirementModes.js --compare-doc [DIG…]
  *        only the templates whose mapping doc is a legacy .doc: each one's checks read the old way (text only) next
  *        to the new way (its Word comments, through a converted .docx copy), and exactly which checks change
+ *   node scripts/auditRequirementModes.js --fields DIG168 [DIG…]
+ *        each "text-shaped value" check (a BA field with no built-in mapping) and the Data Dictionary row + Xpath it
+ *        is compared through at run time — or why it can't be (no row, or a row without an Xpath)
  *
  * Writes: results/smartComm/requirement-audit-<timestamp>.csv
  */
@@ -85,10 +88,30 @@ async function compareDocTemplates(templates) {
   console.log(`Wrote ${out}`);
 }
 
+// --fields: what each text-shaped field links to (validationService.linkTextFieldsToDictionary does the same at run time).
+async function listTextFields(templates) {
+  const dd = require('../helpers/smartComm/dataDictionaryService');
+  for (const t of templates) {
+    const result = await requirementsOf(t);
+    const fields = (result.requirements || []).filter((r) => r.type === 'dynamicShape' && r.shape === 'text' && r.enabled !== false && r.fieldName);
+    console.log(`\n${t.digNumber}  ${t.documentName} — ${fields.length} text-shaped field(s)`);
+    let linked = 0;
+    for (const r of fields) {
+      const m = dd.matchDictionaryRowByCommentFieldName(t.digNumber, r.fieldName);
+      const name = `"${r.fieldName}"`.padEnd(34);
+      if (!m || m.matchedOn === 'wordOverlap') console.log(`  ${r.id.padEnd(5)} ${name} no Data Dictionary row${m ? ` (only a loose word match: "${m.row.attributeName}", not used)` : ''}`);
+      else if (!m.row.xpath) console.log(`  ${r.id.padEnd(5)} ${name} row "${m.row.attributeName}" has no Xpath`);
+      else { linked++; console.log(`  ${r.id.padEnd(5)} ${name} -> "${m.row.attributeName}"  ${m.row.xpath}`); }
+    }
+    if (fields.length) console.log(`  ${linked} of ${fields.length} compared with the payload at run time; the rest stay BLOCKED with the reason shown`);
+  }
+}
+
 (async () => {
   const args = process.argv.slice(2);
   const compare = args.includes('--compare-doc');
   const wanted = args.filter((a) => !a.startsWith('--')).map(catalogService.normalizeDig);
+  if (args.includes('--fields')) return listTextFields(catalogService.loadTemplateCatalog().filter((t) => !wanted.length || wanted.includes(t.digNumber)));
   if (compare) return compareDocTemplates(catalogService.loadTemplateCatalog().filter((t) => !wanted.length || wanted.includes(t.digNumber)));
   const templates = catalogService.loadTemplateCatalog().filter((t) => !wanted.length || wanted.includes(t.digNumber));
   const rows = [];

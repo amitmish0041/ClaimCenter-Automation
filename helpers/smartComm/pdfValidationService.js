@@ -569,7 +569,7 @@ function evaluateOne(req, haystack, context) {
       // where this field actually is, a false PASS that verifies nothing.
       // Report it honestly as unverified rather than a misleading pass.
       if (req.shape === 'text') {
-        return { expected: '<unspecified — no shape or test-data field known>', actual: 'N/A', result: 'BLOCKED', reason: 'No specific shape or test-data field mapped for this dynamic value — presence not verified' };
+        return { expected: '<unspecified — no shape or test-data field known>', actual: 'N/A', result: 'BLOCKED', reason: req.unmappedReason || 'No specific shape or test-data field mapped for this dynamic value — presence not verified' };
       }
       const m = haystack.match(shapeRegex(req.shape));
       return {

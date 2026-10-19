@@ -871,7 +871,8 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // Name/Address/Agent Number — worth keeping visible as SKIPPED, since "no recipient added" is itself a
     // meaningful scenario fact), a never-selected Choices question is noise — drop it from the report
     // entirely rather than show a SKIPPED row for every such condition on every scenario.
-    const reportableRequirements = scenarioRequirements.filter((r) => !(CHOICE_SELECTED_YES_RE.test(r.fieldName || '') && r.enabled === false));
+    const reportableRequirements = linkTextFieldsToDictionary(template, scenarioRequirements, xpathRequirements, rawPayloadRoot)
+      .filter((r) => !(CHOICE_SELECTED_YES_RE.test(r.fieldName || '') && r.enabled === false));
     const evaluated = [...reportableRequirements, ...fraudRequirements, ...xpathRequirements];
     const validations = pdfValidationService.evaluateRequirements(evaluated, text, context);
     // Opt-in: save this scenario as an offline regression case (see regressionCaseService) — never fails the run.
@@ -2141,6 +2142,53 @@ function isNoFraudLanguageRequired(match) {
 // claim's LOB (e.g. Vehicle Make on a Homeowners claim, which has no exposure/vehicle node at all) simply has
 // nothing to resolve, so no check gets generated for it either — only fields with REAL, resolved data AND a
 // real template reference become an assertion.
+// The ways a plain payload number prints: "2450.00" as "2,450.00", "$2,450.00", "2,450", "$2,450" (DIG168's
+// appraisal / NADA amounts, 2026-10-19 — the payload carries the bare number, the letter the formatted one, and a
+// literal search for "2450.00" never finds "$2,450.00"). Only for numbers that can carry formatting: 1,000 or more,
+// or with decimals.
+function printedNumberForms(value) {
+  const raw = String(value == null ? '' : value).trim();
+  if (!/^-?\d+(?:\.\d+)?$/.test(raw)) return [];
+  const n = Number(raw);
+  if (!Number.isFinite(n) || (Math.abs(n) < 1000 && !raw.includes('.'))) return [];
+  const cents = n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const forms = [cents, `$${cents}`];
+  if (Number.isInteger(n)) { const whole = n.toLocaleString('en-US'); forms.push(whole, `$${whole}`); }
+  return [...new Set(forms)].filter((f) => f !== raw);
+}
+
+// A "text-shaped value must appear for <field>" check (a BA comment naming a field with no known test-data mapping or
+// shape — DIG168's "Appraisal Amount", "NADA Value", "Mileage Amount", 2026-10-19) always reported BLOCKED, even when
+// the Data Dictionary has that field with an Xpath into the payload. Its dictionary row, when the BA's field name
+// names one by its own name or a known synonym (not the loose word-overlap match: a wrong row here would be a false
+// FAIL where today there is an honest BLOCKED).
+function textFieldDictionaryRow(digNumber, req) {
+  if (!req || req.type !== 'dynamicShape' || req.shape !== 'text' || req.enabled === false || !req.fieldName) return null;
+  let match;
+  try { match = dataDictionaryService.matchDictionaryRowByCommentFieldName(digNumber, req.fieldName); } catch (_) { return undefined; } // no dictionary file
+  return match && match.matchedOn !== 'wordOverlap' ? match.row : null;
+}
+
+// Each such check becomes the payload comparison its dictionary row's XP check makes (same expected value, same
+// edited-field handling), under the BA's own field name; one that can't be linked says why it stays BLOCKED.
+function linkTextFieldsToDictionary(template, requirements, xpathRequirements, rawPayloadRoot) {
+  return requirements.map((r) => {
+    if (r.type !== 'dynamicShape' || r.shape !== 'text' || r.enabled === false || !r.fieldName) return r;
+    const row = textFieldDictionaryRow(template.digNumber, r);
+    if (row === undefined) return r; // the Data Dictionary couldn't be read: nothing to say about this field
+    if (!row) return { ...r, unmappedReason: `"${r.fieldName}" has no matching Data Dictionary row for ${template.digNumber}, so there's no payload value to compare it with — presence not verified.` };
+    const xp = xpathRequirements.find((x) => x.dictionaryAttribute === row.attributeName);
+    if (xp) {
+      const { id: _id, description: _d, docOrder: _o, ...expectation } = xp;
+      return { ...r, ...expectation, fieldName: r.fieldName, description: `Value for "${r.fieldName}" must match the SmartCOMM payload (Data Dictionary "${row.attributeName}")` };
+    }
+    const why = !row.xpath || !row.xpath.trim() ? `its Data Dictionary row "${row.attributeName}" has no Xpath`
+      : !rawPayloadRoot ? "this scenario's payload couldn't be read"
+      : `its Data Dictionary row "${row.attributeName}" Xpath found no value in this scenario's payload`;
+    return { ...r, unmappedReason: `"${r.fieldName}": ${why}, so there's nothing to compare it with — presence not verified.` };
+  });
+}
+
 function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, interactiveChecks, log, { additionalRecipientAdded = false } = {}) {
   const templateFields = (baseRequirements || [])
     .map((r) => ({ req: r, fn: dataDictionaryService.normalizeForMatch(r.fieldName) }))
@@ -2152,7 +2200,14 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
       (attrNorm && attrNorm.length >= 3 && fn.includes(attrNorm)) ||
       (tmplAttrNorm && tmplAttrNorm.length >= 3 && fn.includes(tmplAttrNorm))).map((t) => t.req);
   };
-  const referencedByTemplate = (row) => referencingRequirements(row).length > 0;
+  // ...plus the rows a "text-shaped" check's own field name resolves to (see textFieldDictionaryRow) — those are
+  // linked to the XP check below instead of reporting BLOCKED with nothing compared.
+  const textFieldRefs = new Map();
+  for (const r of baseRequirements || []) {
+    const row = textFieldDictionaryRow(template.digNumber, r);
+    if (row) textFieldRefs.set(row.attributeName, [...(textFieldRefs.get(row.attributeName) || []), r]);
+  }
+  const referencedByTemplate = (row) => referencingRequirements(row).length > 0 || textFieldRefs.has(row.attributeName);
   const rows = dataDictionaryService.getAttributesForTemplate(template.digNumber)
     .filter((r) => r.xpath && r.xpath.trim())
     // An overlay form has no text requirements to scope by — check every dictionary field for this DIG.
@@ -2200,13 +2255,14 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
     // still carries the value, but the document correctly doesn't print it, so skip with the same reason.
     // Still checked once a recipient really was added: a role-gated field like DIG239's "Agent Number … role of
     // Producer" is never re-enabled itself, and this payload check is the only thing exercising it then.
-    const refs = template.overlayMode ? [] : referencingRequirements(row);
+    const refs = template.overlayMode ? [] : [...new Set([...referencingRequirements(row), ...(textFieldRefs.get(row.attributeName) || [])])];
     const recipientGated = refs.some((r) => /additional recipient|^copy\b/i.test(r.fieldName || ''));
     const conditionallyOff = (r) => r.enabled === false && !/editor's own mechanics/.test(r.disabledReason || '');
     const gatedOff = refs.length > 0 && refs.every(conditionallyOff) && !(additionalRecipientAdded && recipientGated);
     requirements.push({
       ...(gatedOff ? { enabled: false, disabledReason: refs[0].disabledReason || 'Conditional field, not printed in this scenario.' } : {}),
       id: `XP${n}`,
+      dictionaryAttribute: row.attributeName,
       description: `Value for "${row.attributeName}" must match the SmartCOMM payload (via Data Dictionary Xpath)`,
       type: matchedCheck ? 'fieldValueMatch' : 'requiredText',
       expectedValue: datePart ? datePart.value : String(result.value),
@@ -2214,7 +2270,9 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
         // "Claimant Name" on a claim with several claimants: any of them (DIG30 prints the exposure's "Jimmy Claimant").
         : /claimant name/i.test(row.attributeName) && pdfValidationService.claimantsOf({ raw: rawPayloadRoot }).length > 1
           ? { alsoAccept: pdfValidationService.claimantsOf({ raw: rawPayloadRoot }), alsoAcceptNote: 'The claim has more than one claimant; the letter prints another claimant on this claim (likely the one on the exposure the letter is about).' }
-          : { alsoAccept: result.alsoAccept, alsoAcceptNote: result.alsoAcceptNote }),
+          : printedNumberForms(result.value).length
+            ? { alsoAccept: [...(result.alsoAccept || []), ...printedNumberForms(result.value)], alsoAcceptNote: result.alsoAcceptNote || 'Same number as the payload, printed with thousands separators / a dollar sign / cents.' }
+            : { alsoAccept: result.alsoAccept, alsoAcceptNote: result.alsoAcceptNote }),
       fieldValue: matchedCheck ? (matchedCheck.committedMarker || matchedCheck.after || matchedCheck.before) : undefined,
       fieldLabel: matchedCheck ? matchedCheck.label : undefined,
       wasEditedByTest: !matchedCheck && editedByTest,
@@ -2397,5 +2455,6 @@ module.exports = {
   _test: {
     recipientRoleFromTechnicalName, knownValueRole, buildMetadataChecks, buildEditValue, verifyInteractiveEditsInPdf,
     annotateInteractiveEditFailures, runLayoutChecks, payloadUnavailableCheck, metadataUnavailableCheck, rollUpScenario,
+    buildXpathRequirements, linkTextFieldsToDictionary, printedNumberForms,
   },
 };
