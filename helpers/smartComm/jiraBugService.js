@@ -125,7 +125,18 @@ function matchFinding(dig, findingText, known, { anyTemplate = false } = {}) {
 async function annotateTemplateResults(templateResults, { log = () => {} } = {}) {
   const known = await loadKnownBugs({ log });
   const summary = { available: known.available, reason: known.reason, known: 0, newFindings: 0 };
-  if (!known.available) return summary;
+  if (!known.available) {
+    // Say why in every failure's Jira cell — a silently blank column read as "Jira mapping is broken" (2026-10-19).
+    log(`[Jira] lookup unavailable: ${known.reason}`);
+    for (const t of templateResults || []) {
+      for (const s of t.scenarios || []) {
+        for (const item of [s, ...(s.validations || []), ...(s.interactiveChecks || [])]) {
+          if (item && (item.result === 'FAIL' || item.status === 'ERROR')) item.jiraUnavailable = known.reason;
+        }
+      }
+    }
+    return summary;
+  }
   for (const t of templateResults || []) {
     for (const s of t.scenarios || []) {
       const tag = (item, text) => {
@@ -149,6 +160,9 @@ async function annotateTemplateResults(templateResults, { log = () => {} } = {})
 // "SMART-1424 (Re-Open)" / "NEW — no matching bug" for a report cell; '' for anything that isn't a failure.
 function jiraCell(item) {
   if (!item) return '';
+  if (item.jiraUnavailable) {
+    return `Jira lookup unavailable (${/not set/i.test(item.jiraUnavailable) ? 'no Jira email / API token — add them on the Settings tab' : String(item.jiraUnavailable).slice(0, 80)})`;
+  }
   if (item.knownBug) {
     return item.knownBug.open ? `${item.knownBug.key} (${item.knownBug.status})`
       : `${item.knownBug.key} (${item.knownBug.status}) — closed but still occurs: possible regression, re-open or log new`;
