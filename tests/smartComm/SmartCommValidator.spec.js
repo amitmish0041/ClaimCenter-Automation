@@ -31,6 +31,12 @@ test.describe('SmartCOMM Template Validator', () => {
       // Each failure → an existing SMART Jira bug (or "NEW") in the report's Jira column — see jiraBugService.
       await require('../../helpers/smartComm/jiraBugService').annotateTemplateResults([templateResult], { log: (m) => console.log(`[SmartComm] ${m}`) })
         .catch((err) => console.log(`[SmartComm] Jira bug mapping skipped (${err.message})`));
+      // Kept for the Runner's Results page (results/smartComm/runs) — never fails the run.
+      try {
+        require('../../helpers/smartComm/resultsStore').saveRun([templateResult], {
+          env: `${process.env.CC_ENV || 'cloud'}/${process.env.CC_TIER || ''}`, requestedBy: process.env.SMARTCOMM_EMAIL || String(process.env.EMAIL_TO || '').split(',')[0].trim() || null,
+        });
+      } catch (err) { console.log(`[SmartComm] couldn't save the run for the Results page (${err.message})`); }
       await sendReport(templateResult);
     }
     await page.close();
