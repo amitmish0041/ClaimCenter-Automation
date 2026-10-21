@@ -111,3 +111,44 @@ test('free-form blanks are listed with their row label (SMART-1522, DIG220)', as
   try { res = await trs.getRequirements({ digNumber: 'DIG901', templateMappingDoc: 'DIG901_Test.docx' }, dir); } finally { console.log = log; }
   assert.deepEqual(res.freeFormFields.map((f) => f.label), ['j. Working with biohazards', 'COMPLETED BY:', 'SPOKE WITH:']);
 });
+
+// A minimal fillable PDF: one printed line, one text field with a sample value, one BA note on that field, and one
+// general note — what a PDF mapping doc (DIG217 Fringe Benefits Form) carries.
+function buildMappingPdf(file) {
+  const content = 'BT /F1 11 Tf 72 700 Td (Employer:) Tj ET BT /F1 11 Tf 72 600 Td (VACATION: ____ days per year) Tj ET';
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R 8 0 R] >> >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 9 0 R /Annots [5 0 R 6 0 R 7 0 R 8 0 R] >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Type /Annot /Subtype /Widget /FT /Tx /T (Employername) /V (Scott Adams) /Rect [144 696 400 716] /P 3 0 R >>',
+    '<< /Type /Annot /Subtype /Text /Rect [200 698 220 714] /Contents (Insured Name) /T (BA) >>',
+    '<< /Type /Annot /Subtype /Text /Rect [20 760 40 780] /Contents (All fields and checkboxes on the template are editable) /T (BA) >>',
+    '<< /Type /Annot /Subtype /Widget /FT /Tx /T (Vacation) /Rect [140 596 170 612] /P 3 0 R >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    '<< /Title (Mapping doc) >>', // /Info — pdf-parse reads the document metadata and fails ("bad XRef entry") without it
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [];
+  objs.forEach((o, i) => { offsets.push(pdf.length); pdf += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
+  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R /Info ${objs.length} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  fs.writeFileSync(file, pdf, 'latin1');
+}
+
+test('PDF mapping docs: field notes become dynamic values, labels stay fixed wording, empty fields are free-form (DIG217)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mappdf-'));
+  const templatesDir = path.join(dir, 'Templates', 'ClaimCenter');
+  fs.mkdirSync(templatesDir, { recursive: true });
+  buildMappingPdf(path.join(templatesDir, 'DIG902_Test.pdf'));
+  const log = console.log; console.log = () => {};
+  let res;
+  try { res = await trs.getRequirements({ digNumber: 'DIG902', templateMappingDoc: 'DIG902_Test.pdf' }, dir); } finally { console.log = log; }
+  assert.equal(res.mode, 'pdf-comments');
+  const insured = res.requirements.find((r) => r.fieldName === 'Insured Name');
+  assert.ok(insured && insured.sampleValue === 'Scott Adams', `the note names the field under it: ${JSON.stringify(res.requirements)}`);
+  assert.ok(res.requirements.some((r) => r.type === 'requiredText' && r.expectedValue === 'Employer:'), 'the printed label is fixed wording');
+  assert.ok(!res.requirements.some((r) => r.type === 'requiredText' && /Scott Adams/.test(r.expectedValue || '')), 'a sample value is never fixed wording');
+  assert.deepEqual(res.freeFormFields.map((f) => f.fieldName), ['Vacation'], 'the empty field is a free-form blank');
+});

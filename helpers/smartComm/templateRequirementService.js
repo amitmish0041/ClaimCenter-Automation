@@ -923,6 +923,14 @@ async function getRequirements(template, dataDir) {
     console.log(`[SmartComm] templateRequirementService: ${template.digNumber} is a legacy .doc that ${why} — using word-extractor + the heuristic classifier (${paragraphs.length} paragraphs)`);
     return { requirements: fromText, sourceFile: localPath, mode: 'heuristic-doc', mentionsFraudLanguage };
   }
+  if (localPath.toLowerCase().endsWith('.pdf')) {
+    const fromPdf = await readPdfMappingDoc(localPath, template).catch((e) => {
+      console.log(`[SmartComm] templateRequirementService: ${localPath} could not be read as a PDF mapping doc (${e.message}) — skipping`);
+      return null;
+    });
+    if (fromPdf) return { ...fromPdf, sourceFile: localPath };
+    return { requirements: [], sourceFile: localPath, mode: null };
+  }
   if (!localPath.toLowerCase().endsWith('.docx')) {
     console.log(`[SmartComm] templateRequirementService: ${localPath} is not a .docx (likely an overlay PDF form) — generic parsing doesn't apply yet; skipping`);
     return { requirements: [], sourceFile: localPath, mode: null };
@@ -962,6 +970,144 @@ function freeFormFieldsFromDocx(documentXml, anchors, comments) {
   }
   return out;
 }
+
+// ── PDF mapping docs (22 templates, e.g. DIG217 Fringe Benefits Form — per user direction 2026-10-21) ──────────
+// A fillable-form PDF instead of a Word doc: its sample data sits in form fields (widgets: name, value, box) and the
+// BA's notes are PDF comments (sticky notes, "Insured Name", "Claimant SSN") placed ON the field they describe —
+// the same information the Word path reads from comment anchors. Rebuilt into that path's own inputs so every rule
+// built for Word docs applies unchanged:
+//   paragraphs — each printed line, top to bottom, with the noted fields' sample values placed where they sit
+//                (columns more than 8pt apart are joined by a double tab, so the gap-splitting treats them as pieces);
+//   anchors    — one per note, in line order, holding its field's sample value ("[FieldName]" when the sample is
+//                empty, so the field still becomes a checked dynamic value);
+//   comments   — the notes' text.
+// Fields with no note of their own keep their sample OUT of the text: a sample value is never fixed wording.
+// A note on no field ("All fields and checkboxes on the template are editable") is a general instruction: when it
+// says editable/free form, every empty, un-noted text field becomes a free-form blank (freeFormFields).
+const PDF_MAPPING_TEXT = new Map(); // full text (lines + notes) per PDF, for mappingDocText's label/choice look-ups
+
+// The printed label of a form box [x0, yBottom..yTop] (PDF points, y up): the nearest line of text to its left — the
+// bottom line for an ordinary box, the TOP line for a tall one ("FACTS:" beside a multi-line box, DIG209). Touching
+// fragments are joined ("PRE" "-" "TRIAL DATE:"), a gap over 8pt starts a new piece and only the last piece before the
+// box counts ("DATE(S) OF LOSS: … AWW: $" → "AWW: $"); text running into the box is cut at its edge, trailing fill
+// underscores dropped. validationService.overlayRowLabel names the live form's boxes the same way, so the two match.
+function labelLeftOfBox(items, x0, yBottom, yTop, isOurs = () => false) {
+  const target = yTop - yBottom > 24 ? yTop - 8 : yBottom + 3;
+  const cands = items.filter((it) => it.x < x0 - 1 && Math.abs(it.y - target) <= 8 && !isOurs(it)).map((it) => {
+    if (it.x + it.w <= x0 + 1 || !it.str.length) return it;
+    const keep = Math.max(0, Math.floor(it.str.length * ((x0 - it.x) / it.w)));
+    return { ...it, str: it.str.slice(0, keep), w: x0 - it.x };
+  }).filter((it) => it.str.trim());
+  if (!cands.length) return '';
+  const y = cands.reduce((best, it) => (Math.abs(it.y - target) < Math.abs(best - target) ? it.y : best), cands[0].y);
+  const line = cands.filter((it) => Math.abs(it.y - y) <= 1.5).sort((a, b) => a.x - b.x);
+  let piece = '';
+  let end = -Infinity;
+  for (const it of line) {
+    if (it.x - end > 8) piece = '';
+    piece += (piece && it.x - end > 1 ? ' ' : '') + it.str;
+    end = it.x + it.w;
+  }
+  return piece.replace(/[_\s]+$/, '').replace(/\s+/g, ' ').trim();
+}
+async function readPdfMappingDoc(localPath, template) {
+  let pdfParse;
+  try { pdfParse = require('pdf-parse'); } catch (_) { throw new Error('pdf-parse is not installed'); }
+  const pages = [];
+  // A standalone copy: Node can return a small file as a slice of a shared buffer, and pdf.js then reads the whole
+  // shared buffer — every offset is wrong ("bad XRef entry").
+  await pdfParse(new Uint8Array(fs.readFileSync(localPath)), {
+    pagerender: async (p) => {
+      const [tc, annots] = await Promise.all([p.getTextContent(), p.getAnnotations()]);
+      pages.push({
+        items: tc.items.filter((it) => it.str && it.str.trim()).map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5], w: it.width || 0 })),
+        widgets: annots.filter((a) => a.subtype === 'Widget' && a.rect),
+        notes: annots.filter((a) => a.subtype === 'Text' && a.rect && String(a.contents || '').trim() && !a.inReplyTo),
+      });
+      return '';
+    },
+  });
+  const paragraphs = [];
+  const anchors = [];
+  const comments = {};
+  const generalNotes = [];
+  const freeFormFields = [];
+  const textOf = (v) => (Array.isArray(v) ? v.join(' ') : String(v == null ? '' : v)).trim();
+  const isTextField = (w) => w.fieldType === 'Tx';
+  let noteId = 0;
+  for (const pg of pages) {
+    // Each note → the text field under its centre, else the nearest one within 30pt.
+    const noted = new Map(); // widget → note
+    for (const note of pg.notes) {
+      const cx = (note.rect[0] + note.rect[2]) / 2;
+      const cy = (note.rect[1] + note.rect[3]) / 2;
+      const dist = (w) => Math.hypot(Math.max(w.rect[0] - cx, 0, cx - w.rect[2]), Math.max(w.rect[1] - cy, 0, cy - w.rect[3]));
+      const best = pg.widgets.filter(isTextField).filter((w) => !noted.has(w)).sort((a, b) => dist(a) - dist(b))[0];
+      if (best && dist(best) <= 30) noted.set(best, note); else generalNotes.push(String(note.contents).trim());
+    }
+    // Tokens: printed text, plus each noted field's sample value at its own position. A field usually sits on a printed
+    // fill line ("Employer: ______"); that line IS the field, so underscore runs under a noted field are dropped —
+    // left in, they cut the label off from its field ("Employer:\t\t_____ Scott Adams"). One text item can hold two
+    // fill lines and a label ("_______   S.S. No:______", DIG217), so items are split at underscore runs first, each
+    // piece placed by its share of the item's width.
+    const underNoted = (x0, x1, y) => [...noted.keys()].some((w) => x1 > w.rect[0] - 2 && x0 < w.rect[2] + 2 && y >= w.rect[1] - 4 && y <= w.rect[3] + 2);
+    const tokens = [];
+    for (const it of pg.items) {
+      const parts = it.str.split(/(_{3,})/).filter((s) => s !== '');
+      let at = 0;
+      for (const s of parts) {
+        const x0 = it.x + (it.w * at) / it.str.length;
+        const x1 = it.x + (it.w * (at + s.length)) / it.str.length;
+        at += s.length;
+        if (/^_+$/.test(s) && underNoted(x0, x1, it.y)) continue;
+        if (s.trim()) tokens.push({ str: s.trim(), x: x0, y: it.y, w: x1 - x0 });
+      }
+    }
+    for (const [w, note] of noted) {
+      const id = String(noteId++);
+      const sample = textOf(w.fieldValue) || `[${w.fieldName || 'field'}]`;
+      tokens.push({ str: sample, x: w.rect[0] + 2, y: w.rect[1] + 3, w: Math.max(w.rect[2] - w.rect[0] - 4, 1), anchorId: id });
+      comments[id] = { author: note.title || '', fullText: String(note.contents).trim(), highlightedTag: null };
+    }
+    // Lines: tokens whose baselines are within 4pt, top to bottom, left to right.
+    tokens.sort((a, b) => b.y - a.y || a.x - b.x);
+    const lines = [];
+    for (const t of tokens) {
+      const line = lines.find((l) => Math.abs(l.y - t.y) <= 4);
+      if (line) line.tokens.push(t); else lines.push({ y: t.y, tokens: [t] });
+    }
+    lines.sort((a, b) => b.y - a.y);
+    for (const line of lines) {
+      line.tokens.sort((a, b) => a.x - b.x);
+      let text = '';
+      let end = -Infinity;
+      for (const t of line.tokens) {
+        const gap = t.x - end;
+        text += text ? (gap > 8 ? '\t\t' : gap > 1 ? ' ' : '') : '';
+        text += t.str;
+        end = t.x + t.w;
+        if (t.anchorId) anchors.push({ id: t.anchorId, text: t.str });
+      }
+      if (text.trim()) paragraphs.push(text.replace(/[  ]+/g, ' ').trim());
+    }
+    // Empty, un-noted text fields: free-form blanks when a general note says the fields are editable.
+    if (generalNotes.some((n) => /free\s*form|editable/i.test(n))) {
+      for (const w of pg.widgets.filter((x) => isTextField(x) && !noted.has(x) && !textOf(x.fieldValue))) {
+        freeFormFields.push({ commentId: null, fieldName: w.fieldName, label: labelLeftOfBox(pg.items, w.rect[0], w.rect[1], w.rect[3]) || w.fieldName || '' });
+      }
+    }
+  }
+  const allText = [...paragraphs, ...Object.values(comments).map((c) => c.fullText), ...generalNotes].join('\n');
+  PDF_MAPPING_TEXT.set(localPath, allText);
+  const mentionsFraudLanguage = /fraud\s+language/i.test(allText);
+  if (anchors.length) {
+    console.log(`[SmartComm] templateRequirementService: ${template.digNumber} is a PDF mapping doc — using its ${anchors.length} field note(s)${freeFormFields.length ? ` and ${freeFormFields.length} free-form blank(s)` : ''}`);
+    return { requirements: buildRequirementsFromComments(paragraphs, anchors, comments), mode: 'pdf-comments', mentionsFraudLanguage, freeFormFields };
+  }
+  console.log(`[SmartComm] templateRequirementService: ${template.digNumber} is a PDF mapping doc with no field notes — using the heuristic classifier (${paragraphs.length} lines)`);
+  return { requirements: buildRequirementsHeuristic(paragraphs), mode: 'pdf-heuristic', mentionsFraudLanguage, freeFormFields };
+}
+function getPdfMappingText(docPath) { return PDF_MAPPING_TEXT.get(docPath) || ''; }
 
 function readDocx(localPath, template) {
   if (!AdmZip) throw new Error('adm-zip is not installed — run npm install in ClaimCenter-Automation');
@@ -1072,6 +1218,8 @@ function convertDocToDocx(docPath) {
 
 module.exports = {
   getLegacyDocText,
+  getPdfMappingText,
+  labelLeftOfBox,
   getRequirements,
   extractDocxParagraphs,
   buildRequirements: buildRequirementsHeuristic, // back-compat name

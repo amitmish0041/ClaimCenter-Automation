@@ -2091,11 +2091,13 @@ function joinFragments(items, { last = false } = {}) {
   const out = last ? pieces.slice(-1) : pieces;
   return out.join(' ').replace(/\s+/g, ' ').trim();
 }
+// Same rule as the PDF mapping doc's own blanks (templateRequirementService.labelLeftOfBox), so a doc line and its
+// live box get the same name: text running into the box ("VACATION: ____ days per year", DIG217) is cut at the box,
+// and a tall box is named by its top line ("FACTS:", DIG209).
 function overlayRowLabel(pg, e) {
   if (!pg) return '';
   const b = overlayBoxInPdf(pg, e);
-  const left = pg.items.filter((it) => Math.abs(it.y - b.yBottom) <= 6 && it.x + it.w <= b.x0 + 1 && !isOurValue(it));
-  return joinFragments(nearestLine(left, b.yBottom + 2), { last: true });
+  return templateRequirementService.labelLeftOfBox(pg.items, b.x0, b.yBottom, b.yTop, isOurValue);
 }
 // The column header above a box ("Height", "Distance"): the nearest printed line above it that overlaps its width.
 function overlayColumnHeader(pg, e) {
