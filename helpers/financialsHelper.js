@@ -3509,4 +3509,7 @@ module.exports = {
   createRecoveryReserve, createRecoveryReceipt, createBulkInvoice,
   approveTransaction, denyTransaction, assertValidationError, ensureContactHasPrimaryAddress,
   cancelPaymentWizard,
+  // Cloud exposure-grid readers, reused by the OneInc suite (helpers/oneInc/wizardDriver.js) to find a claim's
+  // claimants before choosing a payee.
+  openExposuresTabCloud, getAllExposureClaimantsCloud,
 };

@@ -377,7 +377,10 @@ async function fillRequiredAcrossTabsCloud(page) {
       if (inp.value.trim() || !isRequired(inp)) continue;
       const ph = (inp.placeholder || '').toLowerCase();
       let val = null;
-      if (ph.includes('mm/dd/yyyy')) val = mmddyyyy;
+      // Hire / birth / employment-start dates must precede the loss date ("Date of hire must be before the date of
+      // loss" — CONFIRMED 2026-10-21 on WC, cloud/test); everything else dated keeps today.
+      const who = (label(inp) + ' ' + (inp.name || '')).toLowerCase();
+      if (ph.includes('mm/dd/yyyy')) val = /hire|birth/.test(who) ? '01/01/2020' : mmddyyyy;
       else if (ph.includes('hh:mm'))  val = '09:00';
       else if (ph === 'aa')           val = 'AM';
       if (!val) continue;             // unknown shape - leave it for a human
@@ -412,7 +415,10 @@ async function fillRequiredAcrossTabsCloud(page) {
       if (await dateInput.isVisible().catch(() => false)) {
         if (!((await dateInput.inputValue().catch(() => 'x')) || '').trim()) {
           const d = new Date();
-          const today = String(d.getMonth() + 1).padStart(2, '0') + '/' +
+          // Hire / birth dates must precede the loss date (WC: "Date of hire must be before the date of loss",
+          // 2026-10-21); reported/notified dates stay today, which is after the loss.
+          const wlabel = await dateInput.evaluate((el) => { const w = el.closest('.gw-InputWidget'); const l = w && w.querySelector('.gw-label'); return ((l && l.innerText) || el.name || '').toLowerCase(); }).catch(() => '');
+          const today = /hire|birth/.test(wlabel) ? '01/01/2020' : String(d.getMonth() + 1).padStart(2, '0') + '/' +
                         String(d.getDate()).padStart(2, '0') + '/' + d.getFullYear();
           await dateInput.click().catch(() => {});
           await dateInput.pressSequentially(today, { delay: 30 }).catch(() => {});
@@ -889,11 +895,17 @@ async function fillCloudNewExposure(page, coverageLabel) {
       const isNone = !cur || /^<?none>?$/i.test(cur.trim());
       if (!isNone && !(isClaimantNumber && usedSet.has(cur.trim()))) continue;
 
-      const opt = [...sel.options].find(o => {
+      // "Claimant" (the person, not the number) prefers the claim's insured: first-alphabetical picked a
+      // Lienholder company added to the claim (ACNB BANK, CONFIRMED 2026-10-21).
+      const label = ((sel.closest('[id$="_Input"]') || document.body).querySelector('.gw-label') || {}).textContent || '';
+      const insured = (/Ins:\s*(.+?)\s+(DoL|St|Adj):/.exec((document.body.innerText || '').replace(/\s+/g, ' ')) || [])[1] || '';
+      const isClaimant = /^\s*Claimant\s*$/i.test(label);
+      const real = [...sel.options].filter(o => {
         const t = (o.text || '').trim();
         if (!t || /^<?none>?$/i.test(t)) return false;
         return !(isClaimantNumber && usedSet.has(t));
       });
+      const opt = (isClaimant && insured && real.find(o => o.text.trim().toUpperCase() === insured.trim().toUpperCase())) || real[0];
       if (!opt) continue;
       sel.value = opt.value;
       sel.dispatchEvent(new Event('change', { bubbles: true }));
@@ -953,20 +965,53 @@ async function fillCloudNewExposure(page, coverageLabel) {
             if (!sel.offsetParent || sel.disabled) continue;
             const cur = (sel.options[sel.selectedIndex] || {}).text || '';
             if (cur && !/^<?none>?$/i.test(cur.trim())) continue;
-            const opt = [...sel.options].find(o => o.text && !/^<?none>?$/i.test(o.text.trim()));
+            const real = [...sel.options].filter(o => o.text && !/^<?none>?$/i.test(o.text.trim()));
+            // Vehicle "Style": the first option is "Boat", which then needs a Boat type and fails Ability to pay
+            // (CONFIRMED 2026-10-21) — use "Other".
+            const w = sel.closest('.gw-InputWidget');
+            const lbl = ((w && w.querySelector('.gw-label')) || {}).textContent || '';
+            const opt = (/^\s*Style\s*$/i.test(lbl) && real.find(o => /^Other$/i.test(o.text.trim()))) || real[0];
             if (!opt) continue;
             sel.value = opt.value;
             sel.dispatchEvent(new Event('change', { bubbles: true }));
             done.push(opt.text.trim().slice(0, 20));
           }
+          // Label-aware values. CONFIRMED 2026-10-20 (cloud/test): typing "Automated E2E" into the vehicle
+          // incident's Year (and a non-numeric Loss Estimate) made CC reject the incident — "Year : must be a
+          // four-digit year", "Loss Estimate : must be a numeric value" — so the exposure was never saved. A
+          // previously created vehicle picked from "Select vehicle" also arrives PRE-filled with that bad Year, so
+          // numeric fields holding non-numeric text are corrected too, not only empty ones.
+          const labelOf = (inp) => {
+            const w = inp.closest('.gw-InputWidget');
+            const l = w && w.querySelector('.gw-label');
+            return ((l && l.innerText) || inp.getAttribute('aria-label') || inp.name || '').trim();
+          };
+          const valueFor = (label) => {
+            if (/e-?mail/i.test(label)) return 'automation.qa@example.com';
+            if (/phone|mobile|fax|NationalSubscriberNumber/i.test(label)) return '717-555-0100';
+            if (/\byear\b/i.test(label)) return '2018';
+            if (/estimate|amount|cost|value|odometer|mileage|miles|\bmph\b/i.test(label)) return '1000';
+            if (/zip|postal/i.test(label)) return '19103';
+            // Ability to pay refuses a vehicle with no VIN ("Serial number must be present", CONFIRMED 2026-10-21).
+            if (/^\s*VIN\b|serial number/i.test(label)) return '1HGCM82633A004352';
+            return 'Automated E2E';
+          };
           for (const inp of document.querySelectorAll('textarea, input[type="text"]')) {
-            if (!inp.offsetParent || inp.readOnly || inp.disabled || inp.value.trim()) continue;
+            if (!inp.offsetParent || inp.readOnly || inp.disabled) continue;
             const ph = (inp.placeholder || '').toLowerCase();
             if (ph.includes('mm/dd/yyyy') || ph.includes('hh:mm') || ph === 'aa') continue;
+            const label = labelOf(inp);
+            const want = valueFor(label);
+            const cur = inp.value.trim();
+            // Only year / amount / ZIP fields are re-written when they hold non-numeric text; anything else
+            // (incl. a valid existing email or phone) is left as it is once filled.
+            const numeric = /^\d+$/.test(want);
+            if (cur && !(numeric && !/^[\d,.$\s]+$/.test(cur))) continue;
             const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-            try { setter.call(inp, 'Automated E2E'); } catch (_) { inp.value = 'Automated E2E'; }
+            try { setter.call(inp, want); } catch (_) { inp.value = want; }
             inp.dispatchEvent(new Event('input',  { bubbles: true }));
             inp.dispatchEvent(new Event('change', { bubbles: true }));
+            if (numeric) done.push(`${label || 'field'}=${want}`);
           }
           // Unanswered Yes/No questions default to No, matching the recording.
           for (const rg of document.querySelectorAll('[role="radiogroup"]')) {
@@ -980,12 +1025,36 @@ async function fillCloudNewExposure(page, coverageLabel) {
         }).catch(() => []);
         if (popupFilled.length) console.log('CLOUD exposure: incident popup set ' + popupFilled.join(' | '));
 
+        // OK -> if CC keeps the incident open (validation errors), fix what it names and OK again. CONFIRMED
+        // 2026-10-20: dependent required dropdowns (Vehicle Type, Relation to Insured, "Is there a loan on the
+        // Vehicle?", "Is this loss:") only appear after the first selections, so one fill pass is never enough.
         const ok = page.getByRole('button', { name: 'OK' }).first();
-        if (await ok.isVisible().catch(() => false)) {
+        const inIncident = () => page.getByText(/^Return to New Exposure/).first().isVisible().catch(() => false);
+        for (let r = 0; r < 4; r++) {
+          if (!await ok.isVisible().catch(() => false)) break;
           await ok.click().catch(() => {});
           await page.waitForTimeout(2000);
-          console.log('CLOUD exposure: incident popup OK clicked');
+          console.log('CLOUD exposure: incident popup OK clicked' + (r ? ` (round ${r + 1})` : ''));
+          if (!await inIncident()) break;
+          const fixed = await fixFieldsFromValidation(page).catch(() => []);
+          await answerCloudRadioGroups(page).catch(() => {});
+          await answerUnansweredYesNoPairs(page).catch(() => {});
+          // Any required dropdown still on <none> takes its first real option.
+          await page.evaluate(() => {
+            for (const sel of document.querySelectorAll('select')) {
+              if (!sel.offsetParent || sel.disabled) continue;
+              const cur = (sel.options[sel.selectedIndex] || {}).text || '';
+              if (cur && !/^<?none>?$/i.test(cur.trim())) continue;
+              const opt = [...sel.options].find(o => o.text && !/^<?none>?$/i.test(o.text.trim()));
+              if (!opt) continue;
+              sel.value = opt.value;
+              sel.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          }).catch(() => {});
+          await page.waitForTimeout(1200);
+          console.log('CLOUD exposure: incident still open — fixed ' + (fixed.length ? fixed.slice(0, 6).join(', ') : 'remaining required dropdowns'));
         }
+        if (await inIncident()) console.log('CLOUD exposure: incident popup could NOT be completed — CC says: ' + (await readCloudValidation(page)).slice(0, 300));
       }
     }
   }
@@ -1057,7 +1126,12 @@ async function fillCloudNewExposure(page, coverageLabel) {
     await page.waitForTimeout(500);
     await update.click().catch(() => {});
     await page.waitForTimeout(2500);
-    saved = !(await update.isVisible().catch(() => false));
+    // "Update no longer visible" is NOT proof of a save: an incident popup that failed validation also hides it
+    // (CONFIRMED 2026-10-20 — reported SAVED while "New Vehicle Incident" sat open with "Year : must be a
+    // four-digit year", and the claim ended up with no exposure). Require: no incident popup, no page errors.
+    const incidentOpen = await page.getByText(/^Return to New Exposure/).first().isVisible().catch(() => false);
+    const pageErrors = await page.getByText('Validation errors on current page').first().isVisible().catch(() => false);
+    saved = !(await update.isVisible().catch(() => false)) && !incidentOpen && !pageErrors;
   }
 
   if (saved) {
@@ -1065,8 +1139,11 @@ async function fillCloudNewExposure(page, coverageLabel) {
   } else {
     const vtext = await readCloudValidation(page);
     const bad = await cloudInvalidFields(page);
+    // The page-level "Errors:" block (gw-message) is separate from the Validation Results panel — include it.
+    const pageMsgs = await page.evaluate(() => [...new Set([...document.querySelectorAll('.gw-message, [class*="gw-message-type"]')]
+      .filter(e => e.offsetParent).map(e => (e.innerText || '').replace(/\s+/g, ' ').trim()).filter(Boolean))].join(' / ').slice(0, 600)).catch(() => '');
     console.log('CLOUD exposure: "' + coverageLabel + '" NOT saved. CC says: ' +
-                (vtext || '(Validation Results panel empty)') +
+                (vtext || '(Validation Results panel empty)') + (pageMsgs ? ' | page errors: ' + pageMsgs : '') +
                 (bad.length ? ' | invalid fields: ' + bad.map(b => b.label + ' [' + b.reason + ']').join(', ') : ''));
 
     // With no invalid field to explain the rejection, the next candidate is a
@@ -1179,9 +1256,9 @@ async function fillCloudNewExposure(page, coverageLabel) {
 // Only the buttons this LOB actually renders are used, so an auto claim gets a
 // vehicle, a WC claim an injury, and a property claim property damage - without
 // the caller needing to know which.
-async function addCloudIncidents(page) {
+async function addCloudIncidents(page, kinds = ['Add Vehicle', 'Add Injury', 'Add Property Damage']) {
   const created = [];
-  for (const name of ['Add Vehicle', 'Add Injury', 'Add Property Damage']) {
+  for (const name of kinds) {
     const btn = page.getByRole('button', { name, exact: true }).first();
     if (!await btn.isVisible().catch(() => false)) continue;
 
@@ -1210,10 +1287,19 @@ async function addCloudIncidents(page) {
       for (const inp of document.querySelectorAll('textarea, input[type="text"]')) {
         if (!inp.offsetParent || inp.readOnly || inp.disabled || inp.value.trim()) continue;
         const ph = (inp.placeholder || '').toLowerCase();
+        // Field identity from its label/name: CONFIRMED 2026-10-20 (HO injury incident, cloud/test) that
+        // "Automated E2E" in Email / Alternate Email ("must be a valid email address") kept the incident unsaved.
+        const w = inp.closest('.gw-InputWidget');
+        const lab = (((w && w.querySelector('.gw-label')) || {}).innerText || '') + ' ' + (inp.name || '');
         let val = 'Automated E2E';
-        if (ph.includes('mm/dd/yyyy')) val = today;
+        if (ph.includes('mm/dd/yyyy')) val = /hire|birth/i.test(lab) ? '01/01/2020' : today;   // hire/birth before the loss date
         else if (ph.includes('hh:mm'))  val = '09:00';
         else if (ph === 'aa')           continue;   // meridiem toggle, clicked below
+        else if (/e-?mail/i.test(lab))  val = 'automation.qa@example.com';
+        else if (/phone|mobile|fax|NationalSubscriberNumber/i.test(lab)) val = '717-555-0100';
+        else if (/\byear\b/i.test(lab)) val = '2018';
+        else if (/zip|postal/i.test(lab)) val = '19103';
+        else if (/^\s*VIN\b|serial number/i.test(lab)) val = '1HGCM82633A004352';
         const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
         try { setter.call(inp, val); } catch (_) { inp.value = val; }
         inp.dispatchEvent(new Event('input',  { bubbles: true }));
@@ -1872,7 +1958,9 @@ async function fillIncidentFields(page) {
       if (isMoney) val = '1000';
       if (/occupant/.test(lbl))       val = '1';
       else if (/valuation|estimate|amount|value/.test(lbl)) val = '1000';
-      if (ph.includes('mm/dd/yyyy')) val = today;
+      // Hire / birth dates must be well BEFORE the loss date — "today" was rejected on WC with "Date of hire must be
+      // before the date of loss" (CONFIRMED 2026-10-21, cloud/test).
+      if (ph.includes('mm/dd/yyyy')) val = /hire|birth/.test(lbl) ? '01/01/2020' : today;
       else if (ph.includes('hh:mm'))  val = '09:00';
       else if (ph === 'aa')           continue;
       else if (ph.includes('#####') || /zip|postal/.test(lbl)) val = '17601';
@@ -3743,6 +3831,7 @@ async function fillLossDetailsCloud(page, {
   lossState = 'PA',
   lossCauseCode = '',
   whatHappened = 'Automated FNOL test submission.',
+  incidents,
 } = {}) {
   console.log('FNOL Step 3: Loss Details...');
   await page.waitForLoadState('domcontentloaded');
@@ -3789,7 +3878,7 @@ async function fillLossDetailsCloud(page, {
   // cannot save without its incident, and creating one mid-exposure means a
   // half-built exposure is abandoned when that fails. With incidents already on
   // the claim, the exposure screen only has to SELECT one.
-  await addCloudIncidents(page);
+  await addCloudIncidents(page, incidents);
 
   // The Duplicate Claims panel may appear at the bottom of Step 3.
   // The "Close" button in GW Cloud might be a <div> or <button>; try both.
@@ -6550,6 +6639,10 @@ async function completeFNOL(page, {
   lossDetails = {},
   claimantInfo = {},
   exposures = [],
+  // Cloud only: which incidents Step 3 adds (default all three). The OneInc claim provisioner passes a subset —
+  // since 2026-10-21 TEST auto-creates exposures+reserves from the injury / property-damage incidents on save and
+  // rejects them without a claimant number ("Please enter a claimant number for this exposure").
+  incidents,
   assertClaimNumber = true
 }) {
 
@@ -6640,7 +6733,8 @@ async function completeFNOL(page, {
     await fillLossDetailsCloud(page, {
       lossState: lossDetails.lossState || 'PA',
       lossCauseCode: lossDetails.lossCauseCode || '',
-      whatHappened: lossDetails.lossDescription || 'Automation FNOL test'
+      whatHappened: lossDetails.lossDescription || 'Automation FNOL test',
+      incidents,
     });
   }
 

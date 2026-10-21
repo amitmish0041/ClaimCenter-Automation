@@ -1241,8 +1241,14 @@ async function pollForClaimNumber(page) {
       // explanation at all.
       const t = (document.body.innerText || '') + ' ' + (document.body.textContent || '');
       const step = (t.match(/Step\s*\d+\s*of\s*5[^\n]*/i) || [])[0] || '';
-      const errs = [...t.matchAll(/^(.*(?:Missing required field|already exists on another claim)[^\n]*)$/gim)]
+      const errs = [...t.matchAll(/^(.*(?:Missing required field|already exists on another claim|application error occurred|Exception occurred)[^\n]*)$/gim)]
         .map(m => m[1].trim()).slice(0, 4);
+      // Also the page-level error banner (gw-message), e.g. CC's server-side "An application error occurred …"
+      // (CONFIRMED 2026-10-20 on cloud/test: Finish failed with it and the run reported "No validation text").
+      for (const e of document.querySelectorAll('.gw-message, [class*="gw-message-type"]')) {
+        const x = (e.innerText || '').replace(/\s+/g, ' ').trim();
+        if (e.offsetParent && x && !errs.includes(x) && errs.length < 6) errs.push(x.slice(0, 800));
+      }
       return { step, errs };
     }).catch(() => ({ step: '', errs: [] }));
     // A claimant-number collision here means this POLICY has been used for so

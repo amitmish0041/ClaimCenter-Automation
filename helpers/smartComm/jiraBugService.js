@@ -173,4 +173,5 @@ function jiraCell(item) {
     : 'NEW — no matching bug';
 }
 
-module.exports = { loadKnownBugs, matchFinding, annotateTemplateResults, jiraCell };
+// jiraConfig/searchJql are also used by the OneInc suite's story-readiness lookup (helpers/oneInc/jiraReadiness.js).
+module.exports = { loadKnownBugs, matchFinding, annotateTemplateResults, jiraCell, jiraConfig, searchJql };
