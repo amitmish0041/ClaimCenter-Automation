@@ -109,3 +109,24 @@ test('overlay forms: a typed value counts only inside its own box; rows are labe
   assert.equal(v.overlayValuePrinted(pg, boxB), false, 'box B has no X of its own — A\'s X doesn\'t count');
   assert.equal(v.overlayRowLabel(pg, boxA), 'Sitting', 'fragments joined, the next row ignored');
 });
+
+test('FREE1: a mapping doc with more free-form items than the live session has editable places fails (SMART-1522)', () => {
+  const { _test: v } = require('../../helpers/smartComm/validationService');
+  const doc = [{ label: 'Your Invoice No.:' }, { label: 'Dear' }, { label: 'j. Working with biohazards' }];
+  const live = [
+    { expectedEditable: true, technicalName: 'editableField1', labelContext: 'Your Invoice No.:' },
+    { expectedEditable: true, technicalName: 'editableField1', labelContext: 'Dear' },
+    { expectedEditable: false, technicalName: 'claimNumber', labelContext: 'Our Claim No.:' },
+  ];
+  const fail = v.freeFormBlanksCheck(doc, live, 0);
+  assert.equal(fail.result, 'FAIL', '3 doc items, 2 editable places');
+  assert.match(fail.reason, /biohazards/, 'names the item with no matching label');
+  assert.equal(v.freeFormBlanksCheck(doc, live, 1).result, 'PASS', 'an editable paragraph counts as a place to type');
+  assert.equal(v.freeFormBlanksCheck([], live, 0), null, 'no free-form items in the doc — no row');
+});
+
+test('PAGE1/FRAUD0 helpers: OCR page split', () => {
+  // ocrPages is internal; exercised through buildPageAndFraudChecks on a missing PDF, which must not throw.
+  const { _test: v } = require('../../helpers/smartComm/validationService');
+  return v.buildPageAndFraudChecks('does-not-exist.pdf', '', { mentionsFraudLanguage: true }).then((rows) => assert.deepEqual(rows, []));
+});

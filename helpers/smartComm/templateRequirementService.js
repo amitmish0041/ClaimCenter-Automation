@@ -936,6 +936,33 @@ function quietly(fn) {
   try { return fn(); } catch (_) { return null; } finally { console.log = log; }
 }
 
+// Every blank the BA marked "Free Form/Editable" (an empty Word text field the user fills in), with its label: the
+// nearest text to its left in its table row — checkbox cells have none, so "0-10 lbs" / "j. Working with
+// biohazards…"; a footer row "COMPLETED BY: _ SPOKE WITH: _" gives each blank its own — or, outside a table, the text
+// just before it on its line. An overlay form's live boxes are compared against this list,
+// so a line the doc has but the template lost is reported (Jira SMART-1522, DIG220 question j, 2026-10-21).
+function freeFormFieldsFromDocx(documentXml, anchors, comments) {
+  const out = [];
+  for (const a of anchors) {
+    const c = comments[a.id];
+    if (!c || !/free\s*form/i.test(c.fullText) || a.text.replace(/FORMTEXT|\s/g, '')) continue; // an empty blank only
+    const trStart = Math.max(documentXml.lastIndexOf('<w:tr>', a.startIdx), documentXml.lastIndexOf('<w:tr ', a.startIdx));
+    const trEnd = documentXml.indexOf('</w:tr>', a.startIdx);
+    const inRow = trStart >= 0 && trEnd >= 0 && documentXml.lastIndexOf('</w:tr>', a.startIdx) < trStart;
+    let label = '';
+    if (inRow) {
+      const cells = documentXml.slice(trStart, a.startIdx).split('</w:tc>').map((x) => textOfRuns(x).replace(/\s+/g, ' ').trim());
+      label = cells.reverse().find((t) => t.replace(/[^A-Za-z0-9]/g, '').length >= 2) || '';
+    } else {
+      const pStart = Math.max(documentXml.lastIndexOf('<w:p>', a.startIdx), documentXml.lastIndexOf('<w:p ', a.startIdx));
+      const before = textOfRuns(documentXml.slice(pStart, a.startIdx)).split(/\t+/).map((t) => t.trim()).filter(Boolean);
+      label = before[before.length - 1] || '';
+    }
+    out.push({ commentId: a.id, label: label.replace(/\s+/g, ' ').trim() });
+  }
+  return out;
+}
+
 function readDocx(localPath, template) {
   if (!AdmZip) throw new Error('adm-zip is not installed — run npm install in ClaimCenter-Automation');
 
@@ -952,7 +979,10 @@ function readDocx(localPath, template) {
     const anchors = parseCommentAnchors(documentXml);
     if (anchors.length) {
       console.log(`[SmartComm] templateRequirementService: ${template.digNumber} using comment-driven requirements (${anchors.length} BA-annotated fields)`);
-      return { requirements: buildRequirementsFromComments(paragraphs, anchors, comments), mode: 'comments', mentionsFraudLanguage };
+      return {
+        requirements: buildRequirementsFromComments(paragraphs, anchors, comments), mode: 'comments', mentionsFraudLanguage,
+        freeFormFields: freeFormFieldsFromDocx(documentXml, anchors, comments),
+      };
     }
   }
 

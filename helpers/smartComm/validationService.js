@@ -35,7 +35,7 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
     return blockedTemplateResult(dig, `Template "${dig}" was not found in the SmartCOMM catalog (Claims_Documents_Index.xlsx)`);
   }
 
-  const { requirements, sourceFile, mode, mentionsFraudLanguage } = await templateRequirementService.getRequirements(template, catalogService.DATA_DIR);
+  const { requirements, sourceFile, mode, mentionsFraudLanguage, freeFormFields = [] } = await templateRequirementService.getRequirements(template, catalogService.DATA_DIR);
   // Overlay forms (catalog Overlay = "Yes", e.g. DIG150MIC): the mapping doc is scanned page images — no text,
   // so no static-wording requirements can be derived (CONFIRMED 2026-10-14: DIG150MIC's .docx has 0 text runs,
   // only images). They're still validated on DATA: every Data Dictionary field with an Xpath for this DIG is
@@ -148,7 +148,7 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
         const i = next++;
         if (i >= scenarios.length) return;
         const variant = scenarioVariants.getVariantForIndex(i);
-        scenarioResults[i] = await runScenario(workerPage, { template, scenario: scenarios[i], requirements, recipientEmail, variant, mentionsFraudLanguage, interactive, s3Session, sourceFile });
+        scenarioResults[i] = await runScenario(workerPage, { template, scenario: scenarios[i], requirements, recipientEmail, variant, mentionsFraudLanguage, freeFormFields, interactive, s3Session, sourceFile });
       }
     }
     await Promise.all(pages.map(worker));
@@ -497,7 +497,7 @@ function upgradeRecipientDependentRequirements(reqs, re, additionalRecipient) {
   }
 }
 
-async function runScenario(page, { template, scenario, requirements, recipientEmail, variant, mentionsFraudLanguage, interactive, s3Session, sourceFile }) {
+async function runScenario(page, { template, scenario, requirements, recipientEmail, variant, mentionsFraudLanguage, freeFormFields = [], interactive, s3Session, sourceFile }) {
   scenario = { ...scenario };
   const base = {
     scenarioId: scenario.scenarioId,
@@ -771,7 +771,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
         template, scenario, effectiveTestData, recipient, additionalRecipient,
         fileNamePrefix: `${template.digNumber}_${scenario.testData.claimNumber}_${scenario.scenarioId}`,
         s3Session, claimNumber: base.claimNumber,
-        commentFieldNames: scenarioRequirements.map((r) => r.fieldName).filter(Boolean),
+        commentFieldNames: scenarioRequirements.map((r) => r.fieldName).filter(Boolean), freeFormFields,
         freeFormSamples: scenarioRequirements.filter((r) => /free\s*form/i.test(r.fieldName || '') && r.sampleValue).map((r) => r.sampleValue),
       });
       pdfPath = result.pdfPath;
@@ -956,6 +956,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
         }
       }
     }
+    validations.push(...await buildPageAndFraudChecks(pdfPath, text, { mentionsFraudLanguage: mentionsFraudLanguage || scenarioRequirements.some((r) => /fraud language/i.test(r.fieldName || '')) }));
     // Append the archive .json filing-metadata checks (META*) so they count toward the scenario result and
     // render in their own report table (see reportService). A wrong claim #/template here is a real failure.
     if (metadataChecks && metadataChecks.length) validations.push(...metadataChecks);
@@ -1341,7 +1342,7 @@ function assignByKnownValue(interactiveChecks, digNumber, knownValues) {
 // Document Properties Identifier (see helpers/s3Download/s3AdminService.js — CONFIRMED live that this
 // Identifier is exactly the S3 object's filename). See interactiveEditService.js's own header for what in
 // here is still a first-draft guess vs. actually confirmed live.
-async function runInteractiveGeneration(page, { template, scenario, effectiveTestData, recipient, additionalRecipient, fileNamePrefix, s3Session, commentFieldNames, claimNumber, freeFormSamples = [] }) {
+async function runInteractiveGeneration(page, { template, scenario, effectiveTestData, recipient, additionalRecipient, fileNamePrefix, s3Session, commentFieldNames, claimNumber, freeFormSamples = [], freeFormFields = [] }) {
   const log = (m) => console.log(`[SmartComm] ${scenario.scenarioId}: ${m}`);
 
   // Live preview for the Runner UI (Commercial Line Performance test/runner) — a read-only, auto-refreshing
@@ -1399,8 +1400,10 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // BA marked "Free Form Editable" is meant to be editable, so it's excluded; anything else is a defect (Jira
   // SMART-1313 fraud language editable, SMART-1339 paragraphs deletable). Read before any field is edited.
   const lockChecks = [];
+  let unlockedParagraphCount = 0; // editable paragraphs — free-form areas count toward FREE1's live total
   try {
     const { total, unlocked } = await interactiveEditService.readUnlockedContent(frame);
+    unlockedParagraphCount = unlocked.length;
     const squash = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const intended = (t) => freeFormSamples.some((s) => squash(s).length >= 8 && (squash(s).includes(squash(t)) || squash(t).includes(squash(s))));
     const candidates = unlocked.filter((t) => !intended(t));
@@ -1805,7 +1808,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     }
     const finalPath = path.join(documentService.DOWNLOAD_DIR, `${fileNamePrefix}_interactive.pdf`);
     fs.renameSync(pdfResult.downloaded.localPath, finalPath);
-    if (overlayEdits.length) lockChecks.push(...await buildOverlayChecks(overlayEdits, finalPath, log));
+    if (overlayEdits.length) lockChecks.push(...await buildOverlayChecks(overlayEdits, finalPath, log, freeFormFields));
 
     // Co-located filing metadata (<identifier>.json, the SAME archive folder as the PDF) — per user direction
     // 2026-10-13. Unlike the input review-case payload fetched below (only sometimes present — ~2/7 of recent
@@ -1940,6 +1943,12 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
         unmatchedTrackedFields.map((t) => `${t.row.attributeName} (dictionary=${t.row.editable ? 'Yes' : 'No'})`).join('; '));
     }
 
+    // Overlay forms compare their blanks row by row (OVL-M, buildOverlayChecks); every other template here.
+    if (!overlayEdits.length) {
+      const free = freeFormBlanksCheck(freeFormFields, interactiveChecks, unlockedParagraphCount);
+      if (free) lockChecks.push(free);
+    }
+
     return { pdfPath: finalPath, interactiveChecks, metadataChecks, lockChecks, dictionaryReference, payload, rawPayloadRoot, choicesApplied, trackedFields, unmatchedTrackedFields };
   });
   } finally {
@@ -1962,6 +1971,64 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
 // fields' "vanishes completely" signature was — changing the actual test VALUE for suspected date fields
 // without confirming that's really the mechanism risks fixing nothing while adding untested complexity.
 const DATE_SHAPED_RE = /\d{1,2}\/\d{1,2}\/\d{2,4}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}/i;
+
+// ── Whole-document checks QA found by eye (Jira SMART-1522, DIG220, 2026-10-21) ─────────────────────────────
+// PAGE1: a blank page — DIG220 prints "Fraud Language Continued on Next Page..." and then an empty page 2. A page with
+// no text layer may still be a picture of text (overlay/scanned pages), so it only counts as blank when OCR of the
+// rendered page reads nothing either. (pdf.js's getOperatorList would tell drawn-vs-empty directly, but under Node it
+// loads fonts through `document` and crashes the process from a worker callback no try/catch can reach.)
+// FRAUD0: fraud language printed although the mapping doc never asks for it. The fraud checks only ran when the doc
+// mentioned fraud language, so wording the doc doesn't specify printed unchecked (QA: "Fraud Language is not listed
+// in the mapping document but is showing up").
+// OCR output ("=== page N" then its lines, see ocr/ocr-pdf.ps1) → the recognised text of each page.
+function ocrPages(ocrText) {
+  const out = [];
+  let cur = null;
+  for (const line of String(ocrText || '').split(/\r?\n/)) {
+    const m = /^=== page (\d+)/.exec(line);
+    if (m) { cur = Number(m[1]) - 1; out[cur] = ''; } else if (cur !== null) out[cur] += `${line} `;
+  }
+  return out.map((t) => (t || '').trim());
+}
+async function buildPageAndFraudChecks(pdfPath, text, { mentionsFraudLanguage }) {
+  const checks = [];
+  const pages = (await require('./pdfLayoutText').extractPositionedItems(pdfPath).catch(() => []))
+    .map((p, i) => ({ n: i + 1, text: p.items.map((it) => it.str).join(' ').replace(/\s+/g, ' ').trim() }));
+  const noText = pages.filter((p) => !p.text);
+  if (pages.length && noText.length < pages.length) {
+    const ocr = noText.length ? ocrPages(await require('./pdfOcrService').ocrPdfText(pdfPath).catch(() => null)) : [];
+    const ocrRan = noText.length > 0 && ocr.length > 0;
+    const blank = ocrRan ? noText.filter((p) => !(ocr[p.n - 1] || '').replace(/[^A-Za-z0-9]/g, '')) : [];
+    const why = blank.map((b) => {
+      const prev = pages[b.n - 2];
+      return prev && /continued on (?:the )?next page/i.test(prev.text)
+        ? `page ${b.n} is blank, though page ${b.n - 1} says "Continued on Next Page"` : `page ${b.n} is blank`;
+    });
+    const unconfirmed = noText.length && !ocrRan;
+    checks.push({
+      id: 'PAGE1', description: 'Every page of the document has content (no blank pages)',
+      expected: 'No blank pages',
+      actual: blank.length ? why.join('; ') : unconfirmed ? `page(s) ${noText.map((p) => p.n).join(', ')} have no text` : `${pages.length} page(s), none blank`,
+      result: blank.length ? 'FAIL' : unconfirmed ? 'BLOCKED' : 'PASS',
+      reason: blank.length ? `The generated PDF has an empty page — ${why.join('; ')} (same defect as Jira SMART-1522).`
+        : unconfirmed ? 'These pages have no text layer and OCR wasn\'t available to tell a blank page from a picture — check them visually.' : '',
+    });
+  }
+  if (!mentionsFraudLanguage) {
+    const found = fraudLanguageService.findFraudLanguageInText(String(text || ''));
+    // A Fraud Language sheet row (any state) printed word-for-word — the sheet match decides, the extractor shows it.
+    if (found.length) {
+      const what = fraudLanguageService.extractFraudLanguageFromText(String(text || '')) || found[0].fraudLanguage;
+      checks.push({
+        id: 'FRAUD0', description: 'Fraud language prints only where the mapping doc calls for it',
+        expected: 'No fraud language (the mapping doc doesn\'t mention it)', actual: `Printed: "${String(what).slice(0, 120)}…"`,
+        result: 'FAIL',
+        reason: 'The PDF prints fraud language, but this template\'s mapping doc doesn\'t list it — either the doc is missing it or the template shouldn\'t print it (same question as Jira SMART-1522).',
+      });
+    }
+  }
+  return checks;
+}
 
 // ── PDF-overlay forms: checkboxes and blank lines (DIG220, per user direction 2026-10-21) ─────────────
 // readMergeFields only sees merge spans, so on an overlay form (a page image with typed-into boxes on top) every
@@ -2039,7 +2106,38 @@ function overlayColumnHeader(pg, e) {
   return joinFragments(nearestLine(above, b.yTop));
 }
 
-async function buildOverlayChecks(edits, pdfPath, log) {
+// A row label reduced for comparing the mapping doc's wording with the printed form's: letters/digits only, first 20
+// (the printed label can be cut at a line wrap — "j. Working with biohazards such as blood borne pathogens,").
+const labelKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+
+// FREE1 — the letter-template counterpart of OVL-M: the mapping doc's "Free Form/Editable" blanks need somewhere to
+// type in the live session. A missing DATA field already fails its own "Value for …" check against the PDF; a missing
+// blank has no value to look for, so nothing caught it (Jira SMART-1522 Issue #2). Lenient on purpose: in letters a
+// free-form item can be a pre-filled editable field ("Type of Loss:") or a whole editable paragraph ("We are denying
+// your claim because…"), so the live total is every editable field + every unlocked paragraph, and only a doc with
+// MORE free-form items than that fails. Measured 2026-10-21 on 62 templates' saved runs: a stricter "empty fields
+// only" count failed 27 of them, nearly all false; this one flags only overlay forms with whole sets of lines missing.
+// Labels only NAME the likely-missing items; they don't decide the result.
+function freeFormBlanksCheck(mappingFreeForm, interactiveChecks, unlockedParagraphs = 0) {
+  if (!mappingFreeForm || !mappingFreeForm.length) return null;
+  const live = (interactiveChecks || []).filter((c) => c.expectedEditable);
+  const liveTotal = live.length + unlockedParagraphs;
+  const tail = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(-15);
+  const unseen = mappingFreeForm.filter((f) => tail(f.label) && !live.some((c) => tail(c.labelContext) && (tail(c.labelContext).endsWith(tail(f.label)) || tail(f.label).endsWith(tail(c.labelContext)))));
+  const missing = mappingFreeForm.length - liveTotal;
+  const names = (missing > 0 ? (unseen.length ? unseen : mappingFreeForm) : []).map((f) => `"${truncateLabel(f.label || '(unlabelled)', 60)}"`);
+  return {
+    id: 'FREE1',
+    description: 'Every "Free Form/Editable" item in the mapping doc has an editable place in the live session',
+    expected: `${mappingFreeForm.length} editable item(s)`, actual: `${liveTotal} editable item(s) (${live.length} field(s), ${unlockedParagraphs} paragraph(s))`,
+    result: missing > 0 ? 'FAIL' : 'PASS',
+    reason: missing > 0
+      ? `The mapping doc has ${mappingFreeForm.length} free-form item(s) but the live session has only ${liveTotal} editable place(s) — at least ${missing} missing, likely among: ${names.slice(0, 8).join('; ')}${names.length > 8 ? '; …' : ''} (same kind of defect as Jira SMART-1522).`
+      : '',
+  };
+}
+
+async function buildOverlayChecks(edits, pdfPath, log, mappingFreeForm = []) {
   const pages = await require('./pdfLayoutText').extractPositionedItems(pdfPath).catch(() => []);
   for (const e of edits) {
     e.label = overlayRowLabel(pages[e.page], e);
@@ -2065,6 +2163,26 @@ async function buildOverlayChecks(edits, pdfPath, log) {
       reason: !e.typed
         ? `The mapping doc marks this line "Free Form/Editable", but typing into it in the editor didn't take${e.error ? ` (${e.error})` : ''}.`
         : e.printed ? '' : `"${e.value}" was typed into this line in the editor but isn't printed inside its box in the generated PDF.`,
+    });
+  });
+  // Lines the mapping doc has but the live form doesn't (Jira SMART-1522: no "If yes, please describe" line after DIG220
+  // question j). Counted per row label — the Height and Distance blanks share "0-10 lbs".
+  const liveByKey = {};
+  for (const e of edits.filter((x) => x.kind === 'text')) liveByKey[labelKey(e.label)] = (liveByKey[labelKey(e.label)] || 0) + 1;
+  const docByKey = {};
+  // Only when the live lines could be named (their labels come from the PDF) — otherwise every doc line would "miss".
+  const liveText = edits.filter((x) => x.kind === 'text');
+  const named = liveText.filter((x) => labelKey(x.label)).length;
+  if (liveText.length && named / liveText.length >= 0.5) {
+    for (const f of mappingFreeForm) (docByKey[labelKey(f.label)] = docByKey[labelKey(f.label)] || { label: f.label, n: 0 }).n++;
+  }
+  Object.values(docByKey).filter((d) => labelKey(d.label) && d.n > (liveByKey[labelKey(d.label)] || 0)).forEach((d, i) => {
+    const live = liveByKey[labelKey(d.label)] || 0;
+    checks.push({
+      id: `OVL-M${i + 1}`,
+      description: `Free-form line "${truncateLabel(d.label, 70)}" from the mapping doc is on the live form`,
+      expected: `${d.n} line(s)`, actual: `${live} line(s)`, result: 'FAIL',
+      reason: `The mapping doc has ${d.n} "Free Form/Editable" blank(s) for "${d.label}", but the live form has ${live} — the user has nowhere to write it (same defect as Jira SMART-1522).`,
     });
   });
   const pagesWithBoxes = [...new Set(edits.filter((e) => e.kind === 'checkbox').map((e) => e.page))];
@@ -2622,6 +2740,6 @@ module.exports = {
     recipientRoleFromTechnicalName, knownValueRole, buildMetadataChecks, buildEditValue, verifyInteractiveEditsInPdf,
     annotateInteractiveEditFailures, runLayoutChecks, payloadUnavailableCheck, metadataUnavailableCheck, rollUpScenario,
     buildXpathRequirements, linkTextFieldsToDictionary, printedNumberForms,
-    overlayValuePrinted, overlayRowLabel, overlayColumnHeader,
+    overlayValuePrinted, overlayRowLabel, overlayColumnHeader, buildPageAndFraudChecks, buildOverlayChecks, freeFormBlanksCheck,
   },
 };

@@ -91,3 +91,23 @@ test('Word tabs separate side-by-side columns instead of gluing them (DIG122A "V
   assert.ok(fixed.includes('Our mailing address is:') && fixed.includes('Our overnight address is:'), `address columns split: ${JSON.stringify(fixed)}`);
   assert.ok(!fixed.some((t) => /VacuumingOther|is:Our/.test(t)), `nothing glued: ${JSON.stringify(fixed)}`);
 });
+
+test('free-form blanks are listed with their row label (SMART-1522, DIG220)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mapdoc-'));
+  const cell = (inner) => `<w:tc><w:p>${inner}</w:p></w:tc>`;
+  const blank = (id) => `<w:commentRangeStart w:id="${id}"/><w:r><w:t xml:space="preserve"> </w:t></w:r><w:commentRangeEnd w:id="${id}"/>`;
+  const body = `<w:p>${run('Dear ')}${commented(0, 'John Smith')}</w:p>`
+    + `<w:tbl><w:tr>${cell(run('j. Working with biohazards'))}${cell('')}${cell(blank(1))}</w:tr>`
+    + `<w:tr>${cell(run('COMPLETED BY:'))}${cell(blank(2))}${cell(run('SPOKE WITH:'))}${cell(blank(3))}</w:tr></w:tbl>`;
+  const zip = new AdmZip();
+  zip.addFile('word/document.xml', Buffer.from(`<w:document ${W}><w:body>${body}</w:body></w:document>`));
+  const comments = { 0: 'Claimant Name', 1: 'Free Form/Editable', 2: 'Free Form/Editable', 3: 'Free Form/Editable' };
+  zip.addFile('word/comments.xml', Buffer.from(`<w:comments ${W}>${Object.entries(comments).map(([id, t]) => `<w:comment w:id="${id}" w:author="BA"><w:p>${run(t)}</w:p></w:comment>`).join('')}</w:comments>`));
+  const templatesDir = path.join(dir, 'Templates', 'ClaimCenter');
+  fs.mkdirSync(templatesDir, { recursive: true });
+  zip.writeZip(path.join(templatesDir, 'DIG901_Test.docx'));
+  const log = console.log; console.log = () => {};
+  let res;
+  try { res = await trs.getRequirements({ digNumber: 'DIG901', templateMappingDoc: 'DIG901_Test.docx' }, dir); } finally { console.log = log; }
+  assert.deepEqual(res.freeFormFields.map((f) => f.label), ['j. Working with biohazards', 'COMPLETED BY:', 'SPOKE WITH:']);
+});
