@@ -1284,6 +1284,21 @@ function knownValueRole(attributeName) {
   return null;
 }
 
+// What a field says it IS, from its own technical name or the label in front of it — 'insured' / 'claimant' / null.
+// A field that names its concept may only take a known value of that same concept: the insured is very often the
+// letter's recipient too, so "insuredName" / "getInsName" / "Policyholder:" / "Our Insured:" held exactly the To Name
+// value and was judged against "To Name" (locked) — a false "should be locked" FAIL (DIG26/DIG49, 2026-10-21; 8
+// templates in saved runs, incl. DIG217's insured address judged as "To Street Address"). Claimant fields had the
+// same guard since DIG89 (2026-10-14); this generalises it.
+function fieldConcept(c) {
+  const tech = String(c.technicalName || '');
+  const label = String(c.labelContext || '');
+  if (/insured|policy\s*holder|insname/i.test(tech) || /(policy\s*holder|insured)\s*:?\s*$/i.test(label)) return 'insured';
+  if (/cl(a)?imant|injured/i.test(tech) || /(claimant|injured\s+(?:party|person))(?:'s)?\s*(?:name)?\s*:?\s*$/i.test(label)) return 'claimant';
+  return null;
+}
+const knownValueConcept = (attributeName) => (/insured/i.test(attributeName) ? 'insured' : /claimant/i.test(attributeName) ? 'claimant' : null);
+
 function assignByKnownValue(interactiveChecks, digNumber, knownValues) {
   if (!knownValues.length) return;
   const claimed = new Set();
@@ -1294,6 +1309,7 @@ function assignByKnownValue(interactiveChecks, digNumber, knownValues) {
     // What recipient block this field's OWN technical name says it is (see recipientRoleFromTechnicalName) —
     // used just below to refuse a known value from a different block even when the values coincide.
     const fieldRole = recipientRoleFromTechnicalName(c.technicalName);
+    const concept = fieldConcept(c);
     // CONFIRMED live 2026-10-06 (DIG162): finding the first NOT-YET-CLAIMED match (the original approach) lets
     // a field whose text equally matches an EARLIER-priority, ALREADY-claimed value (e.g. "To Name" — already
     // claimed by the address block) fall through and settle for a LATER, lower-priority value that happens to
@@ -1308,10 +1324,9 @@ function assignByKnownValue(interactiveChecks, digNumber, knownValues) {
       // valued "To ..." row (and vice versa). Role-less known values (Claimant Name, etc.) are never filtered.
       const kvRole = knownValueRole(kv.attributeName);
       if (fieldRole && kvRole && kvRole !== fieldRole) return false;
-      // Same for a field whose own name says claimant — CONFIRMED live 2026-10-14 (DIG89): "climantName"
-      // (Injured Party's Name) held the same company as the To recipient and was judged against "To Name"
-      // (locked) instead of "Claimant Name" — a false "should be locked" FAIL.
-      if (/cl(a)?imant|injured/i.test(String(c.technicalName || '')) && kv.attributeName !== 'Claimant Name') return false;
+      // A field that names its concept (insured / claimant — see fieldConcept) only takes a value of that concept.
+      // CONFIRMED live 2026-10-14 (DIG89, "climantName" judged as "To Name") and 2026-10-21 (DIG26 "insuredName").
+      if (concept && knownValueConcept(kv.attributeName) !== concept) return false;
       // A "City, State, Zip" field holds a ZIP — CONFIRMED live 2026-10-14 (DIG6-WC-AL): a street line
       // ("105 S CLINTON ST") was claimed for "To City, State, Zip" by loose containment against the recipient's
       // address text, then reported as a mismatch against the payload's real city/state/zip.
@@ -1590,6 +1605,9 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     // when that screen's roles render blank (a pre-existing, unrelated capture gap), in which case this
     // entry is simply filtered out below, same graceful degradation as every other known-value source here.
     effectiveTestData && effectiveTestData.claimantName && { attributeName: 'Claimant Name', value: effectiveTestData.claimantName },
+    // The claim's insured — after the To rows on purpose: a label-less field holding the same name as the recipient
+    // is the address block (To Name); a field that names itself insured skips the To rows (fieldConcept) and lands here.
+    effectiveTestData && effectiveTestData.insuredName && { attributeName: 'Insured Name', value: effectiveTestData.insuredName },
   ].filter(Boolean));
 
   const passedChecks = interactiveChecks.filter((c) => c.result === 'PASS').length;
@@ -2739,7 +2757,7 @@ function buildMetadataChecks(meta, { template, claimNumber }) {
 module.exports = {
   validateTemplate,
   _test: {
-    recipientRoleFromTechnicalName, knownValueRole, buildMetadataChecks, buildEditValue, verifyInteractiveEditsInPdf,
+    recipientRoleFromTechnicalName, knownValueRole, assignByKnownValue, fieldConcept, buildMetadataChecks, buildEditValue, verifyInteractiveEditsInPdf,
     annotateInteractiveEditFailures, runLayoutChecks, payloadUnavailableCheck, metadataUnavailableCheck, rollUpScenario,
     buildXpathRequirements, linkTextFieldsToDictionary, printedNumberForms,
     overlayValuePrinted, overlayRowLabel, overlayColumnHeader, buildPageAndFraudChecks, buildOverlayChecks, freeFormBlanksCheck,

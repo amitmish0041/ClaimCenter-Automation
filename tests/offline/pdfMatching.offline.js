@@ -130,3 +130,22 @@ test('PAGE1/FRAUD0 helpers: OCR page split', () => {
   const { _test: v } = require('../../helpers/smartComm/validationService');
   return v.buildPageAndFraudChecks('does-not-exist.pdf', '', { mentionsFraudLanguage: true }).then((rows) => assert.deepEqual(rows, []));
 });
+
+test('known-value matching: a field that names itself insured is never judged as the recipient (DIG26, 2026-10-21)', () => {
+  const { _test: v } = require('../../helpers/smartComm/validationService');
+  const dd = require('../../helpers/smartComm/dataDictionaryService');
+  const saved = dd.getAttributeByExactName;
+  dd.getAttributeByExactName = (dig, name) => ({ scoped: true, row: { attributeName: name, editable: name === 'Insured Name' } });
+  try {
+    const checks = [
+      { technicalName: null, labelContext: '', before: '[MARTHA ANTOLICK]', expectedEditable: false },             // address block
+      { technicalName: 'insuredName', labelContext: 'Policyholder:', before: '[MARTHA ANTOLICK]', expectedEditable: true },
+    ];
+    v.assignByKnownValue(checks, 'DIG900', [{ attributeName: 'To Name', value: 'MARTHA ANTOLICK' }, { attributeName: 'Insured Name', value: 'MARTHA ANTOLICK' }]);
+    assert.equal(checks[0].dictionaryField, 'To Name', 'a label-less field with the recipient\'s name is still the address block');
+    assert.equal(checks[1].dictionaryField, 'Insured Name', 'the insured field takes Insured Name, not To Name');
+    assert.equal(v.fieldConcept({ labelContext: 'Our Insured:' }), 'insured');
+    assert.equal(v.fieldConcept({ technicalName: 'climantName' }), 'claimant');
+    assert.equal(v.fieldConcept({ technicalName: 'ToName', labelContext: 'Dear' }), null);
+  } finally { dd.getAttributeByExactName = saved; }
+});
