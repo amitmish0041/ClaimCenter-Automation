@@ -86,3 +86,26 @@ test('salutation: a fixed honorific that is not part of the recipient\'s name FA
 test('a disabled requirement is SKIPPED, never PASS', () => {
   assert.equal(one({ type: 'requiredText', expectedValue: 'anything', enabled: false, disabledReason: 'not this scenario' }, LETTER).result, 'SKIPPED');
 });
+
+test('OCR exact mode: only a word-for-word reading confirms wording (DIG122A, 2026-10-20)', () => {
+  const { ocrContains } = require('../../helpers/smartComm/pdfOcrService');
+  const ocr = 'PRESCRIPTION RECORDS: Any prescription records, the issuance or sale of\nprescription drugs, refill records and\nTO BE ELIGIBLE FOR BENEFITS, YOU MUST:';
+  assert.equal(ocrContains(ocr, 'PRESCRIPTION RECORDS: Any prescription records, the issuance or sale of prescription drugs', { exact: true }), true, 'a phrase across a line break is confirmed');
+  assert.equal(ocrContains(ocr, 'TO BE ELGIBLE FOR BENEFITS, YOU MUST:', { exact: true }), false, 'a one-word difference is not confirmed in exact mode');
+  assert.equal(ocrContains(ocr, 'TO BE ELGIBLE FOR BENEFITS, YOU MUST:'), true, 'the default (85%) mode would have accepted it — why exact mode exists');
+});
+
+test('overlay forms: a typed value counts only inside its own box; rows are labelled from the printed line (DIG220)', () => {
+  const { _test: v } = require('../../helpers/smartComm/validationService');
+  // Letter page, 816x1056px overlay = 612x792pt (0.75pt/px). Row "Sitting" at top 300px; two boxes on it.
+  const pg = { viewW: 612, viewH: 792, items: [
+    { str: 'Si', x: 54, y: 562, w: 6 }, { str: 'tting', x: 60, y: 562, w: 18 }, // label fragments, touching
+    { str: 'Walking', x: 54, y: 550, w: 30 },                                    // next row down — not this row's label
+    { str: 'X', x: 301, y: 562, w: 6 },                                          // typed into box A only
+  ] };
+  const boxA = { page: 0, pageW: 816, pageH: 1056, left: 400, top: 300, width: 14, height: 14, value: 'X' };
+  const boxB = { ...boxA, left: 500 };
+  assert.equal(v.overlayValuePrinted(pg, boxA), true, 'the X inside box A');
+  assert.equal(v.overlayValuePrinted(pg, boxB), false, 'box B has no X of its own — A\'s X doesn\'t count');
+  assert.equal(v.overlayRowLabel(pg, boxA), 'Sitting', 'fragments joined, the next row ignored');
+});

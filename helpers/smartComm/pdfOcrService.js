@@ -40,8 +40,10 @@ function editDistance(a, b) {
 
 // Is `expected` (fixed wording from the mapping doc) on the page according to the OCR text? Fill-in lines ("____"),
 // checkbox glyphs and punctuation are ignored. Whole phrase first; else ≥85% of its words (3+ letters) each found
-// within one OCR slip.
-function ocrContains(ocrText, expected) {
+// within one OCR slip. `exact` keeps only the whole-phrase test (letters/digits in order, look-alikes folded) — for
+// pages where most wording IS text and OCR only stands in for a few graphic phrases, the 85% rule would also pass a
+// real one-word difference (the mapping doc's "ELGIBLE" vs the printed "ELIGIBLE", DIG122A 2026-10-20).
+function ocrContains(ocrText, expected, { exact = false } = {}) {
   const want = String(expected || '').replace(/_{2,}/g, ' ');
   // A list number on its own ("2.", "4.", "(a)" — DIG47's question numbers): that token at the start of an OCR line or
   // after a space.
@@ -51,6 +53,7 @@ function ocrContains(ocrText, expected) {
   if (whole.length < 2) return false;
   const hay = fold(ocrText);
   if (hay.includes(whole)) return true;
+  if (exact) return false;
   const words = (want.toLowerCase().match(/[a-z0-9]{3,}/g) || []).map(fold);
   if (!words.length) return false;
   const ocrWords = new Set((String(ocrText).toLowerCase().match(/[a-z0-9]{2,}/g) || []).map(fold));

@@ -48,8 +48,15 @@ function decodeXmlEntities(s) {
     .replace(/&amp;/g, '&');
 }
 
+// A Word tab (<w:tab/>, inside a run) comes through as "\t" — it separates side-by-side columns ("Vacuuming<tab>
+// Other: ____", DIG122A; "Our mailing address is:<tab><tab>Our overnight address is:", DIG75), and dropping it glued
+// them into "VacuumingOther" / "...is:Our overnight..." — wording the PDF never prints (CONFIRMED 2026-10-20). A run
+// of 2+ tabs is then split into separate pieces like any other gap (classifyResidualFragment). <w:tab w:val=…/> in
+// <w:tabs> is a tab-stop DEFINITION in paragraph properties, not a tab character, so only the bare form counts.
+const RUN_TEXT_RE = /<w:t[^>]*>([^<]*)<\/w:t>|<w:tab\/>/g;
+
 function textOfRuns(xmlFragment) {
-  return decodeXmlEntities(Array.from(xmlFragment.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)).map(m => m[1]).join(''));
+  return decodeXmlEntities(Array.from(xmlFragment.matchAll(RUN_TEXT_RE)).map(m => (m[1] !== undefined ? m[1] : '\t')).join(''));
 }
 
 // Like textOfRuns, but also emits a space for every paragraph boundary
@@ -64,8 +71,8 @@ function textOfRuns(xmlFragment) {
 // way to interleave the space at the right point in the OUTPUT text.
 function textOfRunsWithParagraphBreaks(xmlFragment) {
   let result = '';
-  for (const m of xmlFragment.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>|<\/w:p>/g)) {
-    result += m[1] !== undefined ? m[1] : ' ';
+  for (const m of xmlFragment.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>|<w:tab\/>|<\/w:p>/g)) {
+    result += m[1] !== undefined ? m[1] : (m[0] === '<w:tab/>' ? '\t' : ' ');
   }
   return decodeXmlEntities(result);
 }

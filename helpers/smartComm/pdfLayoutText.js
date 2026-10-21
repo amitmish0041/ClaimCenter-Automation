@@ -68,4 +68,25 @@ async function extractLayoutText(pdfPath) {
   return out.join('\n');
 }
 
-module.exports = { extractLayoutText };
+// Every text item with its position, page by page: [{ viewW, viewH, items: [{ str, x, y, w }] }] in PDF points, y up
+// from the bottom (baseline). For checks that need to know WHERE something printed — an "X" typed into one checkbox
+// of an overlay form (DIG220) is the same "X" as every other box's, only its position says which box it belongs to.
+async function extractPositionedItems(pdfPath) {
+  if (!pdfParse || !pdfPath || !fs.existsSync(pdfPath)) return [];
+  const pages = [];
+  await pdfParse(fs.readFileSync(pdfPath), {
+    pagerender: async (pageData) => {
+      const tc = await pageData.getTextContent({ normalizeWhitespace: false, disableCombineTextItems: false });
+      const [x0, y0, x1, y1] = pageData.view || [0, 0, 612, 792];
+      const idx = typeof pageData.pageIndex === 'number' ? pageData.pageIndex : pageData.pageNumber - 1;
+      pages[idx >= 0 ? idx : pages.length] = {
+        viewW: x1 - x0, viewH: y1 - y0,
+        items: tc.items.filter((it) => it.str && it.str.trim()).map((it) => ({ str: it.str, x: it.transform[4] - x0, y: it.transform[5] - y0, w: it.width || 0 })),
+      };
+      return '';
+    },
+  });
+  return pages.map((p) => p || { viewW: 612, viewH: 792, items: [] });
+}
+
+module.exports = { extractLayoutText, extractPositionedItems };

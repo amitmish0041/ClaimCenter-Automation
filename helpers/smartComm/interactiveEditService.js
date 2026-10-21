@@ -854,6 +854,47 @@ async function probeParagraphEditable(frame, page, text) {
   }
 }
 
+// ── PDF-overlay forms (DIG220 Claimant Job Description, CONFIRMED live 2026-10-21) ─────────────────
+// An overlay template is a page IMAGE (.th-overlay-form > img.th-overlay-image) with absolutely-positioned boxes on
+// top. Its data fields are ordinary merge spans (readMergeFields finds them), but its checkboxes and blank lines are
+// `.th-overlay-textfield` boxes: an empty, unlocked free-text fragment the user clicks and types into ("X" in a
+// checkbox). They carry no merge span, so readMergeFields never saw them — DIG220 showed 4 fields of its 190.
+// Returns every unlocked one with its page and box in the overlay image's own pixels (the PDF page at 96 dpi).
+async function readOverlayTextFields(frame) {
+  return frame.evaluate(() => {
+    const out = [];
+    Array.from(document.querySelectorAll('.th-contentEditorBody .th-overlay-form')).forEach((form, page) => {
+      const img = form.querySelector('img.th-overlay-image');
+      const pageW = (img && Number(img.getAttribute('width'))) || form.clientWidth;
+      const pageH = (img && Number(img.getAttribute('height'))) || form.clientHeight;
+      form.querySelectorAll('.th-overlay-textfield').forEach((el) => {
+        if (el.closest('.th-frag-locked') || el.querySelector('.th-frag-locked')) return;
+        const px = (p) => parseFloat(el.style[p]) || 0;
+        const text = (el.textContent || '').replace(/[¶ ]/g, ' ').replace(/\s+/g, ' ').trim();
+        out.push({ id: el.id, page, pageW, pageH, left: px('left'), top: px('top'), width: px('width'), height: px('height'), text });
+      });
+    });
+    return out;
+  }).catch(() => []);
+}
+
+// Types `value` into one overlay box (by its element id, which the editor keeps across re-draws) and reports whether
+// that box now holds it. Never throws.
+async function typeIntoOverlayField(frame, page, field, value) {
+  const box = frame.locator(`#${field.id}`);
+  try {
+    await box.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+    await box.click({ position: { x: Math.max(2, field.width / 2), y: Math.max(2, field.height / 2) }, force: true, timeout: 5000 });
+    await page.keyboard.press('End');
+    await page.keyboard.type(value);
+    await page.waitForTimeout(120);
+    const now = await box.evaluate((el) => (el.textContent || '').replace(/[¶ ]/g, ' ').replace(/\s+/g, ' ').trim()).catch(() => '');
+    return { typed: now.includes(value), after: now };
+  } catch (e) {
+    return { typed: false, after: '', error: e.message.split('\n')[0] };
+  }
+}
+
 // ── 5. Read the Identifier off Document Properties — the S3 lookup key ─────────────────────────────
 async function readDocumentPropertiesIdentifier(page) {
   const row = page.locator('div, tr').filter({ hasText: /^Identifier$/ }).last();
@@ -867,4 +908,5 @@ module.exports = {
   clickInteractiveAndWaitForEditor, getEditorFrame, readMergeFields, inspectAndMaybeEdit,
   saveChanges, completeDocument, dismissAnyPopups, readDocumentPropertiesIdentifier, saveDiagnostic,
   installDialogAutoAccept, selectAllYesNoChoices, readUnlockedContent, probeParagraphEditable,
+  readOverlayTextFields, typeIntoOverlayField,
 };

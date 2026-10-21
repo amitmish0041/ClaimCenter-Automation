@@ -935,6 +935,25 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
             ? `Most of the form's printed wording is drawn as graphics in the PDF (only the filled-in values are text), so it was read by OCR: ${ocrConfirmed} of ${fixedFailed.length} lines confirmed${ocrLeft ? `; ${ocrLeft} couldn't be confirmed and are BLOCKED — check those visually` : ''}.`
             : `Most of the form's printed wording is drawn as graphics in the PDF (only the filled-in values are text) and OCR wasn't available, so ${fixedFailed.length} wording checks are BLOCKED instead of FAIL. Open the PDF and confirm the form wording is printed.`,
         });
+      } else if (fixedFailed.length) {
+        // A page where only SOME phrases are drawn as graphics (CONFIRMED 2026-10-20, DIG122A's HIPAA page: "…the issuance
+        // or sale of prescription drugs…" prints, but the text layer jumps from "the issuance" to "pharmacy records").
+        // OCR confirms a phrase only when it reads it word-for-word, so a real wording difference stays a FAIL. Fill-in
+        // lines ("____") can't be seen by OCR, so those keep their text-layer result.
+        const candidates = fixedFailed.filter((v) => !/_{3,}/.test(v.expected || '') && !/fill-in line/i.test(v.reason || ''));
+        const ocrText = candidates.length ? await require('./pdfOcrService').ocrPdfText(pdfPath).catch(() => null) : null;
+        const { ocrContains } = require('./pdfOcrService');
+        for (const v of ocrText ? candidates : []) {
+          if (ocrContains(ocrText, v.expected, { exact: true })) {
+            v.result = 'PASS';
+            v.actual = `${v.expected} (read by OCR)`;
+            v.reason = 'Confirmed by OCR: this wording is printed on the page but drawn as graphics, so the PDF\'s text layer doesn\'t contain it.';
+          } else if (v.actual === 'Not Found' && ocrContains(ocrText, v.expected)) {
+            // Most of the words are on the page — not "missing entirely". DIG122A: the claimant's name prints over the end
+            // of the HIPAA paragraph, so that line can't be read. Still a FAIL, with a reason that sends someone to look.
+            v.reason = 'Most of this wording is printed (read by OCR) but not all of it can be read word-for-word — part of it is drawn as graphics or has something printed over it. Check this passage visually.';
+          }
+        }
       }
     }
     // Append the archive .json filing-metadata checks (META*) so they count toward the scenario result and
@@ -1700,6 +1719,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // Document + reading Document Properties takes. So the archive is watched from just BEFORE Complete Document,
   // on the shared S3 page, and handed the identifier once it's known; whatever the watch didn't catch still
   // falls back to the regular search below.
+  const overlayEdits = await editOverlayFields(frame, page, log);
   let resolveIdentifier;
   const identifierKnown = new Promise((resolve) => { resolveIdentifier = resolve; });
   const archiveWatch = s3Session.withPage((s3Page) => s3AdminService.watchArchiveForIdentifier(s3Page, identifierKnown, documentService.DOWNLOAD_DIR, { log }))
@@ -1785,6 +1805,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     }
     const finalPath = path.join(documentService.DOWNLOAD_DIR, `${fileNamePrefix}_interactive.pdf`);
     fs.renameSync(pdfResult.downloaded.localPath, finalPath);
+    if (overlayEdits.length) lockChecks.push(...await buildOverlayChecks(overlayEdits, finalPath, log));
 
     // Co-located filing metadata (<identifier>.json, the SAME archive folder as the PDF) — per user direction
     // 2026-10-13. Unlike the input review-case payload fetched below (only sometimes present — ~2/7 of recent
@@ -1941,6 +1962,133 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
 // fields' "vanishes completely" signature was — changing the actual test VALUE for suspected date fields
 // without confirming that's really the mechanism risks fixing nothing while adding untested complexity.
 const DATE_SHAPED_RE = /\d{1,2}\/\d{1,2}\/\d{2,4}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}/i;
+
+// ── PDF-overlay forms: checkboxes and blank lines (DIG220, per user direction 2026-10-21) ─────────────
+// readMergeFields only sees merge spans, so on an overlay form (a page image with typed-into boxes on top) every
+// checkbox and blank line went untouched — DIG220 has 162 checkboxes and 24 free-form lines its mapping doc marks
+// editable ("Checkboxes are editable" / "Free Form/Editable"), and the run edited 3 fields. Each unlocked overlay box
+// gets a value: "X" in a checkbox-sized box, a short unique marker ("OV7") in a text line — short because the Height/
+// Distance cells are ~40pt wide. Typed before Save Changes, so the values are committed with everything else.
+const OVERLAY_CHECKBOX_MAX_PX = 16;
+const isOverlayCheckbox = (f) => f.width <= OVERLAY_CHECKBOX_MAX_PX && f.height <= OVERLAY_CHECKBOX_MAX_PX;
+async function editOverlayFields(frame, page, log) {
+  const fields = await interactiveEditService.readOverlayTextFields(frame);
+  if (!fields.length) return [];
+  const edits = [];
+  let textN = 0;
+  for (const f of fields) {
+    const kind = isOverlayCheckbox(f) ? 'checkbox' : 'text';
+    const value = kind === 'checkbox' ? 'X' : `OV${++textN}`;
+    const r = await interactiveEditService.typeIntoOverlayField(frame, page, f, value);
+    edits.push({ ...f, kind, value, typed: r.typed, error: r.error || null });
+  }
+  const sum = (k) => { const all = edits.filter((e) => e.kind === k); return `${all.filter((e) => e.typed).length}/${all.length}`; };
+  log(`overlay form: typed into ${sum('checkbox')} checkbox(es) ("X") and ${sum('text')} free-form line(s) ("OVn")`);
+  return edits;
+}
+
+// An overlay box in PDF points (y up from the bottom), from its box in the overlay image's pixels.
+function overlayBoxInPdf(pg, e) {
+  const sx = pg.viewW / (e.pageW || 816);
+  const sy = pg.viewH / (e.pageH || 1056);
+  return { x0: e.left * sx, x1: (e.left + e.width) * sx, yTop: pg.viewH - e.top * sy, yBottom: pg.viewH - (e.top + e.height) * sy };
+}
+// Did the value print inside its own box? Text items whose start and baseline fall in the box (a few points of slack
+// for font metrics), joined left to right.
+function overlayValuePrinted(pg, e) {
+  if (!pg) return false;
+  const b = overlayBoxInPdf(pg, e);
+  const inBox = pg.items.filter((it) => it.x >= b.x0 - 3 && it.x <= b.x1 + 3 && it.y >= b.yBottom - 4 && it.y <= b.yTop + 2);
+  return inBox.sort((a, c) => a.x - c.x).map((it) => it.str).join('').replace(/\s+/g, '').includes(e.value);
+}
+// The printed label for a box's row: the nearest run of text to its left on the same line ("Sitting", "0-10 lbs",
+// "COMPLETED BY:"). The PDF splits labels into letter fragments ("Si|tt|i|n|g"), so touching fragments are joined
+// and a gap wider than 8pt starts a new piece; our own typed values never count as a label.
+const isOurValue = (it) => /^(X|OV\d+)$/.test(it.str.trim());
+// Items on ONE printed line — the line nearest `targetY` among `candidates` (rows are ~12pt apart, so a fixed
+// tolerance alone mixed two rows: "1126--2550 lbslbs").
+function nearestLine(candidates, targetY) {
+  if (!candidates.length) return [];
+  const y = candidates.reduce((best, it) => (Math.abs(it.y - targetY) < Math.abs(best - targetY) ? it.y : best), candidates[0].y);
+  return candidates.filter((it) => Math.abs(it.y - y) <= 1.5).sort((a, c) => a.x - c.x);
+}
+// Joins one line's fragments; a gap wider than 8pt starts a new piece. `last` keeps only the final piece.
+function joinFragments(items, { last = false } = {}) {
+  const pieces = [];
+  let end = -Infinity;
+  for (const it of items) {
+    if (!pieces.length || it.x - end > 8) pieces.push('');
+    pieces[pieces.length - 1] += (pieces[pieces.length - 1] && it.x - end > 1 ? ' ' : '') + it.str;
+    end = it.x + it.w;
+  }
+  const out = last ? pieces.slice(-1) : pieces;
+  return out.join(' ').replace(/\s+/g, ' ').trim();
+}
+function overlayRowLabel(pg, e) {
+  if (!pg) return '';
+  const b = overlayBoxInPdf(pg, e);
+  const left = pg.items.filter((it) => Math.abs(it.y - b.yBottom) <= 6 && it.x + it.w <= b.x0 + 1 && !isOurValue(it));
+  return joinFragments(nearestLine(left, b.yBottom + 2), { last: true });
+}
+// The column header above a box ("Height", "Distance"): the nearest printed line above it that overlaps its width.
+function overlayColumnHeader(pg, e) {
+  if (!pg) return '';
+  const b = overlayBoxInPdf(pg, e);
+  // Text starting inside the box's own column only — a sentence that merely runs across above it isn't a header.
+  const above = pg.items.filter((it) => it.y > b.yTop && it.y - b.yTop < 120 && it.x >= b.x0 - 4 && it.x < b.x1 + 2 && !isOurValue(it));
+  return joinFragments(nearestLine(above, b.yTop));
+}
+
+async function buildOverlayChecks(edits, pdfPath, log) {
+  const pages = await require('./pdfLayoutText').extractPositionedItems(pdfPath).catch(() => []);
+  for (const e of edits) {
+    e.label = overlayRowLabel(pages[e.page], e);
+    e.printed = e.typed && overlayValuePrinted(pages[e.page], e);
+  }
+  // "Sitting, box 3 of 4" — boxes sharing a row (same top) are numbered left to right.
+  for (const e of edits.filter((x) => x.kind === 'checkbox')) {
+    const row = edits.filter((x) => x.kind === 'checkbox' && x.page === e.page && Math.abs(x.top - e.top) <= 2).sort((a, c) => a.left - c.left);
+    e.where = `${e.label || `row at ${Math.round(e.top)}px`}, box ${row.indexOf(e) + 1} of ${row.length}`;
+  }
+  const checks = [];
+  edits.filter((e) => e.kind === 'text').forEach((e, i) => {
+    // A field sitting in a table column ("0-10 lbs" under "Height") is named by both; a lone line by its label.
+    const header = overlayColumnHeader(pages[e.page], e);
+    const label = [e.label, header && header !== e.label && !/^_+$/.test(header) ? header : ''].filter(Boolean).join(' / ')
+      || `line at ${Math.round(e.left)},${Math.round(e.top)}px`;
+    checks.push({
+      id: `OVL-T${i + 1}`,
+      description: `Free-form line "${label}" (page ${e.page + 1}) can be typed into and prints what was typed`,
+      expected: e.value,
+      actual: !e.typed ? 'Could not type into it' : e.printed ? e.value : 'Not printed in its box',
+      result: e.typed && e.printed ? 'PASS' : 'FAIL',
+      reason: !e.typed
+        ? `The mapping doc marks this line "Free Form/Editable", but typing into it in the editor didn't take${e.error ? ` (${e.error})` : ''}.`
+        : e.printed ? '' : `"${e.value}" was typed into this line in the editor but isn't printed inside its box in the generated PDF.`,
+    });
+  });
+  const pagesWithBoxes = [...new Set(edits.filter((e) => e.kind === 'checkbox').map((e) => e.page))];
+  for (const p of pagesWithBoxes) {
+    const boxes = edits.filter((e) => e.kind === 'checkbox' && e.page === p);
+    const notTyped = boxes.filter((e) => !e.typed);
+    const notPrinted = boxes.filter((e) => e.typed && !e.printed);
+    const list = (xs) => xs.slice(0, 15).map((e) => e.where).join('; ') + (xs.length > 15 ? `; +${xs.length - 15} more` : '');
+    checks.push({
+      id: `OVL-C${p + 1}`,
+      description: `Checkboxes on page ${p + 1} (${boxes.length}) accept an "X" and print it in the right box`,
+      expected: `${boxes.length} of ${boxes.length} printed`,
+      actual: `${boxes.length - notTyped.length - notPrinted.length} of ${boxes.length} printed`,
+      result: notTyped.length || notPrinted.length ? 'FAIL' : 'PASS',
+      reason: [
+        notTyped.length ? `Couldn't type an "X" into ${notTyped.length} (the mapping doc marks them editable): ${list(notTyped)}.` : '',
+        notPrinted.length ? `"X" typed but not printed in its box for ${notPrinted.length}: ${list(notPrinted)}.` : '',
+      ].filter(Boolean).join(' '),
+    });
+  }
+  const failed = checks.filter((c) => c.result === 'FAIL').length;
+  log(`overlay form: ${checks.length} check(s) — ${checks.length - failed} passed, ${failed} failed`);
+  return checks;
+}
 
 function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
   if (!interactiveChecks || !interactiveChecks.length) return;
@@ -2474,5 +2622,6 @@ module.exports = {
     recipientRoleFromTechnicalName, knownValueRole, buildMetadataChecks, buildEditValue, verifyInteractiveEditsInPdf,
     annotateInteractiveEditFailures, runLayoutChecks, payloadUnavailableCheck, metadataUnavailableCheck, rollUpScenario,
     buildXpathRequirements, linkTextFieldsToDictionary, printedNumberForms,
+    overlayValuePrinted, overlayRowLabel, overlayColumnHeader,
   },
 };

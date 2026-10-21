@@ -76,3 +76,18 @@ test('digits glued onto a commented part of a number are not fixed wording (DIG1
   assert.ok(fixed.includes('=(100,000-'), 'longer pieces are still checked');
   assert.ok(fixed.includes('Modifier') && fixed.includes('(41% - 55%)'), 'pieces separated by a space are unchanged');
 });
+
+test('Word tabs separate side-by-side columns instead of gluing them (DIG122A "VacuumingOther", DIG75 address block)', async () => {
+  const TAB = '</w:t><w:tab/><w:t xml:space="preserve">'; // a tab inside a run, as Word writes it
+  const { requirements } = await requirementsFor(
+    [['Dear ', [0, 'John Smith'], ','],
+      [`Vacuuming${TAB}${TAB}Other: ______________`],
+      [`Our mailing address is:${TAB}${TAB}${TAB}${TAB}Our overnight address is:`],
+      [`RE:${TAB}Our Claim No.:`]],
+    { 0: 'Claimant Name' },
+  );
+  const fixed = statics(requirements);
+  assert.ok(fixed.includes('Vacuuming') && fixed.includes('Other: ______________'), `columns are separate checks: ${JSON.stringify(fixed)}`);
+  assert.ok(fixed.includes('Our mailing address is:') && fixed.includes('Our overnight address is:'), `address columns split: ${JSON.stringify(fixed)}`);
+  assert.ok(!fixed.some((t) => /VacuumingOther|is:Our/.test(t)), `nothing glued: ${JSON.stringify(fixed)}`);
+});
