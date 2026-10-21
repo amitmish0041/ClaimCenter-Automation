@@ -37,6 +37,7 @@ function describeItem(item) {
   const v = item[k];
   if (k === 'open') return `Open the ${v === 'quick' ? 'Quick Payment wizard (Financials › reserve row › Quick Payment)' : v === 'financials' ? 'Full Check wizard (Financials › reserve row › Create Payment)' : 'Full Check wizard (Actions › New Transaction › New Payment)'}`;
   if (k === 'payee') return `Select the ${v} as the payee`;
+  if (k === 'call') return `Run ${v[0]}(${v.slice(1).map((a) => JSON.stringify(a)).join(', ')})`;
   if (k === 'joint') return `Add joint payee(s): ${v.map((p) => p.who + (p.type ? ` (${p.type})` : '')).join(', ')}`;
   if (k === 'next') return 'Click Next';
   if (k === 'reserve') return `Select a Reserve Line (${{ open: 'one with open Available Reserves', existing: 'first existing line', new: '"Expense OR First and Final" new line', zero: 'one with no remaining reserve' }[v] || v})`;
@@ -216,6 +217,8 @@ async function execute(page, items, res, ctx, capture) {
       await W.openPayment(page, v === 'quick' ? 'quick' : v === 'financials' ? 'financials' : 'actions', { needZeroReserve: !!item.zeroReserve, needOpenReserve: !item.zeroReserve && (!!item.needOpenReserve || v === 'quick') });
     } else if (k === 'payee') await W.selectPayee(page, v);
     else if (k === 'joint') await W.addJointPayees(page, v);
+    // Generic hook for extension modules: { call: ['<module>.<fn>', ...args] } runs require('./<module>')[fn](page, ...args).
+    else if (k === 'call') { const [modFn, ...args] = v; const [mod, fn] = modFn.split('.'); await require(`./${mod}`)[fn](page, ...args); }
     else if (k === 'next') await W.nextFillingServicePeriod(page);
     else if (k === 'reserve') await W.selectReserveLine(page, v);
     else if (k === 'select') await W.select(page, v[0], v[1]);

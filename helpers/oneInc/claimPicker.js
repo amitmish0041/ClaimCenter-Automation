@@ -23,8 +23,21 @@ const PROFILES = {
   PROP_PA: { label: 'PA homeowners / property', lob: 'PR', state: 'PA', prefix: /^HO-PA-/ },
   // PA auto claim carrying two Lienholder/Mortgagee contacts and a loan on the vehicle (set up by claimCheck's
   // `lienholders` prepare). Pool only — an arbitrary claim from the test-data sheet has no lienholder.
+  // PA homeowners claim with Lienholder/Mortgagee contacts and a mortgage on the fixed-property incident. Pool only.
+  PROP_MORT: { label: 'PA homeowners with mortgagee + mortgage on the property', lob: 'PR', state: 'PA', prefix: /^HO-PA-/, poolOnly: true, fnolAs: 'PROP_PA' },
+  // Aged state claims for the date-of-loss rules (VBR.004 DE / VBR.005 + VBR.015 MD, user direction 2026-10-21: use
+  // the Test Data sheet). New FNOL on a policy whose existing claim is at least minAgeYears old, loss = that DoL + 1.
+  AUTO_DE_OLD: { label: 'DE personal auto, loss 2+ years ago (cause of loss LC50)', lob: 'AUTO', state: 'DE', prefix: /^PA-DE-/, poolOnly: true, minAgeYears: 2.05 },
+  AUTO_MD_OLD: { label: 'MD personal auto, loss 3+ years ago (PIP / Med Pay exposure)', lob: 'AUTO', state: 'MD', prefix: /^PA-MD-/, poolOnly: true, minAgeYears: 3.05 },
   AUTO_LIEN: { label: 'PA personal auto with lienholders + vehicle loan', lob: 'AUTO', state: 'PA', prefix: /^PA-PA-/, poolOnly: true, fnolAs: 'AUTO_PA' },
 };
+
+// Extension profiles (helpers/oneInc/profiles/*.js export { NAME: profile }). A profile may carry fnol: {...} (FNOL
+// settings for scripts/provisionOneIncClaims.js) and prepare: '<module>.<fn>' (run by claimCheck in prepare mode).
+{
+  const dir = path.join(__dirname, 'profiles');
+  if (fs.existsSync(dir)) for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.js')).sort()) Object.assign(PROFILES, require(path.join(dir, f)));
+}
 
 const TIER = (process.env.CC_TIER || 'test').toLowerCase();
 // Shared state on the team share (no per-machine paths): <ONEINC_RESULTS_DIR>TestData.
@@ -99,9 +112,11 @@ function policyCandidates(profile, { exclude = [] } = {}) {
   // Only policies whose existing claim is recent (loss date within the last year) — an older one's term has likely
   // ended and Find Policy won't attach it (CONFIRMED 2026-10-21 with a 2021 loss date).
   const yearAgo = new Date(today); yearAgo.setFullYear(yearAgo.getFullYear() - 1);
+  // Aged profiles (minAgeYears) want the opposite: an existing claim at least that old.
+  const ageYears = (r) => (today - new Date(r.lossDate)) / 31557600000;
   return allRecords()
     .filter((r) => r.lob === p.lob && r.state === p.state && p.prefix.test(r.claimNumber || '') && r.policyNumber && r.lossDate
-      && new Date(r.lossDate) >= yearAgo)
+      && (p.minAgeYears ? ageYears(r) >= p.minAgeYears : new Date(r.lossDate) >= yearAgo))
     .sort((a, b) => (claimsPerPolicy[a.policyNumber] - claimsPerPolicy[b.policyNumber]) || String(b.claimNumber).localeCompare(String(a.claimNumber)))
     .filter((r) => { if (seen.has(r.policyNumber) || used.has(r.policyNumber)) return false; seen.add(r.policyNumber); return true; })
     .map((r) => {

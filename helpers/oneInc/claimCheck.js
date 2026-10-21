@@ -30,7 +30,7 @@ async function addExposures(page, claim, exposures) {
   return exposures.length;
 }
 
-async function checkClaim(page, claim, { prepare = false, lienholders = false, log = console.log } = {}) {
+async function checkClaim(page, claim, { prepare = false, lienholders = false, profile = null, log = console.log } = {}) {
   const out = { claim, opens: false, wizard: false, payees: [], openReserve: false, reserveLines: [], problem: '', repaired: [] };
   try {
     await W.cancelWizard(page);
@@ -41,13 +41,25 @@ async function checkClaim(page, claim, { prepare = false, lienholders = false, l
     out.parties = await W.getParties(page);
     // AUTO_LIEN: two Address Book companies with the claim role Lienholder/Mortgagee, and a loan on the vehicle naming
     // the first (user direction 2026-10-21). Idempotent — existing contacts/loan rows are left as they are.
+    // Extension profile prepare hook: PROFILES[profile].prepare = '<module>.<fn>' → fn(page, claim, out) (TEST only).
+    const hook = profile && (require('./claimPicker').PROFILES[profile] || {}).prepare;
+    if (prepare && hook) {
+      const [mod, fn] = hook.split('.');
+      const done = await require(`./${mod}`)[fn](page, claim, out);
+      if (done) out.repaired.push(String(done));
+      await W.openClaim(page, claim, log);
+      page.__oneIncParties = null;
+      out.parties = await W.getParties(page);
+    }
     if (prepare && lienholders) {
       for (const c of W.lienholders().slice(0, 2)) {
         if (await W.addClaimContactWithRole(page, c)) out.repaired.push(`added ${c.name} as Lienholder/Mortgagee`);
         await W.openClaim(page, claim, log);
       }
-      const loan = await W.addVehicleLoan(page, W.lienholders()[0].name);
-      if (loan !== 'existing') out.repaired.push(`vehicle loan ${loan} → ${W.lienholders()[0].name}`);
+      // HO claims carry the mortgage on the fixed-property incident; auto claims the loan on the vehicle.
+      const kind = /^HO-/.test(claim) ? 'property' : 'vehicle';
+      const loan = await W.addIncidentLoan(page, W.lienholders()[0].name, { kind });
+      if (loan !== 'existing') out.repaired.push(`${kind === 'property' ? 'mortgage' : 'vehicle loan'} ${loan} → ${W.lienholders()[0].name}`);
       await W.openClaim(page, claim, log);
       page.__oneIncParties = null;
       out.parties = await W.getParties(page);
@@ -87,6 +99,8 @@ async function checkClaim(page, claim, { prepare = false, lienholders = false, l
       } catch (e) {
         if (!prepare || round >= 4) throw e;
         if (/Surcharging/i.test(e.message)) {
+          // Profiles with keepSurcharging (VBR.037 positives) must NOT have it completed — stop with the message as found.
+          if (profile && (require('./claimPicker').PROFILES[profile] || {}).keepSurcharging) { out.surchargingIncomplete = true; throw e; }
           await W.repairSurcharging(page);
           out.repaired.push('Surcharging answered "No" and saved');
         } else if (/assign the claim/i.test(e.message)) {

@@ -1527,7 +1527,7 @@ async function editReserveCloud(page, { reserveAmount }) {
   return undefined;
 }
 
-async function createReserveCloud(page, { reserveAmount, costType, costCategory }) {
+async function createReserveCloud(page, { reserveAmount, costType, costCategory, exposure: exposureWanted }) {
   // Open the Actions menu, trying the same candidates the lifecycle helper
   // uses - a single getByRole attempt is not enough when the previous test
   // left the page mid-transition.
@@ -1718,7 +1718,9 @@ async function createReserveCloud(page, { reserveAmount, costType, costCategory 
     return choice;
   };
 
-  const exposure = await pickSelect('Exposure');
+  // exposureWanted (optional, additive 2026-10-21): text of the exposure to reserve on, e.g. 'Medical Expense' —
+  // otherwise the first exposure listed.
+  const exposure = await pickSelect('Exposure', exposureWanted);
   const type     = await pickSelect('CostType', costType);
   const category = await pickSelect('CostCategory', costCategory);
 

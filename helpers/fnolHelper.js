@@ -808,7 +808,13 @@ async function pickCloudCoverage(page, labels) {
     // A real LEAF is the only thing that opens the New Exposure screen. The DOM
     // flags it (aria-haspopup="false" / data-gw-click="fireEvent"), so prefer a
     // flagged leaf and fall back to the deepest match only if none is flagged.
-    const named = all.filter(n => n.text && matches(n.text));
+    // "Parent > Leaf" labels (e.g. "PIP > Medical Payments") pin the leaf under a named grouper: the bare name exists
+    // under several coverages and the fuzzy match took "Medical Payments - General Damage" (CONFIRMED 2026-10-21).
+    const paths = labels.filter(l => String(l).includes('>')).map(l => String(l).split('>').map(x => norm(x.trim())));
+    const parentText = id => (all.find(p => p.id === id.replace(/-\d+-item$/, '')) || {}).text || '';
+    const named = paths.length
+      ? all.filter(n => n.text && paths.some(([par, lf]) => norm(n.text) === lf && norm(parentText(n.id)) === par))
+      : all.filter(n => n.text && matches(n.text));
     const leaf = named.filter(n => n.isLeaf).sort((a, b) => b.depth - a.depth)[0]
               || named.filter(n => n.depth >= 2).sort((a, b) => b.depth - a.depth)[0];
     if (leaf) {

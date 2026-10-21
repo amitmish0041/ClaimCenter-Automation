@@ -315,6 +315,22 @@ for (const [full, quick, primary, joint, tl, checks] of JOINT_CASES) {
   // case is a FAIL (possible pending development), not BLOCKED. Once it exists, the rest of the case runs.
   add(quick, 'AUTO_LIEN', [QOPEN_LIEN, ...PRIMARY(primary)], [{ button: { name: 'Add Joint Payees', present: true } }], JOINT_NOTE + ' Full case flow once the button exists: ' + JOINT_QUICK(primary, joint, tl).map((x) => Object.keys(x)[0]).join(' → '));
 }
+// ── Mortgagee (PROP_MORT: HO claim with Lienholder/Mortgagee contacts + a mortgage on the fixed-property incident) ──
+const MORT_NOTE = 'HO claim; mortgagee = an Address Book company with the claim role Lienholder/Mortgagee, named on the property incident\'s mortgage ("Is there a mortgage on this property?" = Yes).';
+const MORT = { who: 'lienholder', type: 'Mortgagee' }; // HO payee Type "Mortgagee" (also offered: Lienholder/Mortgagee)
+const SNI_REAL = { who: 'sni' };
+const MORT_FULL = (primary, joint) => [{ open: 'full' }, ...PRIMARY(primary), ...(joint.length ? [{ joint }] : []), { next: true }, { reserve: 'open' },
+  { step2: {} }, { next: true }, { expectStep: 3 }];
+const CONTACTS_MORT = [V('ClaimsPay Type', { value: /contact\(s\)\s*(and|&)\s*mortgagee/i }), V('ClaimsPay Method', { value: /customer choice|let customer pick/i })];
+add('GCCM-799/CPD-Mortgagee/TC-76', 'PROP_MORT', MORT_FULL(INS, [MORT]), CONTACTS_MORT, MORT_NOTE);
+add('GCCM-799/CPD-Mortgagee/TC-77', 'PROP_MORT', MORT_FULL(INS, [SNI_REAL, MORT]), CONTACTS_MORT, MORT_NOTE);
+add('GCCM-799/CPD-Mortgagee/TC-78', 'PROP_MORT', MORT_FULL(MORT, []), [V('ClaimsPay Type', { value: /^vendor$/i }), V('ClaimsPay Method', { value: /^mailed check$/i })], MORT_NOTE);
+// Quick Payment: joint cases need Add Joint Payees (missing on Quick Payment); mortgagee-only runs the full flow.
+add('GCCM-1003/CPD-Mortgagee/TC-247', 'PROP_MORT', [QOPEN_LIEN, ...PRIMARY(INS)], [{ button: { name: 'Add Joint Payees', present: true } }], MORT_NOTE);
+add('GCCM-1003/CPD-Mortgagee/TC-248', 'PROP_MORT', [QOPEN_LIEN, ...PRIMARY(INS)], [{ button: { name: 'Add Joint Payees', present: true } }], MORT_NOTE);
+add('GCCM-1003/CPD-Mortgagee/TC-249', 'PROP_MORT', [QOPEN_LIEN, ...PRIMARY(MORT), { step2: {} }, { next: true }, { expectStep: 2 }],
+  [V('ClaimsPay Type', { value: /^vendor$/i }), V('ClaimsPay Method', { value: /^mailed check$/i })], MORT_NOTE);
+
 // CPD.026 — 3 or more payees (not the exempt insured/secondary-insured/vendor combinations)
 add('GCCM-799/CPD-Joint/TC-79', 'AUTO_LIEN', JOINT_FULL(INS, [{ who: 'other', type: 'Other' }, LIEN]),
   [V('ClaimsPay Type', { value: /3 or more payees/i }), V('ClaimsPay Method', { value: /^mailed check$/i })], JOINT_NOTE);
@@ -362,4 +378,17 @@ add('GCCM-783/TC/TC-002', 'AUTO_PA', [{ nav: 'parties' }, { openFirstRow: 'conta
   'Checks the contacts present on the test claim (first contact opened); Company/Vendor/Legal contact types are covered only if present.');
 add('GCCM-783/TC/TC-003', 'AUTO_PA', [{ nav: 'lossDetails' }], [{ text: { re: /ClaimsPay/i, present: false } }]);
 
-module.exports = { RECIPES: R, NO_CONTACT_DETAILS };
+// ── Extension recipe files (added 2026-10-21 for parallel work) ──────────────────────────────────────────────────
+// Every helpers/oneInc/recipes/*.js exports (api) => void and registers recipes with api.add(...). Builders below are
+// shared so extension files read like this one. A later add() for the same id replaces the earlier recipe.
+const BUILDERS = { add, R, V, H, VAL, FULL_PAYEES, FULL_PAYMENTS, FULL_INSTRUCTIONS, NEW_LINE, QUICK, QUICK_DETAILS, QOPEN, QCC, QSVC, QPAYDATE, QSUB,
+  EXP, CC, SVC, PAYDATE, DOC_NOTE, PRIMARY, JOINT_FULL, JOINT_QUICK, LIEN_FULL, LIEN_QUICK, QOPEN_LIEN, MAILED, INS, CLM, LIEN, LIEN2, SNI, MORT,
+  SNI_REAL, MORT_FULL, CONTACTS_MORT, VENDOR_NOTE, LIEN_NOTE, JOINT_NOTE, MORT_NOTE, CPD_NOTE, TXN_TYPES, PAY_DELIVERY, NOT_IN_PAY_DELIVERY, cpd,
+  NO_CONTACT_DETAILS };
+{
+  const dir = require('path').join(__dirname, 'recipes');
+  const files = require('fs').existsSync(dir) ? require('fs').readdirSync(dir).filter((f) => f.endsWith('.js')).sort() : [];
+  for (const f of files) require(require('path').join(dir, f))(BUILDERS);
+}
+
+module.exports = { RECIPES: R, NO_CONTACT_DETAILS, BUILDERS };

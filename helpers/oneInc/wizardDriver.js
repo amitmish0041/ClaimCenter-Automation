@@ -228,14 +228,32 @@ async function addClaimContactWithRole(page, company, role = 'Lienholder/Mortgag
   return true;
 }
 
-// Vehicle incident #index: "Is there a loan on the Vehicle?" = Yes with a loan row naming `lienholderName`.
-async function addVehicleLoan(page, lienholderName, { index = 0, loanNumber = 'LN' + Date.now().toString().slice(-8) } = {}) {
+// Incident #index: the loan/mortgage question = Yes with a loan row naming `lienholderName` (same ExtLienholderInformationLV
+// grid on both, CONFIRMED 2026-10-21). kind 'vehicle': "Is there a loan on the Vehicle?"; 'property' (HO fixed-property
+// incident): "Is there a mortgage on this property?".
+const LOAN_INCIDENT = {
+  vehicle: { link: (i) => `[id$="EditableVehicleIncidentsLV-${i}-Make_button"]`, question: 'Is there a loan on the Vehicle?' },
+  property: { link: (i) => `[id$="EditableFixedPropertyIncidentsLV-${i}-Address1_button"]`, question: 'Is there a mortgage on this property?' },
+};
+// FNOL-made incidents can lack required values the edit screen enforces ("Property Name" dropdown on HO, CONFIRMED
+// 2026-10-21): empty required text gets "Automated E2E", a required dropdown on <none> its first real option.
+async function fillIncidentRequired(page) {
+  for (const f of (await readScreen(page)).fields) {
+    if (!f.required || !f.label || f.readonly) continue;
+    if (f.kind === 'input' && !String(f.value || '').trim()) await fill(page, f.label, 'Automated E2E').catch(() => {});
+    if (f.kind === 'select' && /^(<none>)?$/i.test(String(f.value || '').trim())) { await select(page, f.label, 0).catch(() => {}); await settle(page, 1500); }
+  }
+}
+async function addVehicleLoan(page, lienholderName, opts = {}) { return addIncidentLoan(page, lienholderName, { ...opts, kind: 'vehicle' }); }
+async function addIncidentLoan(page, lienholderName, { kind = 'vehicle', index = 0, loanNumber = 'LN' + Date.now().toString().slice(-8) } = {}) {
+  const inc = LOAN_INCIDENT[kind];
   await navigate(page, 'lossDetails');
-  await page.locator(`[id$="EditableVehicleIncidentsLV-${index}-Make_button"]`).first().click();
+  await page.locator(inc.link(index)).first().click();
   await settle(page, 3000);
   await clickButton(page, 'Edit');
   await settle(page, 2000);
-  await answer(page, 'Is there a loan on the Vehicle?', 'Yes');
+  await fillIncidentRequired(page); // before the question: filling them re-renders the form
+  await answer(page, inc.question, 'Yes');
   await settle(page, 2000);
   const LV = '[id*="ExtLienholderInformationLV"]';
   const already = await page.evaluate((n) => [...document.querySelectorAll('[id*="ExtLienholderInformationLV-"] select')]
@@ -255,13 +273,17 @@ async function addVehicleLoan(page, lienholderName, { index = 0, loanNumber = 'L
     if (await inputs.count()) await inputs.first().fill(loanNumber);
   }
   await answerUnansweredNo(page).catch(() => {});
+  // Picking a required dropdown re-renders the form and clears the loan/mortgage answer — re-answer if so.
+  await fillIncidentRequired(page);
+  const q = findField(await readScreen(page), inc.question);
+  if (q && q.radios && !q.radios.some((r) => r.checked && /yes/i.test(r.label))) await answer(page, inc.question, 'Yes');
   await clickButton(page, 'Update');
   await settle(page, 3500);
   if (await page.getByRole('button', { name: 'Update', exact: true }).first().isVisible().catch(() => false)) {
     const why = (await readScreen(page)).messages.join('; ');
     await page.getByRole('button', { name: 'Cancel', exact: true }).first().click().catch(() => {});
     await settle(page, 1500);
-    throw new Error(`vehicle loan not saved — ${why.slice(0, 300)}`);
+    throw new Error(`${kind} loan/mortgage not saved — ${why.slice(0, 300)}`);
   }
   return already ? 'existing' : loanNumber;
 }
@@ -384,7 +406,7 @@ async function assignClaimAndExposures(page) {
 async function getParties(page) {
   if (page.__oneIncParties) return page.__oneIncParties;
   const insured = await page.evaluate(() => {
-    const m = /Ins:\s*([^\n]+?)\s+(DoL|St|Adj|$)/.exec((document.body.innerText || '').replace(/\s+/g, ' '));
+    const m = /Ins:\s*([^\n]+?)\s+(Clmt|DoL|St|Adj|$)/.exec((document.body.innerText || '').replace(/\s+/g, ' '));
     return m ? m[1].trim() : '';
   }).catch(() => '');
   let claimants = [];
@@ -635,9 +657,10 @@ function vendors() {
 async function selectVendorPayee(page, index = 0) {
   const v = vendors()[index];
   if (!v) throw new Blocked(`no vendor #${index + 1} configured (ONEINC_VENDORS)`);
-  await page.locator('[id$="PrimaryPayee_Name-PrimaryPayee_NameMenuIcon"]').first().click();
+  // force: on Quick Payment a plain click on the icon container never opened the menu (CONFIRMED 2026-10-21).
+  await page.locator('[id$="PrimaryPayee_Name-PrimaryPayee_NameMenuIcon"]').first().click({ force: true });
   await page.waitForTimeout(1000);
-  await page.locator('[id$="PrimaryPayee_Name-MenuItem_Search"]').first().click();
+  await page.locator('[id$="PrimaryPayee_Name-MenuItem_Search"]').first().click({ force: true });
   await settle(page, 3500);
   await select(page, 'Type', 'Vendor (Company)').catch(() => {});
   await page.getByLabel('Name', { exact: true }).last().fill(v.search || v.name);
@@ -710,9 +733,21 @@ async function addJointPayees(page, list) {
     const opts = await sel(i, 'PayeeName').locator('option').evaluateAll((os) => os.map((o) => ({ v: o.value, t: o.textContent.trim() })));
     const already = added.concat([await sel(0, 'PayeeName').evaluate((x) => (x.options[x.selectedIndex] || {}).text).catch(() => '')]);
     const names = opts.map((o) => o.t).filter((t) => t && !/^<none>$/i.test(t) && !already.some((a) => norm(a) === norm(t)));
-    const pick = resolvePayee(page, list[k].who, names);
-    await sel(i, 'PayeeName').selectOption(opts.find((o) => o.t === pick).v);
-    await settle(page, 2000);
+    let pick;
+    if (list[k].who === 'sni') {
+      // The contact CC itself types "Secondary Named Insured" (from the policy) — try candidates until one comes back so.
+      const lienNames = ['ACNB BANK', ...lienholders().map((l) => l.name)];
+      for (const cand of names.filter((t) => !/donegal|insurance|agency/i.test(t) && !lienNames.some((l) => norm(l) === norm(t)))) {
+        await sel(i, 'PayeeName').selectOption(opts.find((o) => o.t === cand).v);
+        await settle(page, 1800);
+        if (/secondary named insured/i.test(await sel(i, 'PayeeType').evaluate((x) => (x.options[x.selectedIndex] || {}).text || '').catch(() => ''))) { pick = cand; break; }
+      }
+      if (!pick) throw new Blocked(`no contact on this claim is typed "Secondary Named Insured" (${names.join(', ')})`);
+    } else {
+      pick = resolvePayee(page, list[k].who, names);
+      await sel(i, 'PayeeName').selectOption(opts.find((o) => o.t === pick).v);
+      await settle(page, 2000);
+    }
     const typeSel = sel(i, 'PayeeType');
     const tOpts = await typeSel.locator('option').evaluateAll((os) => os.map((o) => ({ v: o.value, t: o.textContent.trim() })));
     const cur = await typeSel.evaluate((x) => (x.options[x.selectedIndex] || {}).text || '').catch(() => '');
@@ -744,6 +779,13 @@ async function selectReserveLine(page, kind = 'open') {
   const existing = real.filter((o) => !isNew(o));
   if (!existing.length) throw new Blocked('claim has no existing reserve line');
   if (kind === 'existing') return select(page, 'Reserve Line', existing[0].t);
+  // 'match:<regex>' picks the first existing line whose text matches (e.g. 'match:Bodily Injury').
+  if (typeof kind === 'string' && kind.startsWith('match:')) {
+    const re = new RegExp(kind.slice(6), 'i');
+    const hit = existing.find((o) => re.test(o.t));
+    if (!hit) throw new Blocked(`no Reserve Line matches /${kind.slice(6)}/ (options: ${existing.map((o) => o.t).join(', ')})`);
+    return select(page, 'Reserve Line', hit.t);
+  }
   // 'open' wants Available Reserves > 0; 'zero' wants a line with none left (shown as "-" or $0.00).
   for (const o of existing) {
     await select(page, 'Reserve Line', o.t);
@@ -890,7 +932,7 @@ async function currentStep(page) {
 }
 
 module.exports = {
-  Blocked, settle, inWizard, openClaim, newPaymentErrorText, repairSurcharging, assignClaimAndExposures, abilityToPayErrors, abilityToPay, repairVehicleVins, lienholders, addClaimContactWithRole, addVehicleLoan, addDigitalPaymentAccount, repairClaimantAddress, getParties, optionsOf, select, fill, answer, answerUnansweredNo, clickButton,
+  Blocked, settle, inWizard, openClaim, newPaymentErrorText, repairSurcharging, assignClaimAndExposures, abilityToPayErrors, abilityToPay, repairVehicleVins, lienholders, addClaimContactWithRole, addVehicleLoan, addIncidentLoan, addDigitalPaymentAccount, repairClaimantAddress, getParties, optionsOf, select, fill, answer, answerUnansweredNo, clickButton,
   visibleMenuItems, openActionsMenu, closeMenus, navigate, openFinancialsRowMenu,
   openPayment, cancelWizard, selectPayee, addJointPayees, selectVendorPayee, vendors, selectReserveLine, availableReserves, fillLineItem, completePaymentsStep, next, nextFillingServicePeriod, fillRequiredEmpties, serverError, currentStep,
 };

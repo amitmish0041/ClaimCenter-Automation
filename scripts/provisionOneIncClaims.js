@@ -46,7 +46,17 @@ const FNOL = {
     ] },
 };
 // Same FNOL as AUTO_PA; checkClaim then adds the lienholders and the vehicle loan.
+// Aged DE / MD claims for the date-of-loss rules: DE needs exposure cause of loss LC50 (VBR.004); MD a PIP / Medical
+// Payments exposure (VBR.005, VBR.015). Coverage labels are tried in order (cloud wording not yet confirmed for MD).
+FNOL.AUTO_DE_OLD = { policyType: 'Personal Auto', state: 'DE', lossCauseCode: 'LC50', lossDescription: 'OneInc automation — DE auto, aged DoL (VBR.004)', incidents: ['Add Vehicle'],
+  exposures: [{ coverageLabel: 'Collision' }] };
+FNOL.AUTO_MD_OLD = { policyType: 'Personal Auto', state: 'MD', lossCauseCode: 'LC15', lossDescription: 'OneInc automation — MD auto, aged DoL (VBR.005/015)', incidents: ['Add Vehicle'],
+  exposures: [{ coverageLabel: ['Personal Injury Protection', 'PIP', 'Medical Payments', 'Med Pay', 'Medical Benefits'] }, { coverageLabel: 'Collision' }] };
+FNOL.PROP_MORT = { ...FNOL.PROP_PA, lossDescription: 'OneInc automation — HO fire loss with mortgagee' };
 FNOL.AUTO_LIEN = { ...FNOL.AUTO_PA, lossDescription: 'OneInc automation — PA auto collision with lienholder' };
+
+// Extension profiles carry their own FNOL settings (helpers/oneInc/profiles/*.js → fnol).
+for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnol && !FNOL[name]) FNOL[name] = p.fnol;
 
 (async () => {
   const tier = String(process.env.CC_TIER || 'test').toLowerCase();
@@ -68,7 +78,7 @@ FNOL.AUTO_LIEN = { ...FNOL.AUTO_PA, lossDescription: 'OneInc automation — PA a
     for (const a of adds) {
       const [profile, claim] = a.split('=').map((s) => (s || '').trim());
       if (!FNOL[profile] || !claim) { console.log(`[Provision] --add "${a}" ignored (use PROFILE=CLAIM, profiles: ${Object.keys(FNOL).join(', ')})`); continue; }
-      const chk = await checkClaim(page, claim, { prepare: true, lienholders: profile === 'AUTO_LIEN' });
+      const chk = await checkClaim(page, claim, { prepare: true, lienholders: /^(AUTO_LIEN|PROP_MORT)$/.test(profile), profile });
       const entry = { claim, createdAt: new Date().toISOString(), source: 'added', usable: chk.usable, payees: chk.payees.map((p) => p.name),
         payeeWithDetails: chk.payeeWithDetails, reserveLines: chk.reserveLines, repaired: chk.repaired, problem: chk.problem };
       claimPicker.addToPool(profile, entry);
@@ -129,7 +139,7 @@ FNOL.AUTO_LIEN = { ...FNOL.AUTO_PA, lossDescription: 'OneInc automation — PA a
         });
         envFailuresInARow = 0;
         console.log(`[Provision] ${profile} ${i}: claim ${claim} created — checking it`);
-        const chk = await checkClaim(page, claim, { prepare: true, lienholders: profile === 'AUTO_LIEN' });
+        const chk = await checkClaim(page, claim, { prepare: true, lienholders: /^(AUTO_LIEN|PROP_MORT)$/.test(profile), profile });
         const entry = { claim, policy: policyNumber, lossDate: pol.lossDate, basedOn: pol.basedOn, createdAt: new Date().toISOString(), usable: chk.usable, payees: chk.payees.map((p) => p.name),
           payeeWithDetails: chk.payeeWithDetails, reserveLines: chk.reserveLines, repaired: chk.repaired, problem: chk.problem };
         claimPicker.addToPool(profile, entry);
