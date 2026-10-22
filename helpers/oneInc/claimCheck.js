@@ -64,6 +64,16 @@ async function checkClaim(page, claim, { prepare = false, lienholders = false, p
       page.__oneIncParties = null;
       out.parties = await W.getParties(page);
     }
+    // Declared test data (PROFILES[profile].data, helpers/oneInc/testData.js): check each item, build what is missing,
+    // check again. prepare builds; a plain check only reads. A claim is usable only when every item passes.
+    const items = profile ? require('./testData').itemsFor(profile) : [];
+    if (items.length) {
+      out.data = await require('./testData').ensure(page, claim, items, { build: prepare, log, out });
+      out.data.filter((d) => d.note).forEach((d) => out.repaired.push(`${d.label}: ${d.note}`));
+      await W.openClaim(page, claim, log);
+      page.__oneIncParties = null;
+      out.parties = await W.getParties(page);
+    }
     // prepare: first run CC's own "Ability to pay" check and fix what it names (user direction 2026-10-21).
     const fixAbility = async (why) => {
       if (/Serial number must be present|Boat type must be present|Vehicle Identification Number/i.test(why)) {
@@ -171,7 +181,15 @@ async function checkClaim(page, claim, { prepare = false, lienholders = false, p
       if (lines.length && !out.openReserve && prepare) {
         await W.cancelWizard(page);
         page._currentClaimNumber = claim;
-        const err = await require('../financialsHelper').createReserve(page, { reserveAmount: 2500, costType: 'Claim Cost', strict: true }).catch((e) => e.message);
+        let err = await require('../financialsHelper').createReserve(page, { reserveAmount: 2500, costType: 'Claim Cost', strict: true }).catch((e) => e.message);
+        // CC offers no Cost Category for a cost type the exposure already has a line for (CONFIRMED 2026-10-21 on
+        // PA-PA-01-26-0748484) — raise the existing $0 line instead. Every line is at $0 here, so editing one changes
+        // nothing another case relies on; readAvailable below verifies it.
+        if (typeof err === 'string' && /no Cost Category option/i.test(err)) {
+          await W.openClaim(page, claim, log);
+          page._currentClaimNumber = claim;
+          err = await require('../financialsHelper').createReserve(page, { reserveAmount: 2500, costType: 'Claim Cost' }).catch((e) => e.message);
+        }
         if (typeof err === 'string' && err) throw new Error(`every reserve line is at $0 and a Claim Cost reserve could not be added: ${err}`);
         out.repaired.push('added a $2,500 Claim Cost reserve (all lines were at $0)');
         await validate();
@@ -187,7 +205,14 @@ async function checkClaim(page, claim, { prepare = false, lienholders = false, p
   }
   await W.cancelWizard(page).catch(() => {});
   out.lienholders = out.payees.filter((p) => /lienholder/i.test(p.type)).map((p) => p.name);
-  out.usable = out.wizard && out.payees.length > 0 && out.openReserve && (!lienholders || out.lienholders.length > 0);
+  const dataMissing = (out.data || []).filter((d) => !d.ok);
+  // keepSurcharging profiles never open the wizard (that IS their data); their usability is the data items alone.
+  const keepSurch = profile && (require('./claimPicker').PROFILES[profile] || {}).keepSurcharging;
+  // (VBR.037 negatives carry keepSurcharging too but have no Surcharging screen — their wizard opens: usable the usual way.)
+  out.usable = ((keepSurch && out.surchargingIncomplete) || (out.wizard && out.payees.length > 0 && out.openReserve && (!lienholders || out.lienholders.length > 0)))
+    && !dataMissing.length;
+  if (keepSurch && out.surchargingIncomplete && /Surcharging/i.test(out.problem)) out.problem = '';
+  if (dataMissing.length) out.problem = [out.problem, `missing test data: ${dataMissing.map((d) => `${d.label} (${d.problem})`).join('; ')}`].filter(Boolean).join(' | ').slice(0, 600);
   // Never "not usable" without a reason.
   if (!out.usable && !out.problem) {
     out.problem = !out.wizard ? 'payment wizard did not open' : !out.payees.length ? 'no payees in the wizard'

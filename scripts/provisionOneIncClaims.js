@@ -10,6 +10,10 @@
  *
  *   node scripts/provisionOneIncClaims.js [--profiles AUTO_PA,WC_PA,PROP_PA,AUTO_MI] [--count 2] [--headless]
  *   node scripts/provisionOneIncClaims.js --add PROP_PA=HO-PA-01-26-0748434   (add an existing / hand-made claim)
+ *   node scripts/provisionOneIncClaims.js --verify [--profiles A,B]   (re-check every pool claim's declared test data
+ *        — helpers/oneInc/testData.js — and build what is missing; run before a test run)
+ *   node scripts/provisionOneIncClaims.js --all [--count 1]   (a fresh claim for EVERY profile FNOL can create; aged /
+ *        existing-claim profiles are verified instead)
  *
  * TEST tier only — it creates claims.
  */
@@ -61,7 +65,16 @@ for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnol && !FNO
 (async () => {
   const tier = String(process.env.CC_TIER || 'test').toLowerCase();
   if (tier !== 'test') { console.error('[Provision] creates claims — TEST tier only'); process.exit(2); }
-  const profiles = String(arg('profiles', Object.keys(FNOL).join(','))).split(',').map((s) => s.trim()).filter(Boolean);
+  // Existing-claim profiles (aged DE/MD/…: a new FNOL with an old loss date is impossible) have no FNOL exposures —
+  // they can only be --add-ed / --verify-ed.
+  const canFnol = (p) => FNOL[p] && (FNOL[p].exposures || []).length > 0;
+  let profiles = String(arg('profiles', Object.keys(FNOL).join(','))).split(',').map((s) => s.trim()).filter(Boolean);
+  const existingOnly = profiles.filter((p) => FNOL[p] && !canFnol(p));
+  if (arg('all', false)) profiles = profiles.filter(canFnol);
+  // --verify (and --all for existing-claim profiles): every pool claim of those profiles goes through the --add path.
+  const verifyProfiles = arg('verify', false) ? profiles : arg('all', false) ? existingOnly : [];
+  // Every pool claim (usable or not — a missing item may be buildable now), newest first.
+  const verifyAdds = verifyProfiles.flatMap((p) => (claimPicker.readPool()[p] || []).map((e) => `${p}=${e.claim}`));
   const count = Math.max(1, Math.min(10, Number(arg('count', 2)) || 2));
   const { chromium } = require('playwright');
   let browser = await chromium.launch({ headless: Boolean(arg('headless', false)) || process.env.ONEINC_HEADLESS === '1' }) // headed by default so the run can be watched (user direction 2026-10-20);
@@ -72,23 +85,26 @@ for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnol && !FNO
   // --add PROFILE=CLAIM[,PROFILE=CLAIM...]: put EXISTING claims (e.g. created by hand) into the pool instead of
   // creating new ones — each is prepared (assign / Surcharging / reserve) and checked first. Useful where FNOL
   // automation is fragile for a LOB (HO on cloud TEST, 2026-10-20).
-  const adds = String(arg('add', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const adds = [...String(arg('add', '') || '').split(',').map((s) => s.trim()).filter(Boolean), ...verifyAdds];
   if (adds.length) {
     await base.loginToClaimCenter(page);
     for (const a of adds) {
       const [profile, claim] = a.split('=').map((s) => (s || '').trim());
       if (!FNOL[profile] || !claim) { console.log(`[Provision] --add "${a}" ignored (use PROFILE=CLAIM, profiles: ${Object.keys(FNOL).join(', ')})`); continue; }
       const chk = await checkClaim(page, claim, { prepare: true, lienholders: /^(AUTO_LIEN|PROP_MORT)$/.test(profile), profile });
-      const entry = { claim, createdAt: new Date().toISOString(), source: 'added', usable: chk.usable, payees: chk.payees.map((p) => p.name),
+      const entry = { claim, createdAt: new Date().toISOString(), source: 'added', usable: chk.usable, data: chk.data, payees: chk.payees.map((p) => p.name),
         payeeWithDetails: chk.payeeWithDetails, reserveLines: chk.reserveLines, repaired: chk.repaired, problem: chk.problem };
       claimPicker.addToPool(profile, entry);
       summary.push({ profile, ...entry });
       console.log(`[Provision] ${profile} added ${claim}: ${chk.usable ? 'USABLE' : 'NOT usable — ' + chk.problem}${chk.repaired.length ? ` [prepared: ${chk.repaired.join('; ')}]` : ''}`);
     }
-    await browser.close();
     for (const s of summary) console.log(`[Provision] ${s.profile}: ${s.claim} ${s.usable ? 'USABLE' : 'not usable'}${s.problem ? ' — ' + s.problem : ''}`);
-    console.log(`[Provision] pool: ${claimPicker.POOL_FILE}`);
-    return;
+    if (!arg('all', false)) {
+      await browser.close();
+      console.log(`[Provision] pool: ${claimPicker.POOL_FILE}`);
+      return;
+    }
+    summary.length = 0;
   }
 
   // Fail fast when ClaimCenter itself can't save claims: two FNOLs in a row that die at the final save (Step 5 still
@@ -140,7 +156,7 @@ for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnol && !FNO
         envFailuresInARow = 0;
         console.log(`[Provision] ${profile} ${i}: claim ${claim} created — checking it`);
         const chk = await checkClaim(page, claim, { prepare: true, lienholders: /^(AUTO_LIEN|PROP_MORT)$/.test(profile), profile });
-        const entry = { claim, policy: policyNumber, lossDate: pol.lossDate, basedOn: pol.basedOn, createdAt: new Date().toISOString(), usable: chk.usable, payees: chk.payees.map((p) => p.name),
+        const entry = { claim, policy: policyNumber, lossDate: pol.lossDate, basedOn: pol.basedOn, createdAt: new Date().toISOString(), usable: chk.usable, data: chk.data, payees: chk.payees.map((p) => p.name),
           payeeWithDetails: chk.payeeWithDetails, reserveLines: chk.reserveLines, repaired: chk.repaired, problem: chk.problem };
         claimPicker.addToPool(profile, entry);
         summary.push({ profile, ...entry });

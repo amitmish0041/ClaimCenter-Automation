@@ -30,7 +30,7 @@ const TIER = (process.env.CC_TIER || 'test').toLowerCase();
 const ALLOW_FINISH = process.env.ONEINC_ALLOW_FINISH === '1' && ['test', 'dev'].includes(TIER);
 
 // Claim-level problems: worth retrying the same scenario on the next candidate claim of the profile.
-const CLAIM_LEVEL = /reserve line|Reserve Line has no|Name list is empty|wizard did not open|no reserve rows|no "(claimant|insured)" payee|permission|could not open claim|open \(positive\) remaining reserve|Available Reserves/i;
+const CLAIM_LEVEL = /missing test data|reserve line|Reserve Line has no|Name list is empty|wizard did not open|no reserve rows|no "(claimant|insured)" payee|permission|could not open claim|open \(positive\) remaining reserve|Available Reserves/i;
 
 function describeItem(item) {
   const k = Object.keys(item)[0];
@@ -138,6 +138,20 @@ async function runScenario(page, tc, recipe, ctx) {
         ctx.lastClaim = claim;
         await W.getParties(page);
       }
+      // Test-data preconditions (helpers/oneInc/testData.js): the profile's declared data is checked once per claim per
+      // run, a recipe's own `needs` before every case. Missing data → BLOCKED naming it (next claim tried first), never
+      // a PASS/FAIL on the wrong data. ONEINC_SKIP_DATA_CHECK=1 skips the profile check.
+      const TD = require('./testData');
+      ctx.dataChecked = ctx.dataChecked || {};
+      if (process.env.ONEINC_SKIP_DATA_CHECK !== '1' && TD.itemsFor(recipe.profile).length && !ctx.dataChecked[claim]) {
+        ctx.dataChecked[claim] = await TD.ensure(page, claim, TD.itemsFor(recipe.profile), { log: ctx.log });
+        await W.openClaim(page, claim, ctx.log);
+      }
+      const caseNeeds = process.env.ONEINC_SKIP_DATA_CHECK === '1' ? [] : TD.deriveNeeds(recipe);
+      const need = [...((ctx.dataChecked[claim]) || []), ...(caseNeeds.length ? await TD.ensure(page, claim, caseNeeds, { log: ctx.log }) : [])].filter((d) => !d.ok);
+      res.testData = ctx.dataChecked[claim] || null;
+      if (need.length) throw new W.Blocked(`claim ${claim} is missing test data: ${need.map((d) => `${d.label} (${d.problem})`).join('; ')}`);
+      if (caseNeeds.length) await W.openClaim(page, claim, ctx.log);
       res.claim = claim;
       await execute(page, [...recipe.steps, ...(recipe.checks || [])], res, ctx, capture);
     } catch (e) {

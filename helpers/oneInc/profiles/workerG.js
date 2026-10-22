@@ -5,6 +5,8 @@
  */
 'use strict';
 
+// Declared test data (helpers/oneInc/testData.js): built at claim creation, checked before cases run (2026-10-21).
+const data = (fn) => ({ enumerable: true, get: () => fn(require('../testData').D) });
 module.exports = {
   // PA personal auto with several vehicle exposures. VBR.032 makes a reserve change on one exposure pend ("Pending
   // approval", raised by a non-admin adjuster above their authority), so the reserve line of that exposure carries a
@@ -13,3 +15,6 @@ module.exports = {
     fnol: { policyType: 'Personal Auto', state: 'PA', lossCauseCode: 'LC15', lossDescription: 'OneInc automation (worker G) — PA auto collision, pending approval / exposure owner', incidents: ['Add Vehicle'],
       exposures: [{ coverageLabel: 'Collision' }, { coverageLabel: 'Comprehensive' }] } },
 };
+// VBR.032: exposure (2)'s reserve raised above the provisioning user's authority → "Pending approval" (provision as a
+// non-admin adjuster, e.g. the default CC_USER — su never pends). Exposure (1) stays clean for the negatives.
+Object.defineProperty(module.exports.G_PA, 'data', data((D) => [D.pendingTransaction({ expo: 2 })]));

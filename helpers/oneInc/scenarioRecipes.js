@@ -54,7 +54,8 @@ const MED_PAYMENT = 'Service Period is REQUIRED only on medical / WC indemnity p
 const NO_CONTACT_DETAILS = /payees other than vendor should have the payment contact details/i;
 
 const R = {};
-const add = (id, profile, steps, checks, notes) => { R[id] = { profile, steps, checks, notes }; };
+// opts.needs: case-specific test-data preconditions (helpers/oneInc/testData.js items), checked before the case runs.
+const add = (id, profile, steps, checks, notes, opts = {}) => { R[id] = { profile, steps, checks, notes, ...(opts.needs ? { needs: opts.needs } : {}) }; };
 
 // ══ GCCM-759 — Contact/Vendor Single Payee & Common UI Updates Part 1 (Full Check wizard) ═══════════════════════
 add('GCCM-759/UIF/TC-001', 'AUTO_PA', [{ menu: 'actions' }], [{ menu: { name: 'New Payment', present: true } }, { menu: { name: 'Payment', present: false, exact: true } }]);

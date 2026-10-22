@@ -164,3 +164,21 @@ test('payment recipes (run one at a time) include finishObserve steps, not only 
   const finishRecipes = Object.values(RECIPES).filter((r) => (r.steps || []).some((s) => s.call && /finishObserve/.test(s.call[0])));
   assert.ok(finishRecipes.every(isPaymentRecipe));
 });
+
+test('test data: profiles declare data items, recipes derive case-level needs', () => {
+  const TD = require('../../helpers/oneInc/testData');
+  const { PROFILES } = require('../../helpers/oneInc/claimPicker');
+  for (const [name, p] of Object.entries(PROFILES)) for (const d of p.data || []) {
+    assert.ok(d.id && d.label, `${name}: item without id/label`);
+    assert.ok(d.check || d.build, `${name}: ${d.id} can neither be checked nor built`);
+    assert.ok(d.build || d.manual, `${name}: ${d.id} has no build and no manual note`);
+  }
+  assert.ok(PROFILES.C_SURC_LC01.data.some((d) => d.id.startsWith('causeOfLoss:')));
+  const ids = (r) => TD.deriveNeeds(r).map((d) => d.id);
+  assert.deepEqual(ids({ steps: [{ call: ['reuseExt.openQuickOnRow', 'expense', 'any'] }] }), ['reserveRow:expense:any:']);
+  assert.deepEqual(ids({ steps: [{ open: 'quick', zeroReserve: true }] }), ['reserveRow:.:zero:']);
+  assert.deepEqual(ids({ steps: [{ reserve: 'match:Bodily Injury' }] }), ['reserveRow:.:open:Bodily Injury']);
+  assert.deepEqual(ids({ steps: [{ payee: 'claimant' }, { payee: 'PHILIP ADAMS' }] }), ['contact:PHILIP ADAMS']);
+  assert.ok(Object.values(RECIPES).every((r) => Array.isArray(TD.deriveNeeds(r))));
+  assert.ok(TD.MANUAL_DATA.every((m) => m.label && m.unblock));
+});

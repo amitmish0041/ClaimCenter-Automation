@@ -152,14 +152,19 @@ async function reserveRows(page) {
   return page.evaluate(() => {
     const rows = [...document.querySelectorAll('tr')].filter((r) => r.offsetParent && !r.querySelector('tr'));
     let cost = '';
+    let expo = '';
     const out = [];
     for (const r of rows) {
       const t = (r.innerText || '').replace(/\s+/g, ' ').trim();
       const hasOpt = [...r.querySelectorAll('[role=button]')].some((b) => (b.getAttribute('aria-label') || b.innerText || '').trim() === 'options');
-      if (!hasOpt) { const m = /^(Claim Cost|[A-Za-z ]*Expense(?: - (?:Allocated|Unallocated))?)\b/.exec(t); if (m) cost = m[1]; continue; }
+      if (!hasOpt) {
+        if (/^\(\d+\)/.test(t)) { expo = t.replace(/\s*\$.*$/, ''); continue; }
+        const m = /^(Claim Cost|[A-Za-z ]*Expense(?: - (?:Allocated|Unallocated))?)\b/.exec(t); if (m) cost = m[1]; continue;
+      }
       const b = r.querySelector('[id$="-RemainingReserves_button"]');
       const n = parseFloat(((b && b.innerText) || '').replace(/[^0-9.-]/g, ''));
-      out.push({ cost, remaining: Number.isFinite(n) ? n : 0, text: t.slice(0, 120) });
+      // expo: the "(n) Exposure name" heading the row sits under (added 2026-10-21 for testData reserve checks).
+      out.push({ expo, cost, remaining: Number.isFinite(n) ? n : 0, text: t.slice(0, 120) });
     }
     return out;
   });

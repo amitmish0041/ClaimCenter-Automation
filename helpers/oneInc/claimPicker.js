@@ -31,6 +31,11 @@ const PROFILES = {
   AUTO_MD_OLD: { label: 'MD personal auto, loss 3+ years ago (PIP / Med Pay exposure)', lob: 'AUTO', state: 'MD', prefix: /^PA-MD-/, poolOnly: true, minAgeYears: 3.05 },
   AUTO_LIEN: { label: 'PA personal auto with lienholders + vehicle loan', lob: 'AUTO', state: 'PA', prefix: /^PA-PA-/, poolOnly: true, fnolAs: 'AUTO_PA' },
 };
+// Declared test data (helpers/oneInc/testData.js) — built at claim creation, checked before cases run (2026-10-21).
+// Lazy: testData requires this module.
+Object.defineProperty(PROFILES.AUTO_LIEN, 'data', { enumerable: true, get: () => [require('./testData').D.lienholders({ kind: 'vehicle' })] });
+Object.defineProperty(PROFILES.PROP_MORT, 'data', { enumerable: true, get: () => [require('./testData').D.lienholders({ kind: 'property' })] });
+
 
 // Extension profiles (helpers/oneInc/profiles/*.js export { NAME: profile }). A profile may carry fnol: {...} (FNOL
 // settings for scripts/provisionOneIncClaims.js) and prepare: '<module>.<fn>' (run by claimCheck in prepare mode).

@@ -11,6 +11,8 @@
 // fnol is only here so provisionOneIncClaims.js --add accepts the profile; these profiles are never FNOL-created.
 const NO_FNOL = (state) => ({ policyType: 'Personal Auto', state, lossCauseCode: 'LC50', lossDescription: 'not used (pool-only aged claim)', incidents: [], exposures: [] });
 
+// Declared test data (helpers/oneInc/testData.js): built at claim creation, checked before cases run (2026-10-21).
+const data = (fn) => ({ enumerable: true, get: () => fn(require('../testData').D) });
 module.exports = {
   // DE personal auto (policy PMF-3053397), DoL 09/15/2024, "(2) Medical Benefits" exposure, Cause of Loss Medical
   // Benefits (LC50) — VBR.004. The PA-DE policies offer no LC50 cause (PIP only).
@@ -25,3 +27,16 @@ module.exports = {
   F_DE_WAGE: { label: 'DE personal auto, PIP Wage Loss Benefits exposure (LC57) with a $2,500 reserve', lob: 'AUTO', state: 'DE', prefix: /^PA-DE-/, poolOnly: true,
     fnol: NO_FNOL('DE'), prepare: 'recipes/workerF.prepareDeWage' },
 };
+Object.defineProperty(module.exports.F_DE_LC50, 'data', data((D) => [
+  D.vehicleExposure({ coverage: 'Medical Benefits', cause: 'Medical Benefits', match: /Medical Benefits/i }),
+  D.reserve({ exposure: /Medical Benefits/i, amount: 1500 }),
+]));
+Object.defineProperty(module.exports.F_PA_LC50, 'data', data((D) => [
+  D.vehicleExposure({ coverage: 'Medical Expense', cause: 'Medical Benefits', match: /Medical Expense/i }),
+  D.reserve({ exposure: /Medical Expense/i, amount: 1500 }),
+]));
+// The $2,500 Wage reserve goes to "Pending approval" (Keith Eisenhart) — approve it before the wage cases run.
+Object.defineProperty(module.exports.F_DE_WAGE, 'data', data((D) => [
+  D.vehicleExposure({ coverage: 'PIP', leaf: 'Wage Loss Benefits', cause: 'Personal Injury Protection', match: /Wage/i }),
+  D.reserve({ exposure: /Wage/i, amount: 2500 }),
+]));

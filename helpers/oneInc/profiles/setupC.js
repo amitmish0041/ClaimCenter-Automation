@@ -19,6 +19,8 @@ const AUTO_FNOL = (lossCauseCode, desc, { state = 'PA', policyType = 'Personal A
   exposures: coverage.map((coverageLabel) => ({ coverageLabel })),
 });
 
+// Declared test data (helpers/oneInc/testData.js): built at claim creation, checked before cases run (2026-10-21).
+const data = (fn) => ({ enumerable: true, get: () => fn(require('../testData').D) });
 module.exports = {
   // VBR.037 positive: PA personal auto, LC15, Surcharging screen NOT completed.
   C_SURC_PA: { label: 'PA personal auto, LC15, Surcharging incomplete (setup C: VBR.037 positive)', lob: 'AUTO', state: 'PA', prefix: /^PA-PA-/, poolOnly: true,
@@ -31,7 +33,26 @@ module.exports = {
     keepSurcharging: true, fnol: AUTO_FNOL('LC50', 'surcharge LC50 PA negative') },
   // VBR.037 negative: PA personal auto, LC01 only.
   C_SURC_LC01: { label: 'PA personal auto, LC01, Surcharging incomplete (setup C: VBR.037 no qualifying cause)', lob: 'AUTO', state: 'PA', prefix: /^PA-PA-/, poolOnly: true,
-    keepSurcharging: true, fnol: AUTO_FNOL('LC01', 'surcharge LC01 negative', { coverage: ['Collision'] }) },
+    keepSurcharging: true, fnol: AUTO_FNOL('LC01', 'surcharge LC01 negative', { coverage: ['Comprehensive'] }) },
   // VBR.037 negative: Commercial Auto, LC15.
   C_SURC_CA: { label: 'PA commercial auto, Surcharging incomplete (setup C: VBR.037 non-personal-auto)', lob: 'AUTO', state: 'PA', prefix: /^CA-PA-/, poolOnly: true,
     keepSurcharging: true, fnol: AUTO_FNOL('LC15', 'surcharge commercial auto negative', { policyType: 'Commercial Auto', coverage: ['Collision'] }) },};
+// VBR.037: Surcharging stays incomplete on every C_SURC claim; the negatives need exactly ONE exposure of the qualifying
+// kind (the rule reads the exposure Cause of Loss — see the note above).
+Object.defineProperty(module.exports.C_SURC_PA, 'data', data((D) => [D.surchargingIncomplete()]));
+// Negatives (CA / LC01-only / LC50 outside MI): no Surcharging screen at all on these claims (CONFIRMED 2026-10-21,
+// --verify) — the claim KIND is the precondition, not the Surcharging state.
+Object.defineProperty(module.exports.C_SURC_MI, 'data', data((D) => [
+  D.vehicleExposure({ coverage: 'Medical Expense', cause: 'Medical Benefits', match: /Medical/i }),
+  D.injuryIncident({ exposure: /Medical/i }),
+  D.surchargingIncomplete(),
+]));
+Object.defineProperty(module.exports.C_SURC_LC50, 'data', data((D) => [
+  D.vehicleExposure({ coverage: 'Medical Expense', cause: 'Medical Benefits', match: /Medical/i }),
+  D.injuryIncident({ exposure: /Medical/i }),
+  D.onlyExposures({ match: /Medical/i, why: 'VBR.037 non-Michigan LC50 negative' }),
+]));
+Object.defineProperty(module.exports.C_SURC_LC01, 'data', data((D) => [
+  D.causeOfLoss({ exposure: /Comprehensive/i, cause: 'Fire' }),
+  D.onlyExposures({ match: /Comprehensive/i, why: 'VBR.037 LC01-only negative' }),
+]));

@@ -172,6 +172,28 @@ function annotate(r, story, readiness) {
     else {
       log(`[OneInc] provisioning: selected scenarios need claim profiles ${needed.join(', ')} (pool size ${poolSize} each)`);
       run.provisioned = {};
+      // Test data first (helpers/oneInc/testData.js, 2026-10-21): the pool claims of every needed profile that declares
+      // data are re-checked and whatever is missing is BUILT before anything runs; claims that still miss data drop
+      // out of the pool (usable=false) and new claims are created below to make up the count.
+      const withData = needed.filter((p) => (claimPicker.PROFILES[p] || {}).data && claimPicker.PROFILES[p].data.length);
+      if (withData.length) {
+        log(`[OneInc] provisioning: verifying / building test data on the pool claims of ${withData.join(', ')}`);
+        await new Promise((resolve) => {
+          const { spawn } = require('child_process');
+          const child = spawn(process.execPath, [path.join(__dirname, 'provisionOneIncClaims.js'), '--verify', '--profiles', withData.join(','),
+            ...(arg('headless', false) ? ['--headless'] : [])], { cwd: path.join(__dirname, '..'), env: process.env });
+          let buf = '';
+          child.stdout.on('data', (d) => {
+            buf += d.toString();
+            const lines = buf.split(/\r?\n/);
+            buf = lines.pop();
+            for (const line of lines) if (/^\[(Provision|TestData)\]/.test(line)) log(line);
+          });
+          child.stderr.on('data', () => {});
+          child.on('close', resolve);
+          child.on('error', () => resolve(1));
+        });
+      }
       for (const profile of needed) {
         const have = claimPicker.poolClaims(profile).length;
         if (have >= poolSize) { log(`[OneInc] provisioning: ${profile} — ${have} usable claim(s) already in the pool`); continue; }

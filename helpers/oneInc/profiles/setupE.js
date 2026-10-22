@@ -11,8 +11,15 @@ const AUTO_FNOL = (desc) => ({
   exposures: [{ coverageLabel: 'Collision' }, { coverageLabel: 'Comprehensive' }],
 });
 
+// Declared test data (helpers/oneInc/testData.js): built at claim creation, checked before cases run (2026-10-21).
+const data = (fn) => ({ enumerable: true, get: () => fn(require('../testData').D) });
 module.exports = {
   // PA personal auto for VBR.036 (payments + contact address changes), payee-role cases and VBR.002 / VBR.032.
   E_PA: { label: 'PA personal auto (setup E: mailing-address auto-update / payee roles / exposure owner)', lob: 'AUTO', state: 'PA', prefix: /^PA-PA-/, poolOnly: true,
     fnol: AUTO_FNOL('PA auto collision, payee roles / mailing address') },
 };
+// Payee-role contacts (CPD.030/031) and the claim-only person payee for VBR.036 (not linked to the Address Book).
+Object.defineProperty(module.exports.E_PA, 'data', data((D) => [
+  D.roleContact('stateAgency'), D.roleContact('adverseCarrier'), D.roleContact('attorney'),
+  D.contact('PHILIP ADAMS', 'claim-only person contact (Parties Involved › New Contact › Person, NOT from the Address Book), role Covered Party'),
+]));
