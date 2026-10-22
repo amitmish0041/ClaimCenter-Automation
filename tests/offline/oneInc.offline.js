@@ -182,3 +182,35 @@ test('test data: profiles declare data items, recipes derive case-level needs', 
   assert.ok(Object.values(RECIPES).every((r) => Array.isArray(TD.deriveNeeds(r))));
   assert.ok(TD.MANUAL_DATA.every((m) => m.label && m.unblock));
 });
+
+test('VBR.032: Financials › Transactions rows parse right-aligned past the empty cell after Amount', () => {
+  const { _test: G } = require('../../helpers/oneInc/workerG');
+  const rows = G.parseTxnRows([
+    ['Type', 'Date', 'Amount'],
+    ['', 'Reserve', '10/22/2026', '$600.00', '', '2', '(2) 1st Party Vehicle - AIMEE GOSS', 'Comprehensive', 'Claim Cost', 'Other', 'Pending approval', 'Benjamin Smith'],
+    ['', 'Payment', '10/22/2026', '$1.37', '', '1', '(1) 1st Party Vehicle - AIMEE GOSS', 'Collision', 'Claim Cost', 'Other', 'Submitted', 'Benjamin Smith'],
+  ]);
+  assert.equal(rows.length, 2);
+  assert.deepEqual([rows[0].exposure, rows[0].status, rows[0].user], ['2', 'Pending approval', 'Benjamin Smith']);
+  assert.equal(G.pendingOn(rows, 2).length, 1);
+  assert.equal(G.pendingOn(rows, 1).length, 0);
+});
+
+test('test data: document + propertyExposure items, PROP_BLDG profile and worker K recipes', () => {
+  const TD = require('../../helpers/oneInc/testData');
+  const { PROFILES } = require('../../helpers/oneInc/claimPicker');
+  const doc = TD.D.document();
+  assert.equal(doc.id, 'document:OneInc automation - supporting document');
+  assert.ok(doc.check && doc.build);
+  const pe = TD.D.propertyExposure();
+  assert.equal(pe.id, 'propertyExposure:Coverage C Personal Property');
+  assert.ok(pe.check && pe.build);
+  const ids = PROFILES.PROP_BLDG.data.map((d) => d.id);
+  for (const p of ['causeOfLoss:', 'propertyExposure:', 'reserve:Building', 'lienholders:property', 'document:']) assert.ok(ids.some((i) => i.startsWith(p)), p);
+  // The Contents reserve is a case need of TC-018 / TC-101, not profile data (2026-10-22).
+  assert.ok(!ids.some((i) => i.startsWith('reserve:Contents')));
+  const R018 = RECIPES['GCCM-763/VBR/TC-018'];
+  assert.ok((R018.needs || []).some((d) => /Contents|Personal|Other|(2)/i.test(d.id) || /reserve:/.test(d.id)));
+  for (const id of ['GCCM-763/VBR/TC-016', 'GCCM-1003/VBR/TC-102', 'GCCM-799/UIF/TC-056', 'GCCM-1003/UIF/TC-073']) assert.equal(RECIPES[id].profile, 'PROP_BLDG');
+  assert.ok(runner.isPaymentRecipe(RECIPES['GCCM-763/VBR/TC-016']));
+});

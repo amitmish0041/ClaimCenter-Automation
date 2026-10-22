@@ -216,7 +216,8 @@ function aggregate(root = RESULTS_DIR) {
         at: r.finishedAt || d.run.startedAt, story: r.story, name: r.name, claim: r.claim || '' };
     }
     runs.push({ runId: d.run.runId, startedAt: d.run.startedAt, durationMs: d.run.durationMs, scope: d.run.scope,
-      complete: d.run.complete !== false, tier: (d.run.env || {}).tier, counts, byStory });
+      // A stopped run never writes complete=true: no update for 30 min = not running (2026-10-22).
+      complete: d.run.complete !== false || Date.now() - Date.parse(d.run.finishedAt || d.run.startedAt) > 30 * 60 * 1000, tier: (d.run.env || {}).tier, counts, byStory });
   }
   runs.reverse();
   aggCache = { key, value: { latest, runs } };

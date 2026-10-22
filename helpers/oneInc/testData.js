@@ -26,6 +26,7 @@ const X = () => require('./reuseExt');
 const E = () => require('./setupE');
 const A = () => require('./setupA');
 const G = () => require('./workerG');
+const K = () => require('./recipes/workerK');
 const src = (re) => (re instanceof RegExp ? re.source : String(re));
 const toRe = (v) => (v instanceof RegExp ? v : new RegExp(String(v), 'i'));
 
@@ -63,6 +64,19 @@ const D = {
       return new RegExp(cause, 'i').test(col) ? '' : `exposure /${src(match)}/ has Cause of Loss "${col || '?'}", not "${cause}"`;
     },
     build: (page) => F().addMedExposure(page, { coverage, leaf, cause, existing: toRe(match) }),
+  }),
+
+  // A property (HO) coverage exposure added through Actions › New Exposure › Choose by Coverage › <location> ›
+  // <coverage>, claimant = insured (recipes/workerK.addPropertyExposure, CONFIRMED 2026-10-22 on Coverage C Personal
+  // Property, Cause of Loss Fire-Contents).
+  propertyExposure: ({ coverage = 'Coverage C Personal Property', cause = /^Fire-Contents$/i, match = /Contents|Personal Property/i } = {}) => ({
+    id: `propertyExposure:${coverage}`,
+    label: `Property exposure "${coverage}" (Cause of Loss /${src(cause)}/)`,
+    check: async (page) => {
+      const { k, rows } = await exposureIndex(page, match);
+      return k >= 0 ? '' : `no exposure matching /${src(match)}/ (exposures: ${rows.map((r) => r.t.slice(0, 50)).join(' | ') || 'none'})`;
+    },
+    build: (page) => K().addPropertyExposure(page, { coverage, cause: toRe(cause), existing: toRe(match) }),
   }),
 
   // Cause of Loss on an existing exposure (e.g. Comprehensive → "Fire" = LC01 for VBR.037 negatives).
@@ -121,8 +135,19 @@ const D = {
     },
     build: async (page, claim) => {
       const err = await X().addReserve(page, claim, { amount, costType, exposure: src(exposure) });
-      if (err) throw new W.Blocked(`reserve not added: ${String(err).slice(0, 200)}`);
-      return `added a $${amount} ${costType} reserve on /${src(exposure)}/`;
+      if (!err) return `added a $${amount} ${costType} reserve on /${src(exposure)}/`;
+      // The exposure already has a line of this cost type — CC offers no Cost Category for a second one (CONFIRMED
+      // 2026-10-22, HO-PA-01-26-0747949 Contents): raise that existing line instead.
+      if (/no Cost Category option/i.test(String(err))) {
+        await W.openClaim(page, claim);
+        const row = (await X().reserveRows(page)).find((r) => toRe(exposure).test(r.expo) && new RegExp(`^${costType}`, 'i').test(r.cost));
+        const n = row && (/^\((\d+)\)/.exec(row.expo) || [])[1];
+        if (n) {
+          await G().setReserveAmount(page, Number(n), amount);
+          return `raised the existing ${costType} line on exposure (${n}) to $${amount}`;
+        }
+      }
+      throw new W.Blocked(`reserve not added: ${String(err).slice(0, 200)}`);
     },
   }),
 
@@ -176,13 +201,18 @@ const D = {
     },
   }),
 
-  // Exposure #expo (1-based) has a transaction in "Pending approval" (VBR.032). Raised as the provisioning user, who
-  // must NOT have the authority (not su) — workerG.makePendingReserve.
-  pendingTransaction: ({ expo, amount = 250000 }) => ({
+  // Exposure #expo (1-based) has a transaction in "Pending approval" (VBR.032). Made as the provisioning user, who
+  // must NOT have the authority (not su). via 'reserve' (default): reserve raised to `amount` —
+  // workerG.makePendingReserve (needs the NewReserveSet permission, which the cloud adjuster benjsmit does NOT have —
+  // CONFIRMED 2026-10-22); via 'payment': a small Partial Payment (payAmount, Quick Payment from the reserve row matching
+  // `row`, payee `payee`) that CC holds for approval — workerG.makePendingPayment (benjsmit's PIP payments pend).
+  pendingTransaction: ({ expo, amount = 250000, via = 'reserve', row, payee = null, payAmount = '1.37' }) => ({
     id: `pending:${expo}`,
-    label: `Exposure (${expo}) has a reserve change in "Pending approval"`,
+    label: via === 'payment'
+      ? `Exposure (${expo}) has a payment in "Pending approval" (a $${payAmount} Partial Payment by an adjuster without the authority)`
+      : `Exposure (${expo}) has a reserve change in "Pending approval"`,
     check: async (page) => G().requirePending(page, expo, true).then(() => '').catch((e) => e.message),
-    build: (page) => G().makePendingReserve(page, expo, amount),
+    build: (page) => (via === 'payment' ? G().makePendingPayment(page, expo, { row, payee, amount: payAmount }) : G().makePendingReserve(page, expo, amount)),
   }),
 
   // Surcharging left incomplete (VBR.037 positives) — New Payment must stop on it. FNOL leaves it incomplete; the
@@ -211,6 +241,23 @@ const D = {
     manual: 'provision a new claim (FNOL leaves Surcharging incomplete) — a completed Surcharging screen cannot be reset',
   }),
 
+  // Every exposure owned by a real adjuster `who`. Claims left in a queue have "Default Owner" exposures, and VBR.002
+  // ("Exposure owner Default Owner is missing First Name, Last Name, Email…") then stops every payment (CONFIRMED
+  // 2026-10-22 on HO-PA-01-26-0747949). setupA.assignExposuresTo (Exposures › select all › Assign).
+  exposureOwner: ({ who = 'Benjamin Smith', group = 'Recovery Claims Team 2' } = {}) => ({
+    id: `exposureOwner:${who}`,
+    label: `All exposures owned by ${who}`,
+    check: async (page) => {
+      await W.navigate(page, 'exposures');
+      await page.locator('tr[id*="ExposuresLV-0-"]').first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+      const owners = await page.evaluate(() => [...document.querySelectorAll('[id*="ExposuresLV-"][id$="-Assignee"]')].map((e) => e.innerText.trim()));
+      if (!owners.length) return 'no exposures listed';
+      const other = owners.filter((o) => o.toLowerCase() !== who.toLowerCase());
+      return other.length ? `exposure owner(s): ${[...new Set(other)].join(', ')}` : '';
+    },
+    build: (page) => A().assignExposuresTo(page, who, group),
+  }),
+
   // A contact (person or company) on Parties Involved by name. build: null — claim-only person contacts are made by
   // hand / FNOL (e.g. PHILIP ADAMS on E_PA, David Thomas on the HO claims).
   contact: (name, how = 'add the contact to the claim (Parties Involved › New Contact)') => ({
@@ -234,6 +281,19 @@ const D = {
     },
     build: null,
     manual: state === 'zero' ? 'a reserve line drained to $0 (Final Payment on it)' : /expense/i.test(cost) ? 'an expense reserve row (vendor First and Final on a new Expense line)' : 'a reserve on that exposure (Actions › Reserve)',
+  }),
+
+  // A document on the claim (Documents list) that a payment can link (VBR.010: checks over $1,000 need a linked
+  // document). Built as a record with no file: Documents › New Document › "Indicate the existence of NON-ImageRight
+  // document/media" (recipes/workerK.addDocument, CONFIRMED 2026-10-22 — cloud TEST has no file upload).
+  document: ({ name = 'OneInc automation - supporting document', type = 'Other' } = {}) => ({
+    id: `document:${name}`,
+    label: `Claim document "${name}" (Documents list)`,
+    check: async (page) => {
+      const rows = await K().documentRows(page);
+      return rows.some((t) => t.toLowerCase().includes(name.toLowerCase())) ? '' : `no document "${name}" on the claim (${rows.length} document(s))`;
+    },
+    build: (page) => K().addDocument(page, { name, type }),
   }),
 
   // Wraps an existing profile prepare hook ('<module>.<fn>') as an item (its note is the record).

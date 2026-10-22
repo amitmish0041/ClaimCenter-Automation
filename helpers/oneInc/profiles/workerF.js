@@ -36,7 +36,9 @@ Object.defineProperty(module.exports.F_PA_LC50, 'data', data((D) => [
   D.reserve({ exposure: /Medical Expense/i, amount: 1500 }),
 ]));
 // The $2,500 Wage reserve goes to "Pending approval" (Keith Eisenhart) — approve it before the wage cases run.
+// UIF.061 / UIF.052 (recipes/workerJ.js) pay $1,000.00 and $999.99 on this line (wizard cancelled), so at least $1,000.01
+// must remain on it (a payment equal to the remaining reserve trips VBR.009 instead).
 Object.defineProperty(module.exports.F_DE_WAGE, 'data', data((D) => [
   D.vehicleExposure({ coverage: 'PIP', leaf: 'Wage Loss Benefits', cause: 'Personal Injury Protection', match: /Wage/i }),
-  D.reserve({ exposure: /Wage/i, amount: 2500 }),
+  D.reserve({ exposure: /Wage/i, amount: 2500, min: 1000.01 }),
 ]));
