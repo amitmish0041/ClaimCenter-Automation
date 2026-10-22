@@ -51,8 +51,10 @@ for (const r of Object.values(last)) {
   if (r.automationError) why.RERUN.push(`automation error: ${(r.error || '').slice(0, 120)}`);
   if (/no \$[\d.,]+ check (is )?listed|wizard closed but no/i.test(text)) why.RERUN.push('outcome read by the old Checks reader (page 1 only / held payments dropped)');
   if (r.status !== 'PASS' && /aggregate limit/i.test(text)) why.RERUN.push('aggregate-limit warning treated as a refused Finish (fixed)');
-  if (KNOWN_BAD[r.scenarioId]) why.RERUN.push(KNOWN_BAD[r.scenarioId]);
-  if (rec && BAD_PROFILE[rec.profile]) why.RERUN.push(BAD_PROFILE[rec.profile]);
+  // Runs that checked the claim's test data (testData gate, 2026-10-21 night) already prove the precondition.
+  const verified = Array.isArray(r.testData) || Array.isArray(r.stepShots);
+  if (KNOWN_BAD[r.scenarioId] && !verified) why.RERUN.push(KNOWN_BAD[r.scenarioId]);
+  if (rec && BAD_PROFILE[rec.profile] && !(r.status === 'BLOCKED' && /missing test data/i.test(text))) why.RERUN.push(BAD_PROFILE[rec.profile]);
   if (!rec) why.STALE = 'no longer automated (now MANUAL / needs data / dev pending) — old result, not counted';
   else if ((r.stepsExecuted || []).length) {
     const now = [...(rec.steps || []), ...(rec.checks || [])].filter((i) => !('field' in i) && !('text' in i) && !('button' in i) && !('menu' in i && typeof i.menu === 'object')).map(describeItem);
@@ -61,7 +63,7 @@ for (const r of Object.values(last)) {
     if (differs) why.RERUN.push('recipe steps changed since this run');
   }
   if (r.status === 'BLOCKED' && /missing test data|reserve line|no .* claim available|open reserve|Available Reserves/i.test(text)) why.RERUN.push('BLOCKED on data the provisioner now builds/verifies');
-  if (r.status === 'PASS') {
+  if (r.status === 'PASS' && !verified) {
     const chk = r.checks || [];
     if (!chk.length) why.REVIEW.push('PASS with no recorded checks');
     else if (chk.every(NEG)) why.REVIEW.push(chk.some((c) => /validation error|no error/i.test(c.description + c.expected))
