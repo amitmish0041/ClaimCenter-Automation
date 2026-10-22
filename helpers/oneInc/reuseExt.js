@@ -394,4 +394,10 @@ async function addJoint(page, list) {
   return W.addJointPayees(page, out);
 }
 
-module.exports = { prepareAgedPip, openQuickOnRow, addReserve, reserveRows, newestCheck, describeCheck, requireField, finishObserve, showMessages, selectVendorByTaxId, addJoint, _test: { fmtMsgs, pickCheck } };
+// Like openQuickOnRow, but a wizard that refuses to open ("New Payment Error") is not an error here: the message stays on the
+// screen for the case's own check (rules that fire when the payment is started, e.g. VBR.002).
+async function tryOpenQuickOnRow(page, cost, reserve, exposureSource) {
+  try { await openQuickOnRow(page, cost, reserve, exposureSource); } catch (e) { if (!/did not open/i.test(String(e.message))) throw e; }
+}
+
+module.exports = { prepareAgedPip, tryOpenQuickOnRow, openQuickOnRow, addReserve, reserveRows, newestCheck, describeCheck, requireField, finishObserve, showMessages, selectVendorByTaxId, addJoint, _test: { fmtMsgs, pickCheck } };

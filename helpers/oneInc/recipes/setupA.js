@@ -90,6 +90,39 @@ module.exports = (api) => {
   add('GCCM-799/CPD-Joint/TC-87', 'WCA_PA', [NONUS, { open: 'full' }, { payee: 'claimant' }, { next: true }, { reserve: 'open' }, { step2: {} }, REQ, { next: true }, { expectStep: 3 }], [...MAILED_BOTH, RESTORE], NOTE33);
   add('GCCM-1003/CPD-Joint/TC-258', 'WCA_PA', [NONUS, { open: 'quick', needOpenReserve: true }, { payee: 'claimant' }, { step2: {} }, REQ, { next: true }, { expectStep: 2 }], [...MAILED_BOTH, RESTORE], NOTE33);
 
+  // ── Quick Payment EXPENSE on a denied claim/exposure (negative: the denial rules are claim-cost only) ──────────────
+  const QEXPENSE = [{ call: ['reuseExt.openQuickOnRow', 'expense', 'any'] }, { payee: 'vendor' }, { step2: { amount: '1.37' } }];
+  const QEXP_NOTE = 'Quick Payment opened from the Adjuster Expense reserve row; payee = Address Book vendor; $1.37 submitted when no rule stops it.';
+  add('GCCM-1003/VBR/TC-148', 'AUTOA_PA', VAL([BEN, DEN('Denied in Full'), ...QEXPENSE], null), [], NOTE23 + ' ' + QEXP_NOTE);
+  add('GCCM-1003/VBR/TC-151', 'WCA_PA', VAL([CDEN('Denied in Full'), ...QEXPENSE, REQ], null), [], NOTE24 + ' ' + QEXP_NOTE);
+  add('GCCM-1003/VBR/TC-165', 'WCA_PA', [CDEN('Denied in Part'), ...QEXPENSE, REQ, FINISH], NOT_SHOWN(PART), NOTE28 + ' ' + QEXP_NOTE);
+
+  // ── VBR.002 positive — exposure owner with no email/phone (Jacob Erdman, jacoerdm) ─────────────────────────────────
+  const JAC = call('assignExposuresTo', 'Jacob Erdman', 'Claims Automation Group');
+  const NOTE02P = 'Setup: exposures assigned to Jacob Erdman (jacoerdm), whose user record has no email or phone. Next on Step 2 must raise the exposure-owner error.';
+  // CC raises this error as soon as the payment is started (Full Check: on Next of Step 2; Quick Payment: the wizard refuses to open with
+  // "New Payment Error"), so the closing check is that the message is on the screen.
+  const TRY_QUICK = { call: ['reuseExt.tryOpenQuickOnRow', 'claim cost', 'any'] };
+  add('GCCM-763/VBR/TC-004', 'AUTOA_PA', [JAC, DEN('No'), ...CC('Partial Payment', '1.37'), { next: true }],
+    [{ message: { re: OWNER_INFO, present: true } }], NOTE02P);
+  add('GCCM-1003/VBR/TC-086', 'AUTOA_PA', [JAC, DEN('No'), TRY_QUICK],
+    [{ message: { re: OWNER_INFO, present: true } }], NOTE02P + ' Quick Payment shows it as a "New Payment Error" when the wizard is opened.');
+
+  // ── VBR.025 / VBR.034 — expense payment to a claim-only contact (not in the Address Book, no Tax ID) ───────────────
+  // Payee = the claimant (a claim contact, not an Address Book vendor). The message is whatever CC raises; a different text FAILs with the actual one.
+  const PHIL = 'claimant';
+  const PHIL_NEEDS = {};
+  const QEXP_PHIL = [BEN, DEN('No'), { call: ['reuseExt.openQuickOnRow', 'expense', 'any'] }, { payee: PHIL }, { step2: { amount: '1.37' } }];
+  const FEXP_PHIL = [BEN, DEN('No'), { open: 'full' }, { payee: PHIL }, { next: true }, { reserve: 'new' }, { select: ['Cost Type', 'Adjuster Expense'] },
+    { step2: { transactionType: 'First and Final', amount: '1.37' } }];
+  const NOT_IN_AB = /does not exist in the address book/i;
+  const TAXID_REQ = /TaxId must be entered for Expense Payment/i;
+  const NOTE25 = 'Payee = the claimant: a claim contact, not an Address Book vendor, no Tax ID.';
+  add('GCCM-1003/VBR/TC-152', 'AUTOA_PA', VAL(QEXP_PHIL, NOT_IN_AB), [], NOTE25, PHIL_NEEDS);
+  add('GCCM-803/TC/TC-007', 'AUTOA_PA', VAL(FEXP_PHIL, NOT_IN_AB), [], NOTE25, PHIL_NEEDS);
+  add('GCCM-1003/VBR/TC-183', 'AUTOA_PA', VAL(QEXP_PHIL, TAXID_REQ), [], NOTE25, PHIL_NEEDS);
+  add('GCCM-803/TC/TC-038', 'AUTOA_PA', VAL(FEXP_PHIL, TAXID_REQ), [], NOTE25, PHIL_NEEDS);
+
   // VBR.019 / VBR.022 (second First and Final / Final Payment on one exposure) are NOT automated: their precondition is an
   // earlier payment with status "Paid", which the UI cannot produce (payments stay "Awaiting submission"). Tried 2026-10-21:
   // a second expense First and Final ($1.38) was accepted while the first was "Awaiting submission", and a second Final Payment
