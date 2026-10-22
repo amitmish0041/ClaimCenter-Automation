@@ -300,7 +300,8 @@ function annotate(r, story, readiness) {
   log(`[OneInc] REPORT ${paths.html}`);
   log(`[OneInc] JSON ${paths.json}`);
   log(`[OneInc] CSV ${paths.csv}`);
-  // Per-case review pages (Reports\CaseReviews) — latest result of every case, steps + screenshots (2026-10-22).
-  try { require('./oneIncCaseReviews').build({ log }); } catch (e) { log(`[OneInc] case review pages not written: ${e.message}`); }
+  // Per-case Word documents (Reports\CaseReviews\<id>.docx) — latest result of every case, steps + screenshots, for qTest
+  // (2026-10-22). Only cases whose latest result is new get rewritten, so this takes seconds after a small run.
+  try { await require('./oneIncCaseReviews').build({ log }); } catch (e) { log(`[OneInc] case documents not written: ${e.message}`); }
   logStream.end();
 })().catch((e) => { console.error('[OneInc] fatal:', e.stack || e.message); process.exit(1); });
