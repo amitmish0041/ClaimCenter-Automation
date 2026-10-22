@@ -536,6 +536,16 @@ async function navigate(page, where) {
   // Clicking "Financials" again while its summary is already showing toggles the nav group and the grid never
   // re-renders (CONFIRMED 2026-10-20) — stay put instead.
   if (where === 'financials' && await page.locator('[id^="ClaimFinancialsSummary-"]').first().isVisible().catch(() => false)) return;
+  // From Checks / Transactions the Financials group is EXPANDED, and clicking its header collapses it instead of
+  // opening the Summary (reported 2026-10-21) — click the group's own "Summary" sub-item when it is showing.
+  if (where === 'financials') {
+    const sub = page.locator(`[id^="${NAV_IDS.financials}-ClaimFinancialsGroup_ClaimFinancialsSummary"]`).first();
+    if (await sub.isVisible().catch(() => false)) {
+      await sub.click();
+      await settle(page, 3500);
+      if (await page.locator('[id^="ClaimFinancialsSummary-"]').first().waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false)) return;
+    }
+  }
   const link = page.locator(`[id="${id}"]`).first();
   if (!await link.isVisible().catch(() => false)) {
     // Sub-items only render once their group is expanded.
@@ -923,6 +933,21 @@ function serverError(screen) {
   return m ? m[0].trim().slice(0, 200) : '';
 }
 
+// A warnings-only page: CC stopped Finish/Update to show WARNINGS but nothing that blocks the save — pressing the
+// same button again goes through. CC's Validation Results worksheet (#gw-south-panel) heads its blocks "Errors:" /
+// "Warnings:" (CONFIRMED 2026-10-21: "Validation Results Clear Warnings: At least one aggregate limit on this claim
+// has been exceeded." refused nothing, yet the old "duplicate|warning" text test reported it as a refused Finish).
+// Without a worksheet, fall back to the message text: known warning texts and no field-level / PMS error.
+const WARNING_TEXT = /duplicate|warning|aggregate limit|payment contact details/i;
+const ERROR_TEXT = /Missing required field|: PMS [A-Z]{2}\d+|PMS [A-Z]{2}\d+ :|not allowed|must be|must not|Invalid payee|Validation errors on current page|An application error occurred/i;
+function warningsOnly(screen) {
+  const south = String((screen && screen.south) || '');
+  const msgs = ((screen && screen.messages) || []).join(' / ');
+  if (/\bErrors?\s*:/i.test(south) || /Validation errors on current page/i.test(msgs)) return false;
+  if (/\bWarnings?\s*:/i.test(south)) return true;
+  return WARNING_TEXT.test(msgs) && !ERROR_TEXT.test(msgs.replace(/[^/]*payment contact details[^/]*/gi, ''));
+}
+
 // Which wizard step is showing ("Step 2 of 3: Enter payment information").
 async function currentStep(page) {
   return page.evaluate(() => {
@@ -935,4 +960,5 @@ module.exports = {
   Blocked, settle, inWizard, openClaim, newPaymentErrorText, repairSurcharging, assignClaimAndExposures, abilityToPayErrors, abilityToPay, repairVehicleVins, lienholders, addClaimContactWithRole, addVehicleLoan, addIncidentLoan, addDigitalPaymentAccount, repairClaimantAddress, getParties, optionsOf, select, fill, answer, answerUnansweredNo, clickButton,
   visibleMenuItems, openActionsMenu, closeMenus, navigate, openFinancialsRowMenu,
   openPayment, cancelWizard, selectPayee, addJointPayees, selectVendorPayee, vendors, selectReserveLine, availableReserves, fillLineItem, completePaymentsStep, next, nextFillingServicePeriod, fillRequiredEmpties, serverError, currentStep,
+  warningsOnly,
 };

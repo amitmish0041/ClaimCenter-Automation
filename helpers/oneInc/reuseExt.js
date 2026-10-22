@@ -132,14 +132,15 @@ async function openQuickOnRow(page, costTypeSource = 'expense', reserve = 'any',
 // ── Reserves (TEST only, used by ad-hoc prepare runs) ───────────────────────────────────────────────────────────
 // Adds a reserve of the given cost type on the claim (financialsHelper.createReserve — Actions › Reserve), e.g. a
 // Legal Expense / Adjuster Expense row for the expense-only Quick Payment cases, or a fresh Claim Cost reserve on a
-// claim whose only line was closed by a Final Payment. claimCheck's prepare adds a reserve ONLY when the claim has NO
-// reserve line at all, so a claim whose lines are all at $0 (closed) stays "not usable" with an empty problem
-// (CONFIRMED 2026-10-21 on PA-PA-01-26-0748443) — this is the workaround. Returns '' on success, else the message.
+// claim whose only line was closed by a Final Payment (claimCheck's prepare now also does this when every line is at
+// $0 — it used to only when the claim had NO line, CONFIRMED 2026-10-21 on PA-PA-01-26-0748443). strict: CC must
+// offer the requested cost type / exposure, else the error comes back (no silent edit of another reserve).
+// Returns '' on success, else the message.
 async function addReserve(page, claim, { costType = 'Claim Cost', costCategory, amount = 500, exposure } = {}) {
   await W.cancelWizard(page).catch(() => {});
   await W.openClaim(page, claim);
   page._currentClaimNumber = claim;
-  const err = await require('../financialsHelper').createReserve(page, { reserveAmount: amount, costType, costCategory, exposure }).catch((e) => e.message);
+  const err = await require('../financialsHelper').createReserve(page, { reserveAmount: amount, costType, costCategory, exposure, strict: true }).catch((e) => e.message);
   await W.openClaim(page, claim).catch(() => {});
   return err || '';
 }
@@ -211,16 +212,23 @@ async function newestCheck(page, amount) {
   // The Checks list pages 15 rows at a time, oldest first — a new check lands on the LAST page. Reading page 1 only
   // reported "no check listed" for payments that were submitted (CONFIRMED 2026-10-21 on 0748435, 24 checks / 2
   // pages; core scenarioRunner.newestCheck has the same gap). Read every page.
-  const readPage = () => page.evaluate(() => [...document.querySelectorAll('tr[id*="ChecksLV-"]')].map((r) => {
-    const cell = (k) => ((r.querySelector(`[id$="-${k}"]`) || {}).innerText || '').trim();
-    return { number: cell('CheckNumber'), amount: cell('GrossAmount'), status: cell('Status') };
-  }).filter((x) => /^\d+$/.test(x.number)));
+  // A check held for approval is listed with NO check number and status "Pending approval" (CONFIRMED 2026-10-21 on
+  // PA-MD-01-23-0742279: $2.31 / $2.33 / $2.39 / $2.41 / $2.47 / $2.53 all "Pending approval", number blank) — keep
+  // those rows (pending: true) instead of dropping everything without a number.
+  const readPage = () => page.evaluate(() => {
+    return [...document.querySelectorAll('tr[id*="ChecksLV-"]')].filter((r) => !r.querySelector('tr')).map((r) => {
+      const cell = (k) => ((r.querySelector(`[id$="-${k}"]`) || {}).innerText || '').trim();
+      return { number: cell('CheckNumber'), amount: cell('GrossAmount'), status: cell('Status') };
+    }).filter((x) => /^\d+$/.test(x.number) || (!x.number && /\$\s*[\d,]+\.\d\d/.test(x.amount)));
+  });
+  // Page-change detection keys on the whole row set (rows held for approval all have an empty number).
+  const pageKey = async () => (await readPage()).map((x) => `${x.number}|${x.amount}|${x.status}`).join(';');
   // The list keeps the page it was left on — go back to page 1 first.
   const cur0 = await page.locator('[id$="ChecksLV-_ListPaging-input"]').first().inputValue().catch(() => '1');
   if (Number(cur0) > 1) {
-    const before = ((await readPage())[0] || {}).number;
+    const before = await pageKey();
     await page.locator('[id$="ChecksLV-_ListPaging-first"]').first().click().catch(() => {});
-    for (let t = 0; t < 20 && ((await readPage())[0] || {}).number === before; t++) await page.waitForTimeout(500);
+    for (let t = 0; t < 20 && await pageKey() === before; t++) await page.waitForTimeout(500);
   }
   const rows = await readPage();
   const nextBtn = page.locator('[id$="ChecksLV-_ListPaging-next"]').first();
@@ -228,15 +236,24 @@ async function newestCheck(page, amount) {
     const total = await page.locator('[id$="ChecksLV-_ListPaging-postLabel"]').first().innerText().catch(() => '1');
     const cur = await page.locator('[id$="ChecksLV-_ListPaging-input"]').first().inputValue().catch(() => '1');
     if (!(Number(cur) < Number(total)) || !await nextBtn.isVisible().catch(() => false)) break;
-    const first = (rows.length && (await readPage())[0] || {}).number;
+    const first = await pageKey();
     await nextBtn.click().catch(() => {});
-    for (let t = 0; t < 20 && ((await readPage())[0] || {}).number === first; t++) await page.waitForTimeout(500);
+    for (let t = 0; t < 20 && await pageKey() === first; t++) await page.waitForTimeout(500);
     rows.push(...await readPage());
   }
-  const want = String(amount || '').replace(/[^0-9.]/g, '');
-  const hits = rows.filter((x) => !want || x.amount.replace(/[^0-9.]/g, '') === want);
-  return hits.sort((a, b) => Number(b.number) - Number(a.number))[0] || null;
+  return pickCheck(rows, amount);
 }
+// Pure part of newestCheck (offline-tested): the LAST row of this amount in list order. The list is in creation order
+// across all pages, with checks held for approval (no number) interleaved where they were created (CONFIRMED
+// 2026-10-21 on PA-MD-01-23-0742279) — "highest check number" picked an older numbered check over the new held one.
+function pickCheck(rows, amount) {
+  const want = String(amount || '').replace(/[^0-9.]/g, '');
+  const hits = rows.filter((x) => !want || String(x.amount || '').replace(/[^0-9.]/g, '') === want)
+    .map((x) => ({ ...x, pending: !/^\d+$/.test(x.number || '') }));
+  return hits.slice(-1)[0] || null;
+}
+// "check 123456 ($1.37, Requesting)" | "Pending approval — no check number yet ($2.47)"
+const describeCheck = (c) => (c.pending ? `${c.status || 'Pending approval'} — no check number yet (${c.amount})` : `check ${c.number} (${c.amount}, ${c.status})`);
 async function showOutcome(page, text) {
   await page.evaluate((t) => {
     const old = document.getElementById('reuseb-outcome');
@@ -290,7 +307,14 @@ async function finishObserve(page) {
     await W.clickButton(page, 'Finish');
     await settle();
     let ms = await typedMessages(page);
-    if (await W.inWizard(page) && ms.length && ms.every((m) => /duplicate/i.test(m.t))) {
+    // Press through only warnings that are never what a rule case is about: CC's duplicate-check page and the
+    // claim's "At least one aggregate limit … exceeded" (CONFIRMED 2026-10-21 a warnings-only page that saves on a
+    // second Finish). Any other warning stops here and becomes the outcome.
+    let passed = '';
+    const ignorable = (t) => /duplicate/i.test(t) || (!/\bErrors?\s*:/i.test(t)
+      && t.replace(/^Validation Results\s*Clear\s*Warnings:\s*/i, '').split(/(?<=\.)\s+/).every((x) => /aggregate limit/i.test(x)));
+    if (await W.inWizard(page) && ms.length && ms.every((m) => ignorable(m.t))) {
+      passed = fmtMsgs(ms);
       const notDup = page.getByRole('radio', { name: 'Not a duplicate check', exact: true }).first();
       if (await notDup.isVisible().catch(() => false)) await notDup.click().catch(() => {});
       await W.clickButton(page, 'Finish').catch(() => {});
@@ -300,7 +324,8 @@ async function finishObserve(page) {
     if (await W.inWizard(page)) outcome = `stopped at Finish: ${fmtMsgs(ms) || 'no message'}`;
     else {
       const chk = await newestCheck(page, amount);
-      outcome = chk ? `submitted: check ${chk.number} (${chk.amount}, ${chk.status})` : `submitted, but no ${amount} check is listed on Financials › Checks`;
+      outcome = (chk ? `submitted: ${describeCheck(chk)}` : `submitted, but no ${amount} check is listed on Financials › Checks`)
+        + (passed ? ` — after warning(s) at Finish: ${passed}` : '');
     }
   }
   await showOutcome(page, outcome);
@@ -364,4 +389,4 @@ async function addJoint(page, list) {
   return W.addJointPayees(page, out);
 }
 
-module.exports = { prepareAgedPip, openQuickOnRow, addReserve, reserveRows, newestCheck, requireField, finishObserve, showMessages, selectVendorByTaxId, addJoint, _test: { fmtMsgs } };
+module.exports = { prepareAgedPip, openQuickOnRow, addReserve, reserveRows, newestCheck, describeCheck, requireField, finishObserve, showMessages, selectVendorByTaxId, addJoint, _test: { fmtMsgs, pickCheck } };

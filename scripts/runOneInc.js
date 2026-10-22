@@ -133,7 +133,7 @@ function annotate(r, story, readiness) {
   const logStream = fs.createWriteStream(logFile, { flags: 'a' });
   const log = (line) => { console.log(line); logStream.write(`${new Date().toISOString()} ${line}\n`); };
   const base = require('../helpers/claimCenterBase');
-  const { runScenario, ALLOW_FINISH } = require('../helpers/oneInc/scenarioRunner');
+  const { runScenario, ALLOW_FINISH, isPaymentRecipe } = require('../helpers/oneInc/scenarioRunner');
   const run = {
     // complete stays false until the last save, so the Runner can show a run in progress (even one started here
     // from the command line) by re-reading this file — it is rewritten after every scenario.
@@ -228,7 +228,8 @@ function annotate(r, story, readiness) {
   // pool claims gives each worker a different one). Phase 2 — the validation scenarios, which may press Finish and
   // submit payments that use up a claim's reserve — always runs one at a time afterwards, on worker 1.
   const workers = Math.max(1, Math.min(4, Number(arg('workers', process.env.ONEINC_WORKERS || 1)) || 1));
-  const isPaymentScenario = (id) => ((RECIPES[id] && RECIPES[id].steps) || []).some((s) => s.validate);
+  // validate steps AND finishObserve-style steps submit payments — both run one at a time (scenarioRunner.isPaymentRecipe).
+  const isPaymentScenario = (id) => isPaymentRecipe(RECIPES[id]);
   const phase1 = toRun.filter(({ tc }) => !isPaymentScenario(tc.scenarioId));
   const phase2 = toRun.filter(({ tc }) => isPaymentScenario(tc.scenarioId));
   const ctxs = [{ dirs, log, maxClaims: Number(arg('max-claims', 4)) || 4, worker: 0 }];

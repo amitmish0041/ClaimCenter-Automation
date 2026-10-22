@@ -1071,6 +1071,7 @@ async function fillCloudNewExposure(page, coverageLabel) {
   // rounds because fixing one field reveals the next.
   let saved = false;
   let lastState = null;
+  let warningPresses = 0;
   for (let round = 0; round < 8 && !saved; round++) {
     // Answer radios on EVERY round, including the first. "Reserve Required?" is
     // required from the moment the New Exposure screen opens, so gating this on
@@ -1124,8 +1125,16 @@ async function fillCloudNewExposure(page, coverageLabel) {
         .filter(e => e.offsetParent).map(e => e.id || e.getAttribute('aria-label') || '1').join('|')
     ).catch(() => '');
     if (round > 0 && stateNow === lastState && !bumped) {
-      console.log('CLOUD exposure: round ' + (round + 1) + ' changed nothing — stopping');
-      break;
+      // A warnings-only page ("At least one aggregate limit on this claim has been exceeded") refuses the first
+      // Update but saves on the next one — nothing needs changing, so "changed nothing" must not give up there
+      // (reported 2026-10-21: the add-exposure step stopped on it).
+      if (warningPresses < 2 && await cloudWarningsOnly(page)) {
+        warningPresses++;
+        console.log('CLOUD exposure: warnings only (' + (await readCloudValidation(page)).slice(0, 160) + ') — pressing Update again');
+      } else {
+        console.log('CLOUD exposure: round ' + (round + 1) + ' changed nothing — stopping');
+        break;
+      }
     }
     lastState = stateNow;
 
@@ -1588,6 +1597,17 @@ async function readCloudValidation(page) {
     return (p.innerText || '').replace(/\s+/g, ' ').replace(/^\s*Validation Results\s*/i, '')
       .replace(/^\s*Clear\s*/i, '').trim().slice(0, 400);
   }).catch(() => '');
+}
+
+// True when CC's Validation Results worksheet lists Warnings and no Errors (and the page carries no "Validation errors
+// on current page" banner): the save was held only to show warnings and goes through when pressed again.
+async function cloudWarningsOnly(page) {
+  return page.evaluate(() => {
+    const p = document.getElementById('gw-south-panel');
+    const t = p && p.offsetParent ? (p.innerText || '').replace(/\s+/g, ' ') : '';
+    const pageErr = /Validation errors on current page/i.test(document.body.innerText || '');
+    return /\bWarnings?\s*:/i.test(t) && !/\bErrors?\s*:/i.test(t) && !pageErr;
+  }).catch(() => false);
 }
 
 // Selects the next Claimant Number not already consumed. The pool is shared

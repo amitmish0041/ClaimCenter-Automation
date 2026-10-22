@@ -124,3 +124,43 @@ test('every recipe points at a real test case (when the OneInc workbooks are on 
   const ids = new Set(inv.loadInventory().cases.map((c) => c.scenarioId));
   assert.deepEqual(Object.keys(RECIPES).filter((k) => !ids.has(k)), []);
 });
+
+test('warnings-only pages: Validation Results "Warnings:" without "Errors:" press through; errors never do', () => {
+  const W = require('../../helpers/oneInc/wizardDriver');
+  const sc = (south, messages = []) => ({ south, messages });
+  assert.equal(W.warningsOnly(sc('Validation Results Clear Warnings: At least one aggregate limit on this claim has been exceeded.')), true);
+  assert.equal(W.warningsOnly(sc('Validation Results Clear Errors: Payee type for X must be vendor or other. Warnings: At least one aggregate limit on this claim has been exceeded.')), false);
+  assert.equal(W.warningsOnly(sc('', ['Possible duplicate payment found'])), true, 'no worksheet: known warning text');
+  assert.equal(W.warningsOnly(sc('', ['Transaction Type : PMS PL50 : Partial payment not allowed without open reserve'])), false);
+  assert.equal(W.warningsOnly(sc('', ['Payees other than vendor should have the payment contact details set up on the parties involved.', 'Exposure : Missing required field "Exposure"'])), false);
+  assert.equal(W.warningsOnly(sc('', [])), false, 'nothing shown is not a warnings page');
+});
+
+test('newest check: the last row of the amount in list (creation) order, incl. held-for-approval rows with no number', () => {
+  const { pickCheck } = require('../../helpers/oneInc/reuseExt')._test;
+  const { describeCheck } = require('../../helpers/oneInc/reuseExt');
+  // Order as CC lists them on PA-MD-01-23-0742279 (2026-10-21): held, numbered, then held again.
+  const rows = [
+    { number: '', amount: '$2.39', status: 'Pending approval' },
+    { number: '10000123', amount: '$1.37', status: 'Issued' },
+    { number: '12830492', amount: '$2.39', status: 'Awaiting submission' },
+    { number: '10000999', amount: '$1.37', status: 'Requesting' },
+    { number: '', amount: '$2.39', status: 'Pending approval' },
+  ];
+  assert.equal(pickCheck(rows, '$1.37').number, '10000999');
+  const held = pickCheck(rows, '2.39');
+  assert.equal(held.pending, true, 'the newest $2.39 is the held one, not the older numbered check');
+  assert.match(describeCheck(held), /^Pending approval — no check number yet \(\$2\.39\)$/);
+  assert.match(describeCheck(pickCheck(rows, '1.37')), /^check 10000999 \(\$1\.37, Requesting\)$/);
+  assert.equal(pickCheck(rows, '$9.99'), null);
+});
+
+test('payment recipes (run one at a time) include finishObserve steps, not only validate', () => {
+  const { isPaymentRecipe } = runner;
+  assert.equal(isPaymentRecipe({ steps: [{ open: 'quick' }, { validate: { expect: null } }] }), true);
+  assert.equal(isPaymentRecipe({ steps: [{ open: 'quick' }, { call: ['reuseExt.finishObserve'] }] }), true);
+  assert.equal(isPaymentRecipe({ steps: [{ click: 'Finish' }] }), true);
+  assert.equal(isPaymentRecipe({ steps: [{ open: 'quick' }, { call: ['reuseExt.openQuickOnRow', 'expense'] }], checks: [{ field: { label: 'Amount' } }] }), false);
+  const finishRecipes = Object.values(RECIPES).filter((r) => (r.steps || []).some((s) => s.call && /finishObserve/.test(s.call[0])));
+  assert.ok(finishRecipes.every(isPaymentRecipe));
+});

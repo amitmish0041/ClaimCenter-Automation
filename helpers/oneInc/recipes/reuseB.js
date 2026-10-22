@@ -210,6 +210,11 @@ module.exports = (api) => {
   const SP = (end) => [{ fill: ['Service Period Start', 'DOL'] }, { fill: ['Service Period End', end] }];
   const AGED_FULL = (end, amount, reserve = 'open') => [...FULL_PAYMENTS('claimant', reserve), ...SP(end), { step2: { transactionType: 'Partial Payment', amount } }];
   const AGED_QUICK = (end, amount) => [QOPEN('open'), ...SP(end), { step2: { transactionType: 'Partial Payment', amount } }];
+  // MD: pay from the PIP "(3) 1st Party Medical Expense" line BY NAME. Once the Bodily Injury line got its $500 reserve,
+  // "first line with open reserve" picked BI (Coverage "Liability - Auto bodily injury") and the VBR.005/015 cases
+  // tested the wrong exposure (CONFIRMED 2026-10-21 rerun).
+  const MD_FULL = (end, amount) => [...FULL_PAYMENTS('claimant', 'match:Medical'), ...SP(end), { step2: { transactionType: 'Partial Payment', amount } }];
+  const MD_QUICK = (end, amount) => [X('openQuickOnRow', 'claim cost', 'open', 'Medical'), ...SP(end), { step2: { transactionType: 'Partial Payment', amount } }];
   const LC50 = X('requireField', 'Cause of Loss', 'medical benefits',
     'VBR.004 applies to exposures with Cause of Loss LC50 "Medical Benefits"; the DE test claim\'s PIP exposure offers only "Personal Injury Protection" and no DE/PA claim with a Medical Benefits exposure is available');
   const NOT_LC50 = V('Cause of Loss', { value: /^(?!.*medical benefits).+/i });
@@ -236,19 +241,19 @@ module.exports = (api) => {
   const BI_LINE = 'match:Bodily Injury';
   const BI_QUICK = X('openQuickOnRow', 'claim cost', 'open', 'Bodily Injury');
   const BI_NOTE = ' Non-PIP: pays from the Bodily Injury exposure line.';
-  add('GCCM-763/VBR/TC-012', 'AUTO_MD_AGED', [...AGED_FULL('DOL+1096', '2.31'), PIP, FINISH], [OUT(VBR005)], MD_NOTE);
-  add('GCCM-763/VBR/TC-013', 'AUTO_MD_AGED', [...AGED_FULL('DOL+730', '2.33'), PIP, FINISH], [OUT(/^(?![\s\S]*3 years after the DOL)/i)], MD_NOTE + ' Passes when the VBR.005 text is absent (VBR.015\'s own MD warning may still show).');
+  add('GCCM-763/VBR/TC-012', 'AUTO_MD_AGED', [...MD_FULL('DOL+1096', '2.31'), PIP, FINISH], [OUT(VBR005)], MD_NOTE);
+  add('GCCM-763/VBR/TC-013', 'AUTO_MD_AGED', [...MD_FULL('DOL+730', '2.33'), PIP, FINISH], [OUT(/^(?![\s\S]*3 years after the DOL)/i)], MD_NOTE + ' Passes when the VBR.005 text is absent (VBR.015\'s own MD warning may still show).');
   add('GCCM-763/VBR/TC-014', 'AUTO_DE_AGED', [...AGED_FULL('DOL+1096', '2.37'), PIP, FINISH], [SUBMITTED], DE_NOTE + ' PIP coverage on a non-MD (DE) policy, End = DoL + 3 years. ' + SUB('2.37'));
   add('GCCM-763/VBR/TC-015', 'AUTO_MD_AGED', [...FULL_PAYMENTS('claimant', BI_LINE), NOT_PIP, ...SP('DOL+1096'), { step2: { transactionType: 'Partial Payment', amount: '2.61' } }, FINISH], [SUBMITTED], MD_NOTE + BI_NOTE);
-  add('GCCM-1003/VBR/TC-094', 'AUTO_MD_AGED', [...AGED_QUICK('DOL+1096', '2.39'), PIP, FINISH], [OUT(VBR005)], MD_NOTE);
-  add('GCCM-1003/VBR/TC-095', 'AUTO_MD_AGED', [...AGED_QUICK('DOL+730', '2.41'), PIP, FINISH], [OUT(/^(?![\s\S]*3 years after the DOL)/i)], MD_NOTE);
+  add('GCCM-1003/VBR/TC-094', 'AUTO_MD_AGED', [...MD_QUICK('DOL+1096', '2.39'), PIP, FINISH], [OUT(VBR005)], MD_NOTE);
+  add('GCCM-1003/VBR/TC-095', 'AUTO_MD_AGED', [...MD_QUICK('DOL+730', '2.41'), PIP, FINISH], [OUT(/^(?![\s\S]*3 years after the DOL)/i)], MD_NOTE);
   add('GCCM-1003/VBR/TC-096', 'AUTO_DE_AGED', [...AGED_QUICK('DOL+1096', '2.43'), PIP, FINISH], [SUBMITTED], DE_NOTE + ' PIP on a non-MD policy. ' + SUB('2.43'));
   add('GCCM-1003/VBR/TC-097', 'AUTO_MD_AGED', [BI_QUICK, NOT_PIP, ...SP('DOL+1096'), { step2: { transactionType: 'Partial Payment', amount: '2.67' } }, FINISH], [SUBMITTED], MD_NOTE + BI_NOTE);
   // VBR.015 (MD Medical Benefits exposure — warning on any payment)
-  add('GCCM-763/VBR/TC-042', 'AUTO_MD_AGED', [...AGED_FULL('DOL+30', '2.47'), FINISH], [OUT(VBR015)], MD_NOTE);
+  add('GCCM-763/VBR/TC-042', 'AUTO_MD_AGED', [...MD_FULL('DOL+30', '2.47'), FINISH], [OUT(VBR015)], MD_NOTE);
   add('GCCM-763/VBR/TC-043', 'AUTO_DE_AGED', [...AGED_FULL('DOL+30', '2.51'), FINISH], [SUBMITTED], DE_NOTE + ' Same Medical Expense (PIP) exposure type on a non-MD policy. ' + SUB('2.51'));
   add('GCCM-763/VBR/TC-044', 'AUTO_MD_AGED', [...FULL_PAYMENTS('claimant', BI_LINE), NOT_PIP, { step2: { transactionType: 'Partial Payment', amount: '2.63' } }, FINISH], [SUBMITTED], MD_NOTE + BI_NOTE);
-  add('GCCM-1003/VBR/TC-125', 'AUTO_MD_AGED', [...AGED_QUICK('DOL+30', '2.53'), FINISH], [OUT(VBR015)], MD_NOTE);
+  add('GCCM-1003/VBR/TC-125', 'AUTO_MD_AGED', [...MD_QUICK('DOL+30', '2.53'), FINISH], [OUT(VBR015)], MD_NOTE);
   add('GCCM-1003/VBR/TC-126', 'AUTO_DE_AGED', [...AGED_QUICK('DOL+30', '2.57'), FINISH], [SUBMITTED], DE_NOTE + ' Non-MD policy. ' + SUB('2.57'));
   add('GCCM-1003/VBR/TC-127', 'AUTO_MD_AGED', [BI_QUICK, NOT_PIP, { step2: { transactionType: 'Partial Payment', amount: '2.69' } }, FINISH], [SUBMITTED], MD_NOTE + BI_NOTE);
 };

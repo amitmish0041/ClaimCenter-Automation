@@ -1509,7 +1509,8 @@ async function editReserveCloud(page, { reserveAmount }) {
     return 'editReserveCloud: no editable amount field after Edit';
   }
   await amount.fill(String(reserveAmount)).catch(() => {});
-  await page.getByRole('button', { name: 'Save', exact: true }).first().click().catch(() => {});
+  const save = page.getByRole('button', { name: 'Save', exact: true }).first();
+  await save.click().catch(() => {});
   await page.waitForTimeout(3000);
 
 
@@ -1523,11 +1524,26 @@ async function editReserveCloud(page, { reserveAmount }) {
     console.log('editReserveCloud: blocked by validation —', validation);
     return validation;
   }
+  // Verify, don't assume: it once logged "existing reserve raised to 1000000" while nothing was saved (2026-10-21).
+  // Saved = the edit form is gone (no Save button, no editable amount).
+  const stillEditing = await save.isVisible().catch(() => false) || await amount.isVisible().catch(() => false);
+  if (stillEditing) {
+    await page.getByRole('button', { name: 'Cancel', exact: true }).first().click().catch(() => {});
+    await page.waitForTimeout(1500);
+    return 'editReserveCloud: Save pressed but the reserve is still in edit mode with no validation text — nothing was saved';
+  }
   console.log('editReserveCloud: existing reserve raised to ' + reserveAmount);
   return undefined;
 }
 
-async function createReserveCloud(page, { reserveAmount, costType, costCategory, exposure: exposureWanted }) {
+// strict (additive 2026-10-21; default on when `exposure` is given): the reserve must land on exactly the requested
+// exposure / cost type / cost category. When CC does not offer one of them — or has Actions › Reserve disabled — it
+// returns an error string instead of quietly using the first option or editing some OTHER existing reserve (that
+// fallback once "raised" a reserve the caller never asked for). Legacy callers (no strict, no exposure) keep the
+// first-option / edit-existing fallbacks the WC and LOB e2e flows rely on. On-prem codes are mapped to cloud text
+// (CLPD → Claim Cost, ClaimCost → Claim Cost) so strict matching works with either.
+const CLOUD_RESERVE_ALIASES = { clpd: 'claimcost', indpd: 'indemnity', claimcost: 'claimcost' };
+async function createReserveCloud(page, { reserveAmount, costType, costCategory, exposure: exposureWanted, strict = !!exposureWanted }) {
   // Open the Actions menu, trying the same candidates the lifecycle helper
   // uses - a single getByRole attempt is not enough when the previous test
   // left the page mid-transition.
@@ -1578,6 +1594,10 @@ async function createReserveCloud(page, { reserveAmount, costType, costCategory,
     if (hasItem) {
       const disabled = await menuItem.locator('.gw-action--inner').first()
         .getAttribute('aria-disabled').catch(() => null);
+      if (disabled === 'true' && strict) {
+        for (let esc = 0; esc < 2; esc++) await page.keyboard.press('Escape').catch(() => {});
+        return 'createReserveCloud: Actions › Reserve is disabled on this claim — no new reserve can be set (strict: not editing another reserve instead)';
+      }
       if (disabled === 'true') {
         console.log('createReserveCloud: CC has disabled Actions > Reserve on this claim ' +
                     '(a reserve already exists) — editing the existing reserve instead');
@@ -1711,7 +1731,12 @@ async function createReserveCloud(page, { reserveAmount, costType, costCategory,
       return null;
     }
     const norm = (s) => (s || '').toLowerCase().replace(/[^a-z]/g, '');
-    const match = wanted ? real.find(o => norm(o) === norm(wanted) || norm(o).includes(norm(wanted))) : null;
+    const w = wanted ? (CLOUD_RESERVE_ALIASES[norm(wanted)] || norm(wanted)) : '';
+    const match = w ? real.find(o => norm(o) === w || norm(o).includes(w)) : null;
+    if (wanted && !match && strict) {
+      console.log('createReserveCloud: "' + field + '" does not offer "' + wanted + '" (options: ' + real.join(', ') + ')');
+      return { missing: field, wanted, real };
+    }
     const choice = match || real[0];
     await sel.selectOption({ label: choice }).catch(() => {});
     await page.waitForTimeout(500);
@@ -1720,9 +1745,33 @@ async function createReserveCloud(page, { reserveAmount, costType, costCategory,
 
   // exposureWanted (optional, additive 2026-10-21): text of the exposure to reserve on, e.g. 'Medical Expense' —
   // otherwise the first exposure listed.
+  // Leaves the New Reserve screen unsaved. Accepts a native "discard changes?" confirm if CC raises one (Playwright
+  // dismisses dialogs by default, which would keep the half-filled screen open).
+  const cancelReserveScreen = async () => {
+    const cancel = page.getByRole('button', { name: 'Cancel', exact: true }).first();
+    if (await cancel.isVisible().catch(() => false)) {
+      const accept = (d) => d.accept().catch(() => {});
+      page.on('dialog', accept);
+      try {
+        await cancel.click().catch(() => {});
+        await page.waitForTimeout(2500);
+      } finally { page.off('dialog', accept); }
+    }
+  };
   const exposure = await pickSelect('Exposure', exposureWanted);
-  const type     = await pickSelect('CostType', costType);
-  const category = await pickSelect('CostCategory', costCategory);
+  const type     = exposure && typeof exposure === 'object' ? exposure : await pickSelect('CostType', costType);
+  const category = type && typeof type === 'object' ? type : await pickSelect('CostCategory', costCategory);
+  const refused = [exposure, type, category].find(x => x && typeof x === 'object');
+  if (refused) {
+    await cancelReserveScreen();
+    return 'createReserveCloud: the New Reserve screen offers no ' + refused.missing + ' matching "' + refused.wanted +
+           '" (options: ' + refused.real.slice(0, 12).join(', ') + ') — nothing saved';
+  }
+  if (strict && (!exposure || !type || !category)) {
+    await cancelReserveScreen();
+    return 'createReserveCloud: no ' + (!exposure ? 'Exposure' : !type ? 'Cost Type' : 'Cost Category') +
+           ' option for exposure "' + (exposure || exposureWanted || '') + '" / cost type "' + (type || costType || '') + '" — nothing saved';
+  }
 
   // Cost Category is required, and on WC's medical-only exposure CC offers no
   // category at all for the chosen exposure/cost-type combination - so Save can

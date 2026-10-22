@@ -155,13 +155,32 @@ async function checkClaim(page, claim, { prepare = false, lienholders = false, p
         await openWizard();
         lines = await readLines();
       }
-      for (const l of lines) {
-        await W.select(page, 'Reserve Line', l).catch(() => {});
-        const amt = await W.availableReserves(page);
-        out.reserveLines.push({ line: l, available: amt });
-        if (amt > 0) out.openReserve = true;
+      const readAvailable = async () => {
+        out.reserveLines = [];
+        for (const l of lines) {
+          await W.select(page, 'Reserve Line', l).catch(() => {});
+          const amt = await W.availableReserves(page);
+          out.reserveLines.push({ line: l, available: amt });
+          if (amt > 0) out.openReserve = true;
+        }
+      };
+      await readAvailable();
+      // Lines exist but every one is at $0 (closed by a Final Payment / drained by earlier runs): add a fresh Claim
+      // Cost reserve too. Only "no line at all" used to trigger it, so such a claim stayed "not usable" with an EMPTY
+      // problem (CONFIRMED 2026-10-21 on PA-PA-01-26-0748443). strict: an error instead of editing another reserve.
+      if (lines.length && !out.openReserve && prepare) {
+        await W.cancelWizard(page);
+        page._currentClaimNumber = claim;
+        const err = await require('../financialsHelper').createReserve(page, { reserveAmount: 2500, costType: 'Claim Cost', strict: true }).catch((e) => e.message);
+        if (typeof err === 'string' && err) throw new Error(`every reserve line is at $0 and a Claim Cost reserve could not be added: ${err}`);
+        out.repaired.push('added a $2,500 Claim Cost reserve (all lines were at $0)');
+        await validate();
+        await openWizard();
+        lines = await readLines();
+        await readAvailable();
       }
       if (!lines.length) out.problem = prepare ? 'still no reserve line after adding a reserve' : 'claim has no reserve lines';
+      else if (!out.openReserve) out.problem = `no reserve line has open Available Reserves (${out.reserveLines.map((r) => `${r.line}: ${r.available}`).join('; ').slice(0, 200)})`;
     } else out.problem = 'payee Name list is empty';
   } catch (e) {
     out.problem = e.message.split('\n')[0].slice(0, 300);
@@ -169,7 +188,12 @@ async function checkClaim(page, claim, { prepare = false, lienholders = false, p
   await W.cancelWizard(page).catch(() => {});
   out.lienholders = out.payees.filter((p) => /lienholder/i.test(p.type)).map((p) => p.name);
   out.usable = out.wizard && out.payees.length > 0 && out.openReserve && (!lienholders || out.lienholders.length > 0);
-  out.payeeWithDetails = (out.payees.find((p) => p.contactDetails) || {}).name || null;
+  // Never "not usable" without a reason.
+  if (!out.usable && !out.problem) {
+    out.problem = !out.wizard ? 'payment wizard did not open' : !out.payees.length ? 'no payees in the wizard'
+      : !out.openReserve ? 'no reserve line has open Available Reserves' : 'no Lienholder/Mortgagee payee on the claim';
+  }
+  out.payeeWithDetails =(out.payees.find((p) => p.contactDetails) || {}).name || null;
   return out;
 }
 

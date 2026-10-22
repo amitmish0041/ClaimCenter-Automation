@@ -55,17 +55,20 @@ function describeItem(item) {
   return k;
 }
 
-// Newest check on Financials › Checks (highest check number) whose Gross Amount equals `amount` ("$1.37").
+// Newest check on Financials › Checks whose Gross Amount equals `amount` ("$1.37"). Delegates to reuseExt.newestCheck,
+// which reads EVERY page of the list (15 rows a page, oldest first — reading page 1 only reported real submissions as
+// "no $x check listed", CONFIRMED 2026-10-21 on 0748435) and keeps checks held for approval (no number yet).
 async function newestCheck(page, amount) {
-  await W.navigate(page, 'checks').catch(() => {});
-  await page.locator('tr[id*="ChecksLV-0-"]').first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
-  const rows = await page.evaluate(() => [...document.querySelectorAll('tr[id*="ChecksLV-"]')].map((r) => {
-    const cell = (k) => ((r.querySelector(`[id$="-${k}"]`) || {}).innerText || '').trim();
-    return { number: cell('CheckNumber'), amount: cell('GrossAmount'), status: cell('Status') };
-  }).filter((x) => /^\d+$/.test(x.number)));
-  const want = String(amount || '').replace(/[^0-9.]/g, '');
-  const hits = rows.filter((x) => !want || x.amount.replace(/[^0-9.]/g, '') === want);
-  return hits.sort((a, b) => Number(b.number) - Number(a.number))[0] || null;
+  return require('./reuseExt').newestCheck(page, amount);
+}
+
+// A recipe that may press Finish (submit a payment): a core `validate` step, an extension step whose function name
+// says Finish (reuseExt.finishObserve), or a plain click on Finish. runOneInc runs these one at a time (phase 2) — the
+// old "validate steps only" test let finishObserve recipes run in parallel under --workers N.
+function isPaymentRecipe(recipe) {
+  return [...((recipe && recipe.steps) || []), ...((recipe && recipe.checks) || [])].some((s) => s && (s.validate
+    || (Array.isArray(s.call) && /finish/i.test(String(s.call[0])))
+    || (typeof s.click === 'string' && /^finish$/i.test(s.click))));
 }
 
 async function runScenario(page, tc, recipe, ctx) {
@@ -116,6 +119,7 @@ async function runScenario(page, tc, recipe, ctx) {
   for (const claim of claims) {
     res.claimsTried.push(claim);
     res.stepsExecuted = [];
+    res.stepShots = [];
     res.checks = [];
     let blockedWhy = null;
     try {
@@ -255,6 +259,13 @@ async function execute(page, items, res, ctx, capture) {
       await validate(page, v, res, ctx, capture, record, () => { screen = null; });
     } else {
       throw new Error(`unknown recipe step "${k}"`);
+    }
+    // Step-by-step evidence (user request 2026-10-21): one screenshot after every action step so a reviewer can follow
+    // the whole test, not just the screen the checks read. res.stepShots[i] pairs with res.stepsExecuted[i].
+    // ONEINC_STEP_SHOTS=0 turns it off; 'menu' already captured its own screen above.
+    if (process.env.ONEINC_STEP_SHOTS !== '0' && k !== 'menu') {
+      res.stepShots = res.stepShots || [];
+      res.stepShots[res.stepsExecuted.length - 1] = await capture(`step-${k}`, null).catch(() => null);
     }
   }
 }
@@ -441,16 +452,25 @@ async function validate(page, v, res, ctx, capture, record, dirty) {
   await W.clickButton(page, 'Finish');
   await settleAfterFinish();
   dirty();
-  // CC may stop on a warnings-only page (e.g. "Possible duplicate payment found") that needs a second Finish.
-  if (await W.inWizard(page)) {
+  // CC may stop on a warnings-only page ("Possible duplicate payment found", "At least one aggregate limit on this
+  // claim has been exceeded") that saves on a second Finish. W.warningsOnly reads CC's Validation Results worksheet
+  // ("Warnings:" and no "Errors:"); the old "duplicate|warning" text test reported the aggregate-limit page as a
+  // refused Finish (CONFIRMED 2026-10-21, GCCM-1003 TC-155). A scenario whose EXPECTED message is on that page is
+  // decided right here — pressing on would submit the payment and hide the very warning under test.
+  const warningsPassed = [];
+  for (let r = 0; r < 2 && await W.inWizard(page); r++) {
     const again = await readScreen(page);
-    const onlyWarnings = /duplicate|warning/i.test(again.messages.join(' ')) && !/: (PMS|Missing|must|not allowed)/i.test(again.messages.join(' '));
-    if (onlyWarnings) {
-      const notDup = page.getByRole('radio', { name: 'Not a duplicate check', exact: true }).first();
-      if (await notDup.isVisible().catch(() => false)) await notDup.click().catch(() => {});
-      await W.clickButton(page, 'Finish').catch(() => {});
-      await settleAfterFinish();
-    }
+    if (v.expect && v.expect.test(msgsOf(again))) break;
+    if (!W.warningsOnly(again)) break;
+    if (!await page.getByRole('button', { name: 'Finish', exact: true }).first().isVisible().catch(() => false)) break;
+    warningsPassed.push(msgsOf(again).slice(0, 300));
+    const notDup = page.getByRole('radio', { name: 'Not a duplicate check', exact: true }).first();
+    if (await notDup.isVisible().catch(() => false)) await notDup.click().catch(() => {});
+    await W.clickButton(page, 'Finish').catch(() => {});
+    await settleAfterFinish();
+  }
+  if (warningsPassed.length) {
+    res.notes = [res.notes, `CC showed a warnings-only page at Finish and the automation pressed Finish again: ${warningsPassed.join(' | ')}`].filter(Boolean).join(' ');
   }
   s = await readScreen(page);
   text = msgsOf(s);
@@ -469,13 +489,20 @@ async function validate(page, v, res, ctx, capture, record, dirty) {
     // Prove it: read the newest check on Financials › Checks for this amount (user ask 2026-10-21 — "final page with
     // check number"). A payment that does not show up there is not a PASS.
     const chk = await newestCheck(page, amountShown);
-    res.submittedPayment = { claim: res.claim, amount: amountShown, checkNumber: chk ? chk.number : null, status: chk ? chk.status : null, at: new Date().toISOString() };
+    res.submittedPayment = { claim: res.claim, amount: amountShown, checkNumber: chk && !chk.pending ? chk.number : null, status: chk ? chk.status : null, pendingApproval: !!(chk && chk.pending), at: new Date().toISOString() };
     if (!chk) return rowFor(`wizard closed after Finish, but no ${amountShown || ''} check is listed on Financials › Checks`, 'FAIL');
-    res.notes = [res.notes, `Payment SUBMITTED on TEST: claim ${res.claim}, check ${chk.number}, ${chk.amount}, status "${chk.status}".`].filter(Boolean).join(' ');
     await capture('submitted-check', await readScreen(page));
+    if (chk.pending) {
+      // Its own outcome: no rule stopped the payment, but CC held it for approval — it has no check number and is
+      // not sent to OneInc until approved (CONFIRMED 2026-10-21 on PA-MD-01-23-0742279).
+      res.pendingApproval = true;
+      res.notes = [res.notes, `Payment SUBMITTED on TEST but held for approval: claim ${res.claim}, ${chk.amount}, status "${chk.status}" (no check number yet).`].filter(Boolean).join(' ');
+      return rowFor(`no error — payment submitted, but held for approval: ${chk.status} — no check number yet (${chk.amount})`, 'PASS', { submitted: true, pendingApproval: true });
+    }
+    res.notes = [res.notes, `Payment SUBMITTED on TEST: claim ${res.claim}, check ${chk.number}, ${chk.amount}, status "${chk.status}".`].filter(Boolean).join(' ');
     return rowFor(`no error — payment submitted: check ${chk.number} (${chk.amount}, ${chk.status})`, 'PASS', { submitted: true });
   }
   return rowFor(`Finish refused: ${text.slice(0, 300) || 'no message'}`, 'FAIL');
 }
 
-module.exports = { runScenario, ALLOW_FINISH, _test: { evaluate, rollUp, finish, describeItem } };
+module.exports = { runScenario, ALLOW_FINISH, isPaymentRecipe, _test: { evaluate, rollUp, finish, describeItem } };

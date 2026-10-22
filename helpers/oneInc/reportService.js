@@ -96,7 +96,7 @@ function toHtml(run, results, reportsDir) {
   const rows = results.map((r, i) => {
     const ev = (r.evidence || []).filter((p) => /\.png$/i.test(p)).map((p, k) => `<a href="${esc(rel(reportsDir, p))}" target="_blank">shot ${k + 1}</a>`).join(' · ');
     const dumps = (r.evidence || []).filter((p) => /\.json$/i.test(p)).length;
-    const checks = (r.checks || []).map((c) => `<tr><td>${pill(c.result)}</td><td>${esc(c.description)}</td><td>${esc(c.expected)}</td><td>${esc(c.actual)}${c.missing && c.result === 'FAIL' ? ' <span class="dev">possible pending dev</span>' : ''}</td></tr>`).join('');
+    const checks = (r.checks || []).map((c) => `<tr><td>${pill(c.result)}</td><td>${esc(c.description)}${c.screenshot ? ` <a href="${esc(rel(reportsDir, c.screenshot))}" target="_blank">screenshot</a>` : ''}</td><td>${esc(c.expected)}</td><td>${esc(c.actual)}${c.missing && c.result === 'FAIL' ? ' <span class="dev">possible pending dev</span>' : ''}</td></tr>`).join('');
     return `<tr class="row s-${esc(r.status.replace(' ', '-'))}" data-status="${esc(r.status)}" data-story="${esc(r.story)}" data-auto="${esc(r.automation)}">
       <td class="mono">${esc(r.scenarioId)}</td><td>${esc(r.name)}${r.devNote ? `<div class="dev">${esc(r.devNote)}</div>` : ''}</td>
       <td>${esc(r.automation)}</td><td>${pill(r.status)}</td><td class="mono">${esc(r.claim || '')}</td><td class="n">${r.durationMs ? (r.durationMs / 1000).toFixed(1) + 's' : ''}</td>
@@ -107,7 +107,7 @@ function toHtml(run, results, reportsDir) {
         ${r.notes ? `<p class="muted"><b>Automation note:</b> ${esc(r.notes)}</p>` : ''}
         ${(r.bugs || []).length ? `<p><b>Related OneInc bugs:</b> ${r.bugs.map((b) => `<a href="https://${esc(run.jira.site || 'donegalgroup.atlassian.net')}/browse/${esc(b.key)}" target="_blank">${esc(b.key)}</a> (${esc(b.status)}) ${esc(b.summary)}`).join('<br>')}</p>` : ''}
         ${r.precondition ? `<p class="muted"><b>Pre-condition:</b> ${esc(r.precondition)}</p>` : ''}
-        ${(r.stepsExecuted || []).length ? `<h4>Steps executed</h4><ol>${r.stepsExecuted.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>` : ''}
+        ${(r.stepsExecuted || []).length ? `<h4>Steps executed</h4><ol>${r.stepsExecuted.map((s, k) => `<li>${esc(s)}${(r.stepShots || [])[k] ? ` — <a href="${esc(rel(reportsDir, r.stepShots[k]))}" target="_blank">screenshot</a>` : ''}</li>`).join('')}</ol>` : ''}
         ${checks ? `<h4>Checks</h4><table class="chk"><tr><th>Result</th><th>Check</th><th>Expected</th><th>Actual</th></tr>${checks}</table>` : ''}
         ${r.error ? `<h4>Error</h4><pre>${esc(r.stack || r.error)}</pre>` : ''}
         <p class="muted">${r.startedAt ? `Start ${esc(r.startedAt)} · End ${esc(r.finishedAt)} · ` : ''}Claims tried: ${esc((r.claimsTried || []).join(', ') || '—')}
