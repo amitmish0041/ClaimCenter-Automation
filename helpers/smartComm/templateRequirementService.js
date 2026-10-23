@@ -892,7 +892,26 @@ function docxMentionsFraudLanguage(zip) {
 const LEGACY_DOC_TEXT = new Map();
 function getLegacyDocText(docPath) { return LEGACY_DOC_TEXT.get(docPath) || ''; }
 
+// Fraud-notice WORDING in the mapping doc (not just the words "fraud language"): the notice depends on the claim's
+// state and loss type, so the fraud-language checks (validationService.buildFraudLanguageRequirements) own it. DIG45
+// (2026-10-23) had the PA notice as plain text — it was asserted verbatim (FAIL on its GL-PA scenario, whose notice
+// differs) while FRAUD0 said the doc never mentions fraud language (FAIL again). Such lines are switched off with a
+// reason, and the doc counts as mentioning fraud language.
+const FRAUD_NOTICE_RE = /\bknowingly and with intent to (?:injure,? )?(?:defraud|injure)|\bfraudulent insurance act\b|\bfraud notice\b/i;
 async function getRequirements(template, dataDir) {
+  const res = await getRequirementsFromDoc(template, dataDir);
+  let fraudLines = 0;
+  for (const r of res.requirements || []) {
+    if (r.type !== 'requiredText' || r.enabled === false || !FRAUD_NOTICE_RE.test(String(r.expectedValue || ''))) continue;
+    r.enabled = false;
+    r.disabledReason = 'Fraud-notice wording — it depends on the claim\'s state and loss type, so the fraud-language checks verify it, not this fixed line.';
+    fraudLines++;
+  }
+  if (fraudLines) res.mentionsFraudLanguage = true;
+  return res;
+}
+
+async function getRequirementsFromDoc(template, dataDir) {
   let localPath = resolveLocalTemplatePath(template, dataDir);
   // A .docx saved next to the old .doc (same name) is the BA's newer copy — read that one.
   if (localPath && /\.doc$/i.test(localPath) && fs.existsSync(`${localPath}x`)) localPath = `${localPath}x`;
