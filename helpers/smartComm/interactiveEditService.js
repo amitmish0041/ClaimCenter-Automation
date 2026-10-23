@@ -501,7 +501,31 @@ async function readMergeFields(frame) {
     }));
   }, SELECTOR);
   const base = frame.locator(SELECTOR);
-  return raw.map((f) => ({
+  // One field the editor wraps onto two lines comes back as two spans — "[6007 CHARLESTOWN RD," + "MERCERSBURG, PA
+  // 17236-8704]" (DIG28/DIG30 Loss Location), "[PNPR2-7116 Incorrect CA Liab Prem I" + "RKB]" (DIG28 Insured Name).
+  // Read as two fields, the second piece was "edited" on its own ("value never appeared" FAIL) and the first piece
+  // alone was compared with the payload (CONFIRMED 2026-10-23: 9 of 72 failures in the last week's runs). A span that
+  // opens "[" without closing joins the following spans up to the one that closes "]"; the joined field keeps the
+  // FIRST piece's position (that's where a double-click opens the editor) and its pieces' idx in `pieces`.
+  const merged = [];
+  for (let i = 0; i < raw.length; i++) {
+    const f = { ...raw[i] };
+    const opens = (t) => /^\[/.test(t) && !/\]$/.test(t);
+    if (opens(f.text)) {
+      const pieces = [f.idx];
+      let j = i + 1;
+      while (j < raw.length && raw[j].editable === f.editable && !/^\[/.test(raw[j].text) && pieces.length < 6) {
+        f.text = `${f.text} ${raw[j].text}`.replace(/\s+/g, ' ');
+        pieces.push(raw[j].idx);
+        if (/\]$/.test(raw[j].text)) break;
+        j++;
+      }
+      if (/\]$/.test(f.text) && pieces.length > 1) { f.pieces = pieces; i = j; }
+      else f.text = raw[i].text; // never closed — leave the spans as they were
+    }
+    merged.push(f);
+  }
+  return merged.map((f) => ({
     ...f,
     stripped: f.text.replace(/^\[+/, '').replace(/\]+$/, '').trim(),
     locator: base.nth(f.idx),

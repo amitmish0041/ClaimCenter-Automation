@@ -221,12 +221,39 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
       const v = String(path).split('.').reduce((acc, k) => (acc == null ? acc : acc[k]), { testData: td, recipient: recipient || {}, raw: rawPayloadRoot || {} });
       if (v !== undefined && v !== null && v !== '') return one(v, path.startsWith('raw.') ? 'payload' : 'ClaimCenter');
     }
-    const row = field && dictRows.find((r) => r.attributeName === field && r.xpath);
+    // The row by exact name even when the dictionary's Form(s) column doesn't list this DIG — "Agent Number" (Producer
+    // Code, 19 BLOCKED edits across 12 templates on 2026-10-23) resolves fine from claim.policy.producerCode.
+    const unscoped = field && !dictRows.some((r) => r.attributeName === field) ? dataDictionaryService.getAttributeByExactName(digNumber, field) : null;
+    const row = (field && dictRows.find((r) => r.attributeName === field && r.xpath)) || (unscoped && unscoped.row.xpath ? unscoped.row : null);
     if (!row || !rawPayloadRoot) return null;
     const r = payloadXpathService.resolveXpath(rawPayloadRoot, row.xpath);
     return r.unsupported || r.value === undefined || r.value === '' ? null : one(r.value, 'payload');
   };
   const isPlaceholder = (b) => /<<|editable|^-+$|^\s*$/i.test(String(b || '').replace(/[[\]]/g, '')); // incl. "--Editable--" (DIG179)
+  // Every text value in the payload, read once — for payloadValueMatching below.
+  let payloadStrings = null;
+  const allPayloadStrings = () => {
+    if (payloadStrings) return payloadStrings;
+    const out = new Set();
+    (function walk(o, depth) {
+      if (o == null || depth > 40 || out.size > 50000) return;
+      if (typeof o === 'string' || typeof o === 'number') { const s = String(o).trim(); if (s.length >= 4 && s.length <= 200) out.add(s); return; }
+      if (typeof o === 'object') for (const k of Object.keys(o)) walk(o[k], depth + 1);
+    })(rawPayloadRoot, 0);
+    payloadStrings = [...out];
+    return payloadStrings;
+  };
+  const payloadValueMatching = (text) => {
+    const t = String(text || '').trim();
+    if (!rawPayloadRoot || t.length < 4) return null;
+    const tn = normForKnownValueMatch(t);
+    const td0 = /\d{4}/.test(t) ? new Date(t) : null;
+    // An ISO timestamp's own date part, not converted to local time: "1954-09-13T00:00:00.000Z" is Sep 13, though in
+    // US time that instant is the evening of Sep 12.
+    const dateOf = (s) => { const iso = /^(\d{4})-(\d{2})-(\d{2})(?:T|$)/.exec(s); return iso ? new Date(+iso[1], +iso[2] - 1, +iso[3]) : new Date(s); };
+    return allPayloadStrings().find((s) => normForKnownValueMatch(s) === tn
+      || (td0 && !Number.isNaN(td0.getTime()) && /\d{4}/.test(s) && /^[\d\-/T:.Z ]+$|^[A-Za-z]+ \d{1,2}, \d{4}$/.test(s) && dateOf(s).toDateString() === td0.toDateString())) || null;
+  };
   const sameValue = (a, b) => {
     const x = normForKnownValueMatch(String(a || '').replace(/[[\]]/g, '')); const y = normForKnownValueMatch(b);
     if (!x || !y) return false;
@@ -251,7 +278,12 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
   return edited.map((c, i) => {
     const label = labelOf(c);
     const labelOk = !label || docCompact.includes(compact(label)) || docCompact.includes(compact(label.replace(/^(?:re:\s*)?our\s+/i, '')));
-    const src = sourceOf(c, label);
+    // A field that holds ONE part of a date ("Date of Loss Day" → "6", DIG28/DIG30 "which occurred on or about the [6]
+    // day of [August]") is compared with that part of the source date, not the whole "August 06, 2026" (false FAIL
+    // 2026-10-23) — the same narrowing the PDF checks already do (pdfValidationService.dateLossPart).
+    const whole = sourceOf(c, label);
+    const part = whole && pdfValidationService.dateLossPart(c.dictionaryField || '', whole.value);
+    const src = part ? { values: part.accept, value: part.value, from: whole.from } : whole;
     const before = String(c.before || '');
     const placeholder = isPlaceholder(before);
     // No ClaimCenter/payload value behind the field: its text only has to match the mapping doc (per user direction
@@ -269,8 +301,12 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
     // No dictionary source: is the pre-edit value one of the claim's own values (insured, claimant, policy number,
     // policy type, loss location, underwriting company…)? "[MARTHA ANTOLICK]", "[Homeowner's]" (DIG200/DIG179).
     const knownValue = !src && !placeholder ? knownValues.find((k) => sameValue(before, k.value)) : null;
+    // Nothing names this field's source, but its own pre-edit value is in the payload exactly (a date in any format) —
+    // "[03/23/2026]" effDate, "[09/13/1954]" date of birth, "[29-Fall, slip, or trip injury" (DIG209/DIG15/DIG2118,
+    // BLOCKED before 2026-10-23). Exact only, 4+ characters, so a common short value can't match by accident.
+    const payloadHit = !src && !placeholder && !knownValue && !inTemplate ? payloadValueMatching(beforeText) : null;
     let beforeState = src ? (placeholder ? 'no default' : src.values.some(fieldMatches) ? 'match' : 'mismatch')
-      : (placeholder ? 'free-form' : knownValue ? 'known' : inTemplate ? 'template' : 'unverifiable');
+      : (placeholder ? 'free-form' : knownValue ? 'known' : inTemplate ? 'template' : payloadHit ? 'payload' : 'unverifiable');
     if (beforeState === 'no default' && condReq) beforeState = 'conditional';
     // A checkbox ("[ ]" ticked with "X" — DIG219's "Return to work" boxes) has no ClaimCenter value; whatever its label
     // matched in the dictionary, only the label and the X in the PDF apply.
@@ -289,12 +325,13 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
     const result = problems.length ? 'FAIL' : (beforeState === 'unverifiable' || c.lostInEditor) ? 'BLOCKED' : beforeState === 'conditional' ? 'SKIPPED' : 'PASS';
     return {
       id: `EDIT${i + 1}`, description: `Edited field ${c.id} "${label || c.label}"${c.dictionaryField ? ` (${c.dictionaryField})` : ''}: label, value before edit, value after edit`,
-      expected: isCheckbox ? '(checkbox — no default)' : src ? src.value : (beforeState === 'free-form' ? '(free-form — no default)' : '(no ClaimCenter/payload value)'),
+      expected: isCheckbox ? '(checkbox — no default)' : src ? src.value : (beforeState === 'free-form' ? '(free-form — no default)' : beforeState === 'payload' ? `${payloadHit} (payload, found by value)` : '(no ClaimCenter/payload value)'),
       actual: `Before edit: "${before}" → after edit: "${finalShown}"`,
       result,
       reason: problems.length ? `${problems.join('; ')}.`
         : c.lostInEditor ? `This field's edit ("${c.committedMarker}") was typed over by another test edit in the editor before Complete Document (field positions shifted while editing), so the PDF can't confirm it — not verifiable, not a template defect.`
         : beforeState === 'known' ? `Label is fine; before the edit it showed "${before}", the claim's ${knownValue.name}; the edited value is in the PDF.`
+        : beforeState === 'payload' ? `Before the edit it showed "${before}", which is this claim's value in the SmartCOMM payload ("${payloadHit}" — found by value; the Data Dictionary names no source for this field); the edited value is in the PDF.`
         : beforeState === 'unverifiable' ? `Label is in the mapping doc and the edit is in the PDF, but this field has no ClaimCenter/payload value to compare its pre-edit value "${before}" with.`
         : beforeState === 'checkbox' ? `A checkbox (no ClaimCenter value): it was empty before the edit and the "X" it was ticked with is in the PDF.`
         : beforeState === 'conditional' ? `Empty before the edit, which the mapping doc allows: this field is conditional ("${String(condReq.fieldName).slice(0, 140)}") and the condition wasn't met this run. Label and the edited value in the PDF are fine.`
@@ -706,13 +743,22 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // A template that prints the claimant gets the document related to the claimant's own exposure, as a real
     // claimant letter is (see setAdditionalData) — otherwise its Claimant line prints blank.
     const printsClaimant = (requirements || []).some((r) => r.expectedSource === 'testData.claimantName');
+    // A template whose fields the Data Dictionary sources from the EXPOSURE ("…from associated Vehicle incident for the
+    // exposure selected under 'Related To'" — Vehicle Year/Make/Model, DIG37/DIG75) needs an exposure in Related To too:
+    // related to the claim, those fields correctly print blank and every vehicle check was a false FAIL (2026-10-23).
+    const fieldKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const usedFields = new Set((requirements || []).map((r) => fieldKey(r.fieldName)).filter(Boolean));
+    const exposureRows = dataDictionaryService.getAttributesForTemplate(template.digNumber)
+      .filter((r) => /ccDocumentCreationRequest\.exposure\./i.test(r.xpath || '') && usedFields.has(fieldKey(r.attributeName)));
+    const needsVehicle = exposureRows.some((r) => /vehicleIncident/i.test(r.xpath || ''));
     const applied = await documentService.setAdditionalData(page, {
       language: 'English (US)', documentType: variant.documentType, status: variant.status, securityType: variant.securityType,
-      relatedToName: printsClaimant ? effectiveTestData.claimantName : undefined,
+      relatedToName: printsClaimant ? effectiveTestData.claimantName : (exposureRows.length ? '*' : undefined),
+      preferVehicleExposure: needsVehicle,
       insuredName: effectiveTestData.insuredName,
     });
     if (applied.relatedTo) {
-      console.log(`[SmartComm] ${scenario.scenarioId}: Related To set to "${applied.relatedTo}" (the claimant's exposure)`);
+      console.log(`[SmartComm] ${scenario.scenarioId}: Related To set to "${applied.relatedTo}" (${printsClaimant ? 'the claimant\'s exposure' : `an exposure — ${exposureRows.length} field(s) come from it${needsVehicle ? ', incl. its vehicle' : ''}`})`);
       // The letter's Claimant line fills from that exposure — expect its claimant.
       if (applied.relatedToClaimant && applied.relatedToClaimant.toLowerCase() !== String(effectiveTestData.claimantName || '').toLowerCase()) {
         console.log(`[SmartComm] ${scenario.scenarioId}: expected claimant now "${applied.relatedToClaimant}" (was "${effectiveTestData.claimantName}", which has no exposure on this claim)`);
@@ -1565,9 +1611,13 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     // up). Logging every FAILED field's real note immediately (not just the final tally) so the next run
     // shows the actual Playwright error text instead of this having to be re-diagnosed blind again.
     if (result === 'FAIL' && outcome.note) log(`field #${n} FAILED: ${outcome.note}`);
-    const match = dataDictionaryService.matchAttributeForField(template.digNumber, {
+    let match = dataDictionaryService.matchAttributeForField(template.digNumber, {
       labelContext: field.labelContext, technicalName: outcome.technicalName,
     });
+    // The label pass can pair a bare "Name:" with "To Name" (DIG37 "insuredName", 2026-10-23) — a field that names
+    // itself insured/claimant (fieldConcept) never keeps a recipient-block row; the known-value pass then matches it.
+    const concept = fieldConcept({ technicalName: outcome.technicalName, labelContext: field.labelContext });
+    if (match && match.row && concept && knownValueConcept(match.row.attributeName) !== concept && /^(to|copy|from)\b/i.test(match.row.attributeName)) match = null;
     const dictRow = match && match.row;
     interactiveChecks.push({
       id: `INT${n}`,
@@ -1679,7 +1729,15 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     log(`Second pass #${retryRound}: ${targets.length} editable field(s) still not edited (${relocated.length} relocated, ${stillMissing.length} could not be relocated this round) — retrying: ${relocated.map(({ target }) => `#${target.i + 1}`).join(', ')}`);
     for (const { field, target } of relocated) {
       const n2 = target.i + 1;
-      const outcome = await interactiveEditService.inspectAndMaybeEdit(frame, page, field, { newValue: buildEditValue(field, n2, template.digNumber, editableValues), fallbackValue: `QA-EDIT-${n2}`, log });
+      // A field that swallowed the text edit and looks numeric (SSN / ZIP / phone / amount, or a number-only value) is
+      // retried with digits — DIG15's Claimant SSN rejected "QA-EDIT-4" every time ("value never appeared", a false FAIL
+      // 2026-10-23). Four digits, so a last-4 / short field accepts it too.
+      const prior = target.c;
+      const looksNumeric = /ssn|social|zip|postal|phone|fax|amount|number|count|digits/i.test(`${prior.technicalName || ''} ${prior.label || ''} ${prior.dictionaryField || ''}`)
+        || /^\[?\s*[\d\s().-]*\]?$/.test(String(prior.before || ''));
+      const rejectedText = /never appeared|vanish/i.test(prior.reason || '');
+      const retryValue = rejectedText && looksNumeric ? String(1000 + n2).slice(-4) : buildEditValue(field, n2, template.digNumber, editableValues);
+      const outcome = await interactiveEditService.inspectAndMaybeEdit(frame, page, field, { newValue: retryValue, fallbackValue: `QA-EDIT-${n2}`, log });
       const existing = target.c; // same object reference as interactiveChecks[target.i]
       if (outcome.attempted && outcome.changed) {
         existing.result = 'PASS';
@@ -2382,7 +2440,21 @@ function annotateInteractiveEditFailures(validations, interactiveChecks) {
       return expectedNorm.length >= minLen && beforeNorm.length >= minLen
         && (expectedNorm.includes(beforeNorm) || beforeNorm.includes(expectedNorm));
     });
-    if (!hits.length) continue;
+    if (!hits.length) {
+      // The value lived in a field whose own test edit was typed over by a neighbouring edit before Complete Document
+      // (c.lostInEditor — its EDIT row is BLOCKED): neither the original value nor the edit can be in the PDF, so a
+      // "not found" here is the test's own collision, not a template defect (DIG28-AUTO-OH "Date of Loss Month",
+      // 2026-10-23). BLOCKED like that EDIT row — only when the field really showed the expected value first.
+      const lost = (interactiveChecks || []).filter((c) => c.observedChanged === true && c.lostInEditor && (
+        (c.dictionaryField && desc.includes(`"${c.dictionaryField.toLowerCase()}"`))
+        || (expectedNorm.length >= 3 && normForKnownValueMatch(c.before).includes(expectedNorm))));
+      if (lost.length && lost.some((c) => expectedNorm.length >= 3 && normForKnownValueMatch(c.before).includes(expectedNorm))) {
+        v.result = 'BLOCKED';
+        v.actual = `Before edit: "${lost.map((c) => c.before).join(' ')}" (its test edit was typed over before Complete Document)`;
+        v.reason = `The field showed "${v.expected}" before the test edited it (${lost.map((c) => c.id).join(', ')}), but that edit was typed over by another test edit before Complete Document, so the PDF can't confirm this field — the test's own collision, not a template defect.`;
+      }
+      continue;
+    }
     // committedMarker is the plain value actually typed; `after` carries the live editor's own extra bracket
     // decoration ("[[QA-EDIT-18]]") that never appears in the real PDF.
     const editedValue = hits.map((h) => h.committedMarker || h.after).join(' ');
@@ -2760,6 +2832,6 @@ module.exports = {
     recipientRoleFromTechnicalName, knownValueRole, assignByKnownValue, fieldConcept, buildMetadataChecks, buildEditValue, verifyInteractiveEditsInPdf,
     annotateInteractiveEditFailures, runLayoutChecks, payloadUnavailableCheck, metadataUnavailableCheck, rollUpScenario,
     buildXpathRequirements, linkTextFieldsToDictionary, printedNumberForms,
-    overlayValuePrinted, overlayRowLabel, overlayColumnHeader, buildPageAndFraudChecks, buildOverlayChecks, freeFormBlanksCheck,
+    buildEditedFieldChecks, overlayValuePrinted, overlayRowLabel, overlayColumnHeader, buildPageAndFraudChecks, buildOverlayChecks, freeFormBlanksCheck,
   },
 };

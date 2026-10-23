@@ -720,7 +720,10 @@ async function setEmail(page, email, recipientName) {
 // value set, or null when the field isn't on this template's screen / the
 // select failed) so the report never claims a dropdown value that was never
 // set — e.g. DIG52 on Cloud Test has no Security Type or Language field.
-async function setAdditionalData(page, { language = 'English (US)', documentType = 'Other', status, securityType, relatedToName, insuredName } = {}) {
+// relatedToName: a claimant's name → that claimant's exposure; '*' → any exposure (a template whose fields come from
+// the exposure, not a claimant). preferVehicleExposure: pick an exposure with a vehicle ("(1) 1st Party Vehicle - …")
+// first — the vehicle fields come from that exposure's vehicle incident.
+async function setAdditionalData(page, { language = 'English (US)', documentType = 'Other', status, securityType, relatedToName, insuredName, preferVehicleExposure = false } = {}) {
   const applied = { documentType: null, status: null, securityType: null, relatedTo: null };
   await page.getByRole('tab', { name: L.additionalData.tab, exact: true }).click();
 
@@ -752,7 +755,11 @@ async function setAdditionalData(page, { language = 'English (US)', documentType
       // DIG66: "Jessi Claimant" listed, exposures only for JESSICA MILLER / Gary Moore) — then relate to an
       // exposure whose claimant isn't the insured, and the caller expects THAT name (applied.relatedToClaimant).
       const notInsured = (o) => { const c = claimantOf(o); return c && (!insuredName || c.trim().toLowerCase() !== String(insuredName).trim().toLowerCase()); };
-      const pick = exposures.find((o) => o.toLowerCase().includes(want)) || exposures.find(notInsured);
+      const anyExposure = want === '*';
+      const named = (o) => anyExposure || o.toLowerCase().includes(want);
+      const vehicle = (o) => /vehicle/i.test(o);
+      const pick = (preferVehicleExposure && (exposures.find((o) => named(o) && vehicle(o)) || exposures.find(vehicle)))
+        || exposures.find(named) || exposures.find(notInsured);
       if (pick) applied.relatedToClaimant = (claimantOf(pick) || '').trim() || null;
       if (pick) {
         await relatedField.selectOption({ label: pick.trim() })

@@ -152,3 +152,23 @@ test('PDF mapping docs: field notes become dynamic values, labels stay fixed wor
   assert.ok(!res.requirements.some((r) => r.type === 'requiredText' && /Scott Adams/.test(r.expectedValue || '')), 'a sample value is never fixed wording');
   assert.deepEqual(res.freeFormFields.map((f) => f.fieldName), ['Vacation'], 'the empty field is a free-form blank');
 });
+
+test('a field whose sample also appears earlier in the same line anchors on its own occurrence (DIG37 "2 door")', async () => {
+  const { requirements } = await requirementsFor(
+    [['Dear ', [1, 'John Smith'], ','], ['Body Style (2 door, 4 door, SUV, truck etc.) ___', [0, '2 door'], '___']],
+    { 0: 'Vehicle Body Style', 1: 'Claimant Name' },
+  );
+  const fixed = statics(requirements);
+  assert.ok(fixed.some((t) => /^Body Style \(2 door, 4 door, SUV, truck etc\.\)/.test(t)), `the printed list stays whole: ${JSON.stringify(fixed)}`);
+  assert.ok(!fixed.some((t) => /___2 door/.test(t)), `the sample value is not fixed wording: ${JSON.stringify(fixed)}`);
+});
+
+test('a fill line left over from the previous field is not part of the next label (DIG37 "________ Dealer:")', async () => {
+  const { requirements } = await requirementsFor(
+    [['Dear ', [1, 'John Smith'], ','], ['Date vehicle was leased? _', [0, '01/01/2020'], ' ________ Dealer: _', [2, 'ABC Motors'], ' ______']],
+    { 0: 'Lease Date', 1: 'Claimant Name', 2: 'Dealer Name' },
+  );
+  const fixed = statics(requirements);
+  assert.ok(fixed.some((t) => /^Dealer:/.test(t)), `"Dealer:" starts its own check: ${JSON.stringify(fixed)}`);
+  assert.ok(!fixed.some((t) => /^_{2,}\s*Dealer/.test(t)), `no leading fill line: ${JSON.stringify(fixed)}`);
+});

@@ -236,8 +236,12 @@ function evalRootCondition(root, condText) {
 // Splits top-level "1> ... 2> ... 3> ..." numbered alternatives (the split point is the digit+">" marker
 // itself, never inside a nested if/when/where — CONFIRMED live these markers only ever appear at the very
 // start of each alternative in the real dictionary data, never mid-expression).
+// "1. ccDocumentCreationRequest… 2. ccDocumentCreationRequest…" is the same thing written with a full stop (Jurisdiction,
+// DIG151WC 2026-10-23 — resolved to nothing, so its check was BLOCKED); only split there when a path follows, so a
+// number inside an expression is never a split point.
 function splitNumberedAlternatives(expr) {
-  const parts = expr.split(/(?:^|\s)\d+>\s*/).map((s) => s.trim()).filter(Boolean);
+  let parts = expr.split(/(?:^|\s)\d+>\s*/).map((s) => s.trim()).filter(Boolean);
+  if (parts.length < 2) parts = expr.split(/(?:^|\s)\d+\.\s+(?=ccDocumentCreationRequest\b)/).map((s) => s.trim()).filter(Boolean);
   return parts.length > 1 ? parts : null;
 }
 

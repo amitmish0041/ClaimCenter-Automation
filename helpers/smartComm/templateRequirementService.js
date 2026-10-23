@@ -403,7 +403,11 @@ function parseCommentAnchors(documentXml) {
     const endIdx = documentXml.indexOf(endMarker, m.index);
     if (endIdx === -1) continue;
     const text = textOfRunsWithParagraphBreaks(documentXml.slice(m.index, endIdx)).trim();
-    anchors.push({ id, startIdx: m.index, text });
+    // The text right before the anchor in its own paragraph — tells apart two occurrences of the same words
+    // ("Body Style (2 door, 4 door, SUV, truck etc.) ___2 door": the comment is on the SECOND "2 door", DIG37).
+    const pStart = Math.max(documentXml.lastIndexOf('<w:p>', m.index), documentXml.lastIndexOf('<w:p ', m.index));
+    const before = pStart >= 0 ? textOfRuns(documentXml.slice(pStart, m.index)) : '';
+    anchors.push({ id, startIdx: m.index, text, before });
   }
   anchors.sort((a, b) => a.startIdx - b.startIdx);
   return anchors;
@@ -467,7 +471,10 @@ function normalizeWs(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
 // see the inline-label-pairs case below, which can emit several from a
 // single fragment.
 function classifyResidualFragment(fragment, docOrder, { sampleNames = [] } = {}) {
-  const line = fragment.trim();
+  // A fill line at the START of a fragment is the previous field's own line, left behind when that field was cut out
+  // ("Date vehicle was leased? _[field] ________ Dealer: _" → "________ Dealer: _", DIG37 2026-10-23) — not wording,
+  // and it made the fill-in-line rule demand a blank before "Dealer:". A line's own trailing blank is kept.
+  const line = fragment.trim().replace(/^_{2,}\s*/, '');
   // "Dear Mrs. DONNA BRANDT:" — the salutation repeating the mock-up's SAMPLE recipient (the text its own "To
   // Name" comment anchors elsewhere), not fixed wording; CONFIRMED live 2026-10-14 (DIG34: "Dear  DONNA BRANDT:"
   // was split into a "Dear" check plus a "DONNA BRANDT:" check that can never match a real claim). Checked as a
@@ -567,7 +574,7 @@ function classifyResidualFragment(fragment, docOrder, { sampleNames = [] } = {})
     // pieces to SURVIVE the filter) as the trigger, so a gap with only one meaningful side fell through to
     // the unsplit `line` below, silently undoing the split it just did. Whatever survives the filter (even
     // just one piece) is what must be asserted — never the original gap-containing string.
-    const pieces = rawPieces.map((p) => p.trim()).filter((p) => p && !isNoiseLine(p));
+    const pieces = rawPieces.map((p) => p.trim().replace(/^_{2,}\s*/, '')).filter((p) => p && !isNoiseLine(p));
     if (pieces.length) {
       // A piece that's a sample date ("Date of Injury:<tab>May 03. 2018", DIG226) is checked as a date shape.
       return pieces.map((p) => (SAMPLE_DATE_RE.test(p)
@@ -622,8 +629,17 @@ function buildRequirementsFromComments(paragraphs, anchors, comments) {
   for (const a of dynamicAnchors) {
     const needle = normalizeWs(a.text);
     if (!needle) continue;
-    const foundAt = normalized.indexOf(needle, normCursor);
+    let foundAt = normalized.indexOf(needle, normCursor);
     if (foundAt === -1) continue; // not found from here on — leave as static downstream
+    // Same words more than once: take the occurrence whose preceding text matches the anchor's own (Word anchors carry
+    // it — see parseCommentAnchors). "(2 door, 4 door, … etc.) ___2 door": the field is the second "2 door"; the first
+    // is printed wording, and taking it broke the list into a bogus fixed-wording check (DIG37, 2026-10-23).
+    const tail = normalizeWs(a.before || '').slice(-12);
+    if (tail.length >= 3 && !normalized.slice(0, foundAt).trimEnd().endsWith(tail.trimEnd())) {
+      for (let at = normalized.indexOf(needle, foundAt + 1); at !== -1; at = normalized.indexOf(needle, at + 1)) {
+        if (normalized.slice(0, at).trimEnd().endsWith(tail.trimEnd())) { foundAt = at; break; }
+      }
+    }
     const startIdx = map[foundAt];
     const endIdx = map[Math.min(foundAt + needle.length - 1, map.length - 1)] + 1;
     matches.push({ startIdx, endIdx, anchor: a });
