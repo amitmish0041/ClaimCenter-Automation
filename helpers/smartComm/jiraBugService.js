@@ -40,10 +40,22 @@ function savedRunnerLogin() {
   return null;
 }
 
+// Last resort, for a PC with no personal login: the team's READ-ONLY Jira service account, kept once on the shared V:
+// drive like the S3 session (per user direction 2026-10-23 — never a person's own token). JSON
+// { "email": "...", "apiToken": "...", "site": "donegalgroup.atlassian.net" }; override the path with
+// JIRA_SHARED_LOGIN_FILE. Read only, never logged.
+const DEFAULT_SHARED_LOGIN_FILE = 'V:\\Amit Int\\SmartComm\\jira-service-account.json';
+function sharedServiceLogin() {
+  try {
+    const s = JSON.parse(require('fs').readFileSync(process.env.JIRA_SHARED_LOGIN_FILE || DEFAULT_SHARED_LOGIN_FILE, 'utf8'));
+    return s && s.email && s.apiToken ? { email: s.email, token: s.apiToken, site: s.site, from: 'the shared Jira service account (V:)' } : null;
+  } catch (_) { return null; }
+}
+
 function jiraConfig() {
   const fromEnv = process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN
     ? { email: process.env.JIRA_EMAIL, token: process.env.JIRA_API_TOKEN, site: process.env.JIRA_SITE, from: 'environment' } : null;
-  const login = fromEnv || savedRunnerLogin();
+  const login = fromEnv || savedRunnerLogin() || sharedServiceLogin();
   if (!login) return null;
   const site = String(login.site || 'donegalgroup.atlassian.net').replace(/^https?:\/\//i, '').replace(/[\/?#].*$/, '');
   return { site, from: login.from, auth: `Basic ${Buffer.from(`${String(login.email).trim()}:${login.token}`).toString('base64')}` };
@@ -188,7 +200,7 @@ async function annotateTemplateResults(templateResults, { log = () => {} } = {})
 function jiraCell(item) {
   if (!item) return '';
   if (item.jiraUnavailable) {
-    return `Jira lookup unavailable (${/not set/i.test(item.jiraUnavailable) ? 'no Jira email / API token — add them on the Settings tab' : String(item.jiraUnavailable).slice(0, 80)})`;
+    return `Jira lookup unavailable (${/not set/i.test(item.jiraUnavailable) ? 'no Jira login — the shared service account file on V: wasn\'t readable; add your own on the Settings tab' : String(item.jiraUnavailable).slice(0, 80)})`;
   }
   if (item.knownBug) {
     return item.knownBug.open ? `${item.knownBug.key} (${item.knownBug.status})`
