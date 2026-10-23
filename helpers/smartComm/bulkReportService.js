@@ -202,6 +202,25 @@ function jiraFindings(templateResults) {
   return [...byKey.values()].sort((a, b) => Number(Boolean(a.known)) - Number(Boolean(b.known)) || a.dig.localeCompare(b.dig, undefined, { numeric: true }));
 }
 
+// Why the Jira sheet is empty — no failures to map is not the same as "credentials not set" (the old single message
+// said the latter even for a clean run, 2026-10-21).
+function jiraNotMappedNote(templateResults) {
+  let failures = 0;
+  let unavailable = '';
+  for (const t of templateResults || []) {
+    for (const s of t.scenarios || []) {
+      for (const item of [s, ...(s.validations || []), ...(s.interactiveChecks || [])]) {
+        if (!item || !(item.result === 'FAIL' || item.status === 'ERROR')) continue;
+        failures++;
+        if (item.jiraUnavailable) unavailable = item.jiraUnavailable;
+      }
+    }
+  }
+  if (!failures) return 'No failures to map to Jira in this run.';
+  if (unavailable) return `Not mapped — Jira lookup unavailable: ${jiraBugService.jiraCell({ jiraUnavailable: unavailable }).replace(/^Jira lookup unavailable \(|\)$/g, '')}.`;
+  return 'Not mapped — the Jira lookup didn\'t run for this report.';
+}
+
 function jiraFindingsHtml(templateResults) {
   const rows = jiraFindings(templateResults);
   if (!rows.length) return '';
@@ -222,7 +241,7 @@ function jiraFindingsHtml(templateResults) {
 function writeJiraFindingsSheet(ws, templateResults) {
   const rows = jiraFindings(templateResults);
   ws.addRow(['Findings vs Jira (SMART)']).font = { bold: true, size: 14 };
-  if (!rows.length) { ws.addRow(['Not mapped — Jira credentials not set or Jira unreachable for this run.']); return; }
+  if (!rows.length) { ws.addRow([jiraNotMappedNote(templateResults)]); return; }
   ws.addRow(['"NEW" findings have no matching bug yet — log those; the rest are already in Jira (re-check any that match a Closed bug).']);
   ws.addRow([]);
   reportService.styleHeaderRow(ws.addRow(['Template', 'Finding', 'Scenarios', 'Jira']));

@@ -17,12 +17,36 @@
 
 const OPEN = (status) => !/^(closed|rejected|done|retired|resolved|cancell?ed)$/i.test(String(status || '').trim());
 
+// Where the Jira login comes from: the environment (a Runner job inherits it from the Settings tab), else the Runner's
+// own saved settings on this PC — so a run started outside the Runner (npm run smartcomm:test, a script, a dev sweep)
+// still maps its failures instead of reporting "Jira lookup unavailable" (CONFIRMED 2026-10-21: every bulk run from
+// the repo said so, because only the runner repo's .env had the login). Read only, never logged.
+function runnerSettingsFiles() {
+  const path = require('path');
+  return [
+    process.env.RUNNER_SETTINGS_FILE,
+    process.env.APPDATA && path.join(process.env.APPDATA, 'ClaimCenter Runner', 'settings.json'), // installed Runner
+    path.join(__dirname, '..', '..', '..', 'Commercial Line Performance test', 'runtime-data', 'runner-settings.json'), // dev Runner
+  ].filter(Boolean);
+}
+function savedRunnerLogin() {
+  const fs = require('fs');
+  for (const file of runnerSettingsFiles()) {
+    try {
+      const s = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (s && s.jiraEmail && s.jiraApiToken) return { email: s.jiraEmail, token: s.jiraApiToken, site: s.jiraSite, from: 'Runner settings' };
+    } catch (_) { /* not there / unreadable — try the next one */ }
+  }
+  return null;
+}
+
 function jiraConfig() {
-  const email = process.env.JIRA_EMAIL;
-  const token = process.env.JIRA_API_TOKEN;
-  if (!email || !token) return null;
-  const site = String(process.env.JIRA_SITE || 'donegalgroup.atlassian.net').replace(/^https?:\/\//i, '').replace(/[\/?#].*$/, '');
-  return { site, auth: `Basic ${Buffer.from(`${email}:${token}`).toString('base64')}` };
+  const fromEnv = process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN
+    ? { email: process.env.JIRA_EMAIL, token: process.env.JIRA_API_TOKEN, site: process.env.JIRA_SITE, from: 'environment' } : null;
+  const login = fromEnv || savedRunnerLogin();
+  if (!login) return null;
+  const site = String(login.site || 'donegalgroup.atlassian.net').replace(/^https?:\/\//i, '').replace(/[\/?#].*$/, '');
+  return { site, from: login.from, auth: `Basic ${Buffer.from(`${String(login.email).trim()}:${login.token}`).toString('base64')}` };
 }
 
 function adfToText(node) {
@@ -59,6 +83,7 @@ async function loadKnownBugs({ log = () => {} } = {}) {
   if (cache) return cache;
   const cfg = jiraConfig();
   if (!cfg) { cache = { available: false, reason: 'JIRA_EMAIL / JIRA_API_TOKEN not set', bugs: [] }; return cache; }
+  log(`[Jira] using the Jira login from ${cfg.from}`);
   try {
     const bugs = await searchJql(cfg, 'project = SMART AND issuetype = Bug ORDER BY key DESC', ['summary', 'status', 'description']);
     const stories = await searchJql(cfg, 'project = SMART AND issuetype = Story AND summary ~ "Test_Execution"', ['summary', 'issuelinks']);
@@ -140,6 +165,8 @@ async function annotateTemplateResults(templateResults, { log = () => {} } = {})
   for (const t of templateResults || []) {
     for (const s of t.scenarios || []) {
       const tag = (item, text) => {
+        delete item.jiraUnavailable; // a re-annotated result (saved by an earlier run without a login) must not keep the old note
+        delete item.similarBug;
         item.knownBug = matchFinding(t.digNumber, text, known);
         if (item.knownBug) { summary.known++; return; }
         summary.newFindings++;
