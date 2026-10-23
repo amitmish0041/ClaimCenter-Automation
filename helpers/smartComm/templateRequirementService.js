@@ -845,11 +845,27 @@ function buildDigPrefixIndex(templatesDir) {
 // Verification.docx"); the local mirror under Templates/ClaimCenter/ uses
 // the identical file name in the common case, so resolving is normally just
 // a basename swap — the indexes above only matter for the exceptions.
+// Where mapping docs are looked up, in order (per user direction 2026-10-23): the BA team's own S: folder first — the
+// master copy — then the data folder's TemplatesClaimCenter (V: on the team's Runner, the bundled copy otherwise). A
+// PC without S: mapped just falls through. SMARTCOMM_TEMPLATES_DIR overrides the first folder.
+const DEFAULT_MASTER_TEMPLATES_DIR = 'S:/Shared Folders/Policy Center Initiative/PolicyCenter/Integration/Future State - Donegal/HPExstream Document Mapping/ClaimCenter';
+function templateDirs(dataDir) {
+  const dirs = [process.env.SMARTCOMM_TEMPLATES_DIR || DEFAULT_MASTER_TEMPLATES_DIR, dataDir && path.join(dataDir, 'Templates', 'ClaimCenter')];
+  return [...new Set(dirs.filter(Boolean))].filter((d) => { try { return fs.statSync(d).isDirectory(); } catch (_) { return false; } });
+}
+
 function resolveLocalTemplatePath(template, dataDir) {
+  for (const dir of templateDirs(dataDir)) {
+    const hit = resolveTemplateIn(template, dir);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function resolveTemplateIn(template, templatesDir) {
   const mapped = String(template.templateMappingDoc || '').trim();
   const baseName = path.basename(mapped);
   if (!baseName) return null;
-  const templatesDir = path.join(dataDir, 'Templates', 'ClaimCenter');
 
   const exact = [path.join(templatesDir, baseName), path.join(templatesDir, baseName + '.docx')];
   const exactHit = exact.find(p => fs.existsSync(p));
