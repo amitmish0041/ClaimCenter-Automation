@@ -16,6 +16,8 @@ const W = require('./wizardDriver');
 const CM_URL = process.env.CM_URL || 'https://cm-test-dngldev.donegal.beta5-andromeda.guidewire.net/ContactManager.do';
 const LEDGER = path.join(__dirname, '..', '..', 'results', 'oneInc', 'cm-restore.json');
 const FIELD = 'input[name$="ExtTINValidDate"]';
+const PHONE = 'input[name$="ABPersonVendorInputSet-Work-GlobalPhoneInputSet-NationalSubscriberNumber"]';
+const EMAIL = 'input[name$="ABPersonVendorInputSet-Primary"]';
 
 const readLedger = () => { try { return JSON.parse(fs.readFileSync(LEDGER, 'utf8')); } catch (_) { return []; } };
 const writeLedger = (l) => { fs.mkdirSync(path.dirname(LEDGER), { recursive: true }); fs.writeFileSync(LEDGER, JSON.stringify(l, null, 2)); };
@@ -54,11 +56,11 @@ async function openVendorEdit(cm, taxId) {
   await cm.locator(FIELD).waitFor({ timeout: 20000 });
 }
 
-async function saveField(cm, value) {
-  await cm.locator(FIELD).fill(value);
+async function saveField(cm, value, field = FIELD) {
+  await cm.locator(field).fill(value);
   await cm.keyboard.press('Tab');
   await cm.getByRole('button', { name: 'Update', exact: true }).first().click();
-  await cm.getByRole('button', { name: 'Edit', exact: true }).first().waitFor({ timeout: 20000 }).catch(() => { throw new W.Blocked('ContactManager did not save the vendor change'); });
+  await cm.getByRole('button', { name: 'Edit', exact: true }).first().waitFor({ timeout: 20000 }).catch(async () => { if (process.env.CM_DEBUG_SHOT) await cm.screenshot({ path: process.env.CM_DEBUG_SHOT }).catch(() => {}); throw new W.Blocked('ContactManager did not save the change: ' + (await cm.locator('.gw-message, [class*=error], [role=alert]').allInnerTexts().catch(() => [])).join(' / ').replace(/s+/g, ' ').slice(0, 300)); });
 }
 
 // Runs fn(cmPage) in its own browser context (separate cookies; the ClaimCenter page is left alone).
@@ -82,13 +84,62 @@ async function applyDate(page, taxId, value, label) {
   });
 }
 
+
+// ── Person contact e-mail (CPD.001: a payee with no e-mail makes ClaimCenter default ClaimsPay to Other / Mailed Check) ──
+// The insured/claimant of the automation PA auto claims (DMG LMB TEST, ZIP 18109) is linked to the Address Book and "must be
+// changed in PolicyCenter" in ClaimCenter, so it is edited here. who = { name, lastName, zip }.
+async function openPersonEdit(cm, who) {
+  await cm.getByText('Search', { exact: true }).first().click();
+  const sub = cm.locator('select[name$="ContactSubtype"]').first();
+  await sub.waitFor({ timeout: 20000 });
+  await cm.waitForTimeout(1500);
+  await sub.selectOption({ label: 'Person' });
+  await cm.locator('input[name$="LastName"]').first().waitFor({ timeout: 20000 }).catch(async () => { throw new W.Blocked('ContactManager Person search form did not load (fields: ' + (await cm.evaluate(() => [...document.querySelectorAll('input,select')].filter((i) => i.offsetParent).map((i) => (i.name || '').replace(/^.*-/, '')).join(','))) + ')'); });
+  if (who.lastName) await cm.locator('input[name$="LastName"]').first().fill(who.lastName);
+  if (who.zip) await cm.locator('input[name$="PostalCode"]').first().fill(who.zip);
+  await cm.getByRole('button', { name: 'Search', exact: true }).click();
+  await cm.waitForTimeout(4000);
+  const row = cm.locator('tr').filter({ hasText: who.name }).first();
+  if (!await row.isVisible().catch(() => false)) throw new W.Blocked(`contact "${who.name}" not found in ContactManager`);
+  await row.getByText(who.name, { exact: false }).first().click();
+  await cm.waitForTimeout(4500);
+  await cm.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  await cm.locator(EMAIL).waitFor({ timeout: 20000 }).catch(async () => { throw new W.Blocked('ContactManager person edit has no e-mail field; inputs: ' + (await cm.evaluate(() => [...document.querySelectorAll('input')].filter((i) => i.offsetParent).map((i) => i.name.replace(/^.*ContactDetailScreen-/, '')).join(','))).slice(-450)); });
+}
+
+async function applyEmail(page, who, value, label) {
+  return withCM(page, async (cm) => {
+    await openPersonEdit(cm, who);
+    const [valEmail, valPhone] = String(value).split('|');
+    const before = await cm.locator(EMAIL).inputValue();
+    const beforePhone = await cm.locator(PHONE).inputValue().catch(() => '');
+    const wantPhone = valPhone === undefined ? beforePhone : valPhone;
+    if (before === valEmail && beforePhone === wantPhone) { await cm.getByRole('button', { name: 'Cancel', exact: true }).first().click().catch(() => {}); return { before, changed: false }; }
+    if (label) {
+      const ledger = readLedger().filter((e) => !(e.kind === 'email' && e.who.name === who.name));
+      ledger.push({ kind: 'email', name: label, who, field: 'Main Email', original: before + '|' + beforePhone, changedAt: new Date().toISOString() });
+      writeLedger(ledger); // recorded before the edit is saved
+    }
+    if (wantPhone !== beforePhone) { const ph = cm.locator(PHONE).first(); await ph.click(); await ph.fill(''); if (wantPhone) await ph.pressSequentially(wantPhone, { delay: 30 }); await ph.press('Tab'); const got = await ph.inputValue(); if (wantPhone && !got) throw new W.Blocked('ContactManager Business phone did not accept "' + wantPhone + '"'); }
+    await saveField(cm, valEmail, EMAIL);
+    return { before: before + '|' + beforePhone, changed: true };
+  });
+}
+
+// Test step: sets the person's Main Email (blank = '' ) in ContactManager. Reverted by restoreVendors.
+async function setContactEmail(page, name, lastName, zip, email) {
+  const r = await applyEmail(page, { name, lastName, zip }, email, name);
+  return `${name}: Main Email ${r.before || '<blank>'} → ${email || '<blank>'}${r.changed ? '' : ' (already set)'}`;
+}
+
 async function restoreVendors(page) {
   const pending = readLedger();
   for (const e of pending) {
-    await applyDate(page, e.taxId, e.original, null);
-    writeLedger(readLedger().filter((x) => x.taxId !== e.taxId));
+    if (e.kind === 'email') await applyEmail(page, e.who, e.original, null);
+    else await applyDate(page, e.taxId, e.original, null);
+    writeLedger(readLedger().filter((x) => x !== undefined && JSON.stringify(x) !== JSON.stringify(e)));
   }
-  return pending.length ? `restored ${pending.map((e) => `${e.name} Tax ID Valid Until=${e.original || '<blank>'}`).join('; ')}` : 'nothing to restore';
+  return pending.length ? `restored ${pending.map((e) => `${e.name} ${e.field}=${e.original || '<blank>'}`).join('; ')}` : 'nothing to restore';
 }
 
 // Test step: sets the vendor's Tax ID Valid Until to 'past' | 'future' | 'none' (or a date). Reverted by restoreVendors.
@@ -99,7 +150,7 @@ async function setTaxValidUntil(page, label, taxId, when) {
   return `${label}: Tax ID Valid Until ${r.before || '<blank>'} → ${value || '<blank>'}${r.changed ? '' : ' (already set)'}`;
 }
 
-module.exports = { setTaxValidUntil, restoreVendors, readLedger, dateFor };
+module.exports = { setContactEmail, setTaxValidUntil, restoreVendors, readLedger, dateFor };
 
 if (require.main === module) {
   require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env'), override: false });

@@ -117,8 +117,15 @@ module.exports = (api) => {
   // AUTO_PA vehicle line: JOINT_FULL also answers "Payment for a total loss?" = No.
   const VJ = (joint) => JOINT_FULL(VENDOR, joint, 'No');
   // HO claim (PROP_MORT) where a real Secondary Named Insured exists: MORT_FULL(primary, joint).
-  add('GCCM-759/CPD/TC-018', 'AUTO_PA', VJ([INS]), [CT(C_AND_V)], VJ_NOTE);
-  add('GCCM-759/CPD/TC-020', 'AUTO_PA', VJ([CLM]), [CT(C_AND_V)], VJ_NOTE);
+  // QA review 2026-10-26: the PA auto insured/claimant (DMG LMB TEST) has no e-mail, so CPD.001 forces Other/Mailed Check; these run on
+  // the HO claim whose insured/claimant Robert Charles has an e-mail and phone.
+  const HO_NOTE = ' Run on the HO claim (PROP_PA): Robert Charles has an e-mail and phone, so CPD.001 does not override the defaults.';
+  const SET_DT = { call: ['contactManager.setContactEmail', 'David Thomas', 'Thomas', '19073', 'davidthomas@example.com|7175550142'] };
+  const REST = { call: ['contactManager.restoreVendors'] };
+  const HOJ = (primary, joint, setDT) => [...(setDT ? [SET_DT] : []), { open: 'full' }, ...PRIMARY(primary), { joint }, { next: true }, { reserve: 'open' }, { step2: {} }, { next: true }, { expectStep: 3 }];
+  const DT = { who: 'David Thomas', type: 'Additional Claimant' };
+  add('GCCM-759/CPD/TC-018', 'PROP_PA', HOJ(VENDOR, [INS]), [CT(C_AND_V)], VJ_NOTE + HO_NOTE);
+  add('GCCM-759/CPD/TC-020', 'PROP_PA', HOJ(VENDOR, [CLM]), [CT(C_AND_V)], VJ_NOTE + HO_NOTE);
   add('GCCM-799/UIF/TC-060', 'AUTO_PA', VJ([INS]), [CT(C_AND_V), V('Approval Required', { required: true, editable: true })], VJ_NOTE);
   const SNI_NOTE = MORT_NOTE + ' Secondary insured = the contact CC types "Secondary Named Insured" (from the policy).';
   add('GCCM-759/CPD/TC-009', 'PROP_MORT', MORT_FULL(INS, [SNI_REAL]), [CT(CONTACTS), CM(CHOICE)], SNI_NOTE + ' ' + 'CPD.001 (no email → Other/Mailed Check) may take precedence; reported as observed.');
@@ -132,12 +139,17 @@ module.exports = (api) => {
   const PJ = (primary, joint) => [{ open: 'full' }, ...PRIMARY(primary), X('addJoint', joint), { next: true }, { reserve: 'open' },
     { answer: ['Payment for a total loss?', 'No'] }, { step2: {} }, { next: true }, { expectStep: 3 }];
   const PJ_NOTE = 'Secondary claimant = a second PERSON contact on the claim (not the insured / exposure claimant), typed "Additional Claimant" in the joint payee grid.';
-  add('GCCM-759/CPD/TC-011', 'AUTO_PA', PJ(CLM, [PERSON2]), [CT(CONTACTS), CM(CHOICE)], PJ_NOTE);
-  add('GCCM-759/CPD/TC-025', 'AUTO_PA', PJ(CLM, [PERSON2]), [CT(CONTACTS)], PJ_NOTE);
-  add('GCCM-759/CPD/TC-012', 'AUTO_PA', PJ(VENDOR, [CLM, PERSON2]), [CT(C_AND_V)], PJ_NOTE + ' ' + VJ_NOTE);
-  add('GCCM-759/CPD/TC-024', 'AUTO_PA', PJ(VENDOR, [CLM, PERSON2]), [CT(C_AND_V), V('Approval Required')], PJ_NOTE + ' ' + VJ_NOTE);
-  add('GCCM-759/CPD/TC-002', 'PROP_PA', [...FULL_PAYEES('David Thomas'), { next: true }, { reserve: 'open' }, { step2: {} }, { next: true }, { expectStep: 3 }],
-    [CT(NOT_MAILED)], DETAILS);
+  const DT_NOTE = ' Secondary claimant = David Thomas (typed Additional Claimant); his Main Email/phone are set in ContactManager for the case and restored afterwards.' + HO_NOTE;
+  add('GCCM-759/CPD/TC-011', 'PROP_PA', HOJ(CLM, [DT], true), [CT(CONTACTS), CM(CHOICE), REST], PJ_NOTE + DT_NOTE);
+  add('GCCM-759/CPD/TC-025', 'PROP_PA', HOJ(CLM, [DT], true), [CT(CONTACTS), REST], PJ_NOTE + DT_NOTE);
+  add('GCCM-759/CPD/TC-012', 'PROP_PA', HOJ(VENDOR, [CLM, DT], true), [CT(C_AND_V), REST], PJ_NOTE + DT_NOTE + ' ' + VJ_NOTE);
+  add('GCCM-759/CPD/TC-024', 'PROP_PA', HOJ(VENDOR, [CLM, DT], true), [CT(C_AND_V), V('Approval Required'), REST], PJ_NOTE + DT_NOTE + ' ' + VJ_NOTE);
+  // CPD.001 negative (QA review 2026-10-26): BOTH the primary and the secondary payee must have an e-mail. Primary = the insured
+  // Robert Charles (has one); secondary = David Thomas, whose Address Book record has none — his Main Email is set in ContactManager
+  // for the case and put back afterwards (contactManager.js ledger).
+  add('GCCM-759/CPD/TC-002', 'PROP_PA', [{ call: ['contactManager.setContactEmail', 'David Thomas', 'Thomas', '19073', 'davidthomas@example.com|7175550142'] },
+    ...FULL_PAYEES('insured'), { joint: [{ who: 'David Thomas' }] }, { next: true }, { reserve: 'open' }, { step2: {} }, { next: true }, { expectStep: 3 }],
+    [CT(NOT_MAILED), { call: ['contactManager.restoreVendors'] }], 'Primary Robert Charles (insured, has e-mail) + joint payee David Thomas (Secondary Named Insured, e-mail set in ContactManager for this case and restored after).');
   // CPD.014 — vendor Mailed Check → Certified delivery
   add('GCCM-759/CPD/TC-028', 'AUTO_PA', [...FULL_INSTRUCTIONS('vendor'), { select: ['ClaimsPay Method', /mailed check/i] }],
     [V('Payment Delivery', { value: /certified/i, includes: ['Certified', 'Expedite'], excludes: ['Standard'] })], VENDOR_NOTE);

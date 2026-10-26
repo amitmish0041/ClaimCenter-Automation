@@ -702,7 +702,25 @@ async function selectPayee(page, who = 'claimant') {
   if (!names.length) throw new Blocked('payee Name list is empty');
   const pick = resolvePayee(page, who, names);
   await select(page, 'Name', pick);
+  await settle(page, 1500);
+  await setPayeeRoleType(page, who);
   return pick;
+}
+
+// CC fills the payee Type from the contact's roles, and a contact that is both the insured and the claimant (every PA auto
+// claim: DMG LMB TEST) comes back as "Claimant" — so a case that says "single Insured payee" would silently be run as a
+// claimant (QA review 2026-10-26, GCCM-759 CPD TC-005). Set the Type the case names whenever CC offers it.
+const ROLE_TYPE = { insured: /^insured$/i, claimant: /^claimant$/i };
+async function setPayeeRoleType(page, who) {
+  const want = ROLE_TYPE[who];
+  if (!want) return;
+  const opts = ((await optionsOf(page, 'Type').catch(() => null)) || []).map((o) => o.t);
+  const target = opts.find((t) => want.test(t));
+  if (!target) return;
+  const cur = await page.evaluate(() => { const x = [...document.querySelectorAll('select')].find((e) => /PayeeType|-Type$/.test(e.name || '') && e.offsetParent); return x ? (x.options[x.selectedIndex] || {}).text : ''; }).catch(() => '');
+  if (want.test(cur || '')) return;
+  await select(page, 'Type', target);
+  await settle(page, 1500);
 }
 
 // Which of the payee `names` is `who` (see selectPayee). Throws Blocked when the claim has no such contact.

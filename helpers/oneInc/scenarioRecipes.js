@@ -107,13 +107,13 @@ const cpd = (who, type, method, gateHasDetails) => ({
     V('ClaimsPay Type', { value: type }), V('ClaimsPay Method', { value: method }),
   ],
 });
-const CPD_NOTE = 'Run through the "payment contact details" warning (user direction 2026-10-21). No TEST claimant/insured payee clears that warning (a Digital Payment Account did not), so CC may apply CPD.001 (Other/Mailed Check) — reported as observed.';
+const CPD_NOTE = 'Run on the HO claim (profile PROP_PA): its insured/claimant Robert Charles has an e-mail and phone. CPD.001 (no e-mail on a payee gives Other/Mailed Check) overrides the other defaults, and the PA auto claims insured DMG LMB TEST has no e-mail (QA review 2026-10-26). The payee Type is set to the role the case names.';
 let c = cpd('claimant', /other\s*\/\s*mailed check/i, /^(mailed )?check$/i, false); add('GCCM-759/CPD/TC-032', 'AUTO_PA', c.steps, c.checks);
-c = cpd('insured', /^contact\(s\)$/i, /customer choice|let customer pick/i, true); add('GCCM-759/CPD/TC-005', 'AUTO_PA', c.steps, c.checks, CPD_NOTE);
-c = cpd('claimant', /^contact\(s\)$/i, /customer choice|let customer pick/i, true); add('GCCM-759/CPD/TC-007', 'AUTO_PA', c.steps, c.checks, CPD_NOTE);
-c = cpd('insured', /^contact\(s\)$/i, /./, true); add('GCCM-759/CPD/TC-019', 'AUTO_PA', c.steps, c.checks, CPD_NOTE);
-c = cpd('claimant', /^contact\(s\)$/i, /./, true); add('GCCM-759/CPD/TC-021', 'AUTO_PA', c.steps, c.checks, CPD_NOTE);
-c = cpd('claimant', /^contact\(s\)$/i, /./, true); add('GCCM-759/CPD/TC-027', 'AUTO_PA', c.steps, c.checks, CPD_NOTE);
+c = cpd('insured', /^contact\(s\)$/i, /customer choice|let customer pick/i, true); add('GCCM-759/CPD/TC-005', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
+c = cpd('claimant', /^contact\(s\)$/i, /customer choice|let customer pick/i, true); add('GCCM-759/CPD/TC-007', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
+c = cpd('insured', /^contact\(s\)$/i, /./, true); add('GCCM-759/CPD/TC-019', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
+c = cpd('claimant', /^contact\(s\)$/i, /./, true); add('GCCM-759/CPD/TC-021', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
+c = cpd('claimant', /^contact\(s\)$/i, /./, true); add('GCCM-759/CPD/TC-027', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
 
 // Vendor payee (Address Book vendor selected by Tax ID — wizardDriver.selectVendorPayee).
 const VENDOR_NOTE = 'Payee = an Approved Vendor (Company) from the TEST Address Book, selected by Tax ID (default: ADJUSTMENT SERVICES INC, 58-1623664).';
