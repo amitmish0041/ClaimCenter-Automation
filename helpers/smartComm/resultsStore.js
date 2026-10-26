@@ -152,7 +152,49 @@ function saveRun(templates, meta = {}, { root = DEFAULT_ROOT } = {}) {
   const savedAt = new Date();
   const file = path.join(dir, `run_${savedAt.getTime()}.json`);
   fs.writeFileSync(file, JSON.stringify({ format: 1, savedAt: savedAt.toISOString(), meta, templates }, null, 1));
+  shareRun(templates, { ...meta, kind: 'single' });
   return idOf('runs', path.basename(file));
 }
 
-module.exports = { listRuns, getRun, compareWithPrevious, pdfPathFor, saveRun, STATUSES, DEFAULT_ROOT };
+// ── Team run history on the shared drive (per user direction 2026-10-26) ─────────────────────────────
+// Every run — the owner's and every teammate's Runner — also lands in ONE shared folder, so the team's results can be
+// reviewed together for false flags and tool problems. One file per run:
+//   <SMARTCOMM_SHARED_RUNS_DIR | V:/Amit Int/SmartComm/run-history>/<YYYY-MM>/<YYYY-MM-DD_HHMMSS>_<user>_<DIGs>.json
+// with who / which PC / which code ran it. Best effort: a missing or slow V: never fails a run's own results.
+// SMARTCOMM_SHARE_RUNS=0 turns it off (the offline tests do).
+const DEFAULT_SHARED_RUNS_DIR = 'V:/Amit Int/SmartComm/run-history';
+function shareRun(templates, meta = {}) {
+  if (/^(0|false|no|off)$/i.test(process.env.SMARTCOMM_SHARE_RUNS || '')) return null;
+  try {
+    const os = require('os');
+    const base = process.env.SMARTCOMM_SHARED_RUNS_DIR || DEFAULT_SHARED_RUNS_DIR;
+    if (!fs.existsSync(path.parse(path.resolve(base)).root)) return null; // drive not mapped on this PC
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    let user = 'unknown';
+    try { user = os.userInfo().username; } catch (_) { /* keep "unknown" */ }
+    const digs = [...new Set((templates || []).map((t) => t && t.digNumber).filter(Boolean))];
+    const digPart = digs.length > 4 ? `${digs.slice(0, 4).join('-')}+${digs.length - 4}` : (digs.join('-') || 'none');
+    const dir = path.join(base, stamp.slice(0, 7));
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${stamp}_${user.replace(/[^\w.-]/g, '')}_${digPart}.json`);
+    let codeVersion = process.env.RUNNER_CODE_BUILD || null;
+    if (!codeVersion) {
+      try { codeVersion = require('child_process').execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).toString().trim(); } catch (_) { /* packaged build — no git */ }
+    }
+    if (!codeVersion) codeVersion = path.basename(path.resolve(__dirname, '..', '..', '..')); // packaged: the code\<build> folder name
+    const record = {
+      format: 1, savedAt: now.toISOString(), user, machine: os.hostname(),
+      env: `${process.env.CC_ENV || ''}/${process.env.CC_TIER || ''}`, codeVersion, meta, templates,
+    };
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify(record));
+    fs.renameSync(`${file}.tmp`, file); // readers never see a half-written file
+    return file;
+  } catch (e) {
+    console.log(`[Results] couldn't copy this run to the shared run history (${String(e.message).split('\n')[0]}) — local results are unaffected.`);
+    return null;
+  }
+}
+
+module.exports = { listRuns, getRun, compareWithPrevious, pdfPathFor, saveRun, shareRun, STATUSES, DEFAULT_ROOT };

@@ -133,6 +133,9 @@ async function main() {
     console.log(`[Bulk] Jira bug mapping skipped (${err.message})`);
   }
   console.log(`\n[Bulk] Raw results written to ${outPath}`);
+  // Team run history on V: (resultsStore.shareRun) — one shared folder for reviewing everyone's runs.
+  const sharedCopy = require('../helpers/smartComm/resultsStore').shareRun(templateResults, { kind: 'bulk', localFile: path.basename(outPath), recipient: recipientEmail || null });
+  if (sharedCopy) console.log(`[Bulk] Run copied to the team run history: ${sharedCopy}`);
 
   await bulkReportService.sendBulkReport(templateResults);
 }
