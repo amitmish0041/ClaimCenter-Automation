@@ -274,7 +274,7 @@ const LIEN_TL = [V('ClaimsPay Type', { value: /^lienholder$/i }), H('ClaimsPay M
 const LIEN_NTL = [V('ClaimsPay Type', { value: /other\s*\/\s*mailed check/i }), V('ClaimsPay Method', { value: /^mailed check$/i }),
   { text: { re: /Non Total Loss Lienholder payments requ/i, present: true } }];
 // GCCM-799 (Full Check)
-add('GCCM-799/CPD-Lienholder/TC-068', 'AUTO_LIEN', LIEN_FULL('Yes'), LIEN_TL, LIEN_NOTE);
+add('GCCM-799/CPD-Lienholder/TC-068', 'AUTO_LIEN', LIEN_FULL('Yes'), LIEN_TL, LIEN_NOTE + ' Observed 2026-10-26: still Other/Mailed Check with an e-mail and phone set on ACNB BANK in ContactManager, so the cause is not the payee e-mail/phone alone (open question).');
 add('GCCM-799/CPD-Lienholder/TC-070', 'AUTO_LIEN', LIEN_FULL('No'), LIEN_NTL, LIEN_NOTE);
 add('GCCM-799/UIF/TC-058', 'AUTO_LIEN', LIEN_FULL('No'), [V('Reason for Check', { required: true, editable: true })],
   LIEN_NOTE + ' Cloud shows the reason as "Reason Details" (read-only) — reported as observed.');

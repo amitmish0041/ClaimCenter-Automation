@@ -56,6 +56,20 @@ async function openVendorEdit(cm, taxId) {
   await cm.locator(FIELD).waitFor({ timeout: 20000 });
 }
 
+// Types a phone number key by key (the field is masked). The page re-renders after a phone/e-mail change and can reset the
+// other field, so setBoth re-checks both values until they stick, right before Update.
+async function typeInto(cm, sel, val) { const el = cm.locator(sel).first(); await el.click(); await el.fill(''); if (val) await el.pressSequentially(val, { delay: 30 }); await el.press('Tab'); await cm.waitForTimeout(1200); }
+async function setBoth(cm, emailSel, phoneSel, email, phone) {
+  const digits = (x) => String(x || '').replace(/[^0-9]/g, '');
+  const ok = async () => digits(await cm.locator(phoneSel).first().inputValue()) === digits(phone) && await cm.locator(emailSel).first().inputValue() === email;
+  for (let i = 0; i < 3; i++) {
+    if (digits(await cm.locator(phoneSel).first().inputValue()) !== digits(phone)) await typeInto(cm, phoneSel, phone);
+    if (await cm.locator(emailSel).first().inputValue() !== email) await typeInto(cm, emailSel, email);
+    if (await ok()) return;
+  }
+  throw new W.Blocked('ContactManager did not keep the e-mail/phone values on the form (wanted "' + email + '" / "' + phone + '"; form has "' + await cm.locator(emailSel).first().inputValue() + '" / "' + await cm.locator(phoneSel).first().inputValue() + '")');
+}
+
 async function saveField(cm, value, field = FIELD) {
   await cm.locator(field).fill(value);
   await cm.keyboard.press('Tab');
@@ -75,7 +89,7 @@ async function applyDate(page, taxId, value, label) {
     const before = await cm.locator(FIELD).inputValue();
     if (before === value) { await cm.getByRole('button', { name: 'Cancel', exact: true }).first().click().catch(() => {}); return { before, changed: false }; }
     if (label) {
-      const ledger = readLedger().filter((e) => e.taxId !== taxId);
+      const ledger = readLedger(); if (ledger.some((e) => !e.kind && e.taxId === taxId)) { /* keep the first original (a retried step must not record the changed value) */ } else
       ledger.push({ name: label, taxId, field: 'Tax ID Valid Until', original: before, changedAt: new Date().toISOString() });
       writeLedger(ledger); // recorded before the edit is saved
     }
@@ -116,11 +130,11 @@ async function applyEmail(page, who, value, label) {
     const wantPhone = valPhone === undefined ? beforePhone : valPhone;
     if (before === valEmail && beforePhone === wantPhone) { await cm.getByRole('button', { name: 'Cancel', exact: true }).first().click().catch(() => {}); return { before, changed: false }; }
     if (label) {
-      const ledger = readLedger().filter((e) => !(e.kind === 'email' && e.who.name === who.name));
+      const ledger = readLedger(); if (ledger.some((e) => e.kind === 'email' && e.who.name === who.name)) { /* keep the first original */ } else
       ledger.push({ kind: 'email', name: label, who, field: 'Main Email', original: before + '|' + beforePhone, changedAt: new Date().toISOString() });
       writeLedger(ledger); // recorded before the edit is saved
     }
-    if (wantPhone !== beforePhone) { const ph = cm.locator(PHONE).first(); await ph.click(); await ph.fill(''); if (wantPhone) await ph.pressSequentially(wantPhone, { delay: 30 }); await ph.press('Tab'); const got = await ph.inputValue(); if (wantPhone && !got) throw new W.Blocked('ContactManager Business phone did not accept "' + wantPhone + '"'); }
+    await setBoth(cm, EMAIL, PHONE, valEmail, wantPhone);
     await saveField(cm, valEmail, EMAIL);
     return { before: before + '|' + beforePhone, changed: true };
   });
@@ -132,10 +146,38 @@ async function setContactEmail(page, name, lastName, zip, email) {
   return `${name}: Main Email ${r.before || '<blank>'} → ${email || '<blank>'}${r.changed ? '' : ' (already set)'}`;
 }
 
+// ── Company / Financial Institution (e.g. the ACNB BANK lienholder): Main Email + Business phone, found by Tax ID ──
+const CO_EMAIL = 'input[name$="ContactBasicsDV-Email1"]';
+const CO_PHONE = 'input[name$="ContactBasicsDV-BusinessPhone-GlobalPhoneInputSet-NationalSubscriberNumber"]';
+async function applyCompany(page, taxId, value, label) {
+  return withCM(page, async (cm) => {
+    await openVendorEdit(cm, taxId);
+    const [valEmail, valPhone] = String(value).split('|');
+    const before = await cm.locator(CO_EMAIL).inputValue();
+    const beforePhone = await cm.locator(CO_PHONE).inputValue().catch(() => '');
+    const wantPhone = valPhone === undefined ? beforePhone : valPhone;
+    if (before === valEmail && beforePhone === wantPhone) { await cm.getByRole('button', { name: 'Cancel', exact: true }).first().click().catch(() => {}); return { before: before + '|' + beforePhone, changed: false }; }
+    if (label) {
+      const ledger = readLedger(); if (ledger.some((e) => e.kind === 'company' && e.taxId === taxId)) { /* keep the first original */ } else
+      ledger.push({ kind: 'company', name: label, taxId, field: 'Main Email|Business phone', original: before + '|' + beforePhone, changedAt: new Date().toISOString() });
+      writeLedger(ledger); // recorded before the edit is saved
+    }
+    await setBoth(cm, CO_EMAIL, CO_PHONE, valEmail, wantPhone);
+    await saveField(cm, valEmail, CO_EMAIL);
+    return { before: before + '|' + beforePhone, changed: true };
+  });
+}
+// Test step: sets a company's Main Email and Business phone ('email|phone'). Reverted by restoreVendors.
+async function setCompanyContact(page, name, taxId, value) {
+  const r = await applyCompany(page, taxId, value, name);
+  return `${name}: Main Email|Business phone ${r.before} → ${value}${r.changed ? '' : ' (already set)'}`;
+}
+
 async function restoreVendors(page) {
   const pending = readLedger();
   for (const e of pending) {
     if (e.kind === 'email') await applyEmail(page, e.who, e.original, null);
+    else if (e.kind === 'company') await applyCompany(page, e.taxId, e.original, null);
     else await applyDate(page, e.taxId, e.original, null);
     writeLedger(readLedger().filter((x) => x !== undefined && JSON.stringify(x) !== JSON.stringify(e)));
   }
@@ -150,7 +192,7 @@ async function setTaxValidUntil(page, label, taxId, when) {
   return `${label}: Tax ID Valid Until ${r.before || '<blank>'} → ${value || '<blank>'}${r.changed ? '' : ' (already set)'}`;
 }
 
-module.exports = { setContactEmail, setTaxValidUntil, restoreVendors, readLedger, dateFor };
+module.exports = { setContactEmail, setCompanyContact, setTaxValidUntil, restoreVendors, readLedger, dateFor };
 
 if (require.main === module) {
   require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env'), override: false });
