@@ -138,6 +138,30 @@ async function selectTemplate(page, templateNameOrNames) {
     }
   }
 
+  // Last: the same names with a space after "DIG" — some templates are registered in ClaimCenter as "DIG 71 …"
+  // while the catalog says "DIG71 …" (DIG71, 2026-10-26: no result for any search). Only tried after every existing
+  // search came back empty, so templates that already resolve are untouched.
+  const spaced = (s) => String(s || '').replace(/^DIG(?=\d)/i, 'DIG ');
+  for (const templateName of [...new Set(candidates.map(spaced))].filter((s) => !candidates.includes(s))) {
+    const row = await searchTemplateByName(page, templateName);
+    if (!row) continue;
+    const rowText = await row.innerText();
+    if (!rowText.toLowerCase().includes(templateName.toLowerCase())) continue;
+    console.log(`selectTemplate: found "${templateName}" (registered with a space after DIG)`);
+    await row.getByRole('button', { name: L.selectTemplate.selectButtonInRow }).click();
+    await page.waitForLoadState('domcontentloaded').catch(() => {});
+    return;
+  }
+  if (digNumber && spaced(digNumber[0]) !== digNumber[0]) {
+    const row = await searchTemplateById(page, spaced(digNumber[0]));
+    if (row) {
+      console.log(`selectTemplate: found "${spaced(digNumber[0])}" by id (registered with a space after DIG)`);
+      await row.getByRole('button', { name: L.selectTemplate.selectButtonInRow }).click();
+      await page.waitForLoadState('domcontentloaded').catch(() => {});
+      return;
+    }
+  }
+
   // CONFIRMED live (DIG47, DIG124): a template that exists in the catalog
   // spreadsheet but hasn't been released to this environment's SmartCOMM
   // library yet returns zero search results for every candidate name —

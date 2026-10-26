@@ -391,6 +391,20 @@ function evaluateOne(req, haystack, context) {
       if (compactIncludes(haystack, req.expectedValue) && !/_{3,}/.test(req.expectedValue)) {
         return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Same text; only spacing differs in the PDF text.' };
       }
+      // A line with a fill-in blank whose words the PDF prints with its spaces dropped ("Other(Please explain -userotherside
+      // ifnecessary):", DIG2 2026-10-26): the same letters in order, spacing ignored, AND a fill line right beside it (the
+      // blank can sit just before the words: "3.________Other…") — still FAILs when there's no blank at all.
+      if (/_{3,}/.test(req.expectedValue)) {
+        const core = req.expectedValue.replace(/_{3,}/g, ' ').trim();
+        const letters = core.replace(/[^A-Za-z0-9]/g, '');
+        if (letters.length >= 12) {
+          const re = new RegExp(letters.split('').map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[^A-Za-z0-9]*'), 'i');
+          const m = re.exec(haystack);
+          if (m && /_{3,}/.test(haystack.slice(Math.max(0, m.index - 20), m.index + m[0].length + 20))) {
+            return { expected: req.expectedValue, actual: m[0].replace(/\s+/g, ' '), result: 'PASS', reason: 'Same wording and fill-in line; the PDF text drops some spaces / places the line just before the words.' };
+          }
+        }
+      }
       const fuzzy = findPunctuationRelaxedMatch(haystack, req.expectedValue);
       if (fuzzy) {
         // Per user direction 2026-10-14: spacing/punctuation-only differences pass — EXCEPT a missing fill-in

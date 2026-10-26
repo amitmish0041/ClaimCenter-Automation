@@ -878,6 +878,16 @@ function resolveTemplateIn(template, templatesDir) {
 
   const ownDigMatches = buildDigPrefixIndex(templatesDir).get(template.digNumber.toUpperCase()) || [];
   if (ownDigMatches.length === 1) return ownDigMatches[0];
+  // Several files for this DIG (a .pdf and a .docx of the same form — DIG1043, 2026-10-26: the catalog's
+  // "DIG1043 -Agreement to Compensation.pdf" spelling matched neither exactly, so NO mapping doc was read and every
+  // dictionary field was checked): the one with the catalog's own extension, else the only .docx.
+  if (ownDigMatches.length > 1) {
+    const wantExt = path.extname(baseName).toLowerCase();
+    const sameExt = ownDigMatches.filter((p) => path.extname(p).toLowerCase() === wantExt);
+    if (wantExt && sameExt.length === 1) return sameExt[0];
+    const docx = ownDigMatches.filter((p) => /\.docx$/i.test(p));
+    if (docx.length === 1) return docx[0];
+  }
 
   // Fuzzy basename match — handles a stale version-duplicate suffix, an old
   // .doc extension, or repeated underscores (CONFIRMED live: DIG11's "(3)"
@@ -917,6 +927,14 @@ const FRAUD_NOTICE_RE = /\bknowingly and with intent to (?:injure,? )?(?:defraud
 async function getRequirements(template, dataDir) {
   const res = await getRequirementsFromDoc(template, dataDir);
   let fraudLines = 0;
+  // A "fixed wording" line that is only a long number is sample DATA the BA didn't comment (DIG2's "1002015498", a policy
+  // number — false FAIL, QA review 2026-10-26): the real claim's number prints there, so it's never fixed wording.
+  for (const r of res.requirements || []) {
+    if (r.type === 'requiredText' && r.enabled !== false && /^\s*\d{6,}\s*$/.test(String(r.expectedValue || ''))) {
+      r.enabled = false;
+      r.disabledReason = 'A number on its own in the mapping doc — sample claim/policy data, not fixed wording; the real claim\'s value prints here.';
+    }
+  }
   for (const r of res.requirements || []) {
     if (r.type !== 'requiredText' || r.enabled === false || !FRAUD_NOTICE_RE.test(String(r.expectedValue || ''))) continue;
     r.enabled = false;

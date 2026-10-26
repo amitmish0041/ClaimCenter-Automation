@@ -198,6 +198,13 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
   const sourceOf = (c, label) => {
     const field = c.dictionaryField;
     const one = (value, from) => (value ? { values: [String(value)], value: String(value), from } : null);
+    // A field whose own technical name says it's the additional recipient's ("current_additionalRecipients_ext.
+    // primaryAddress.state.code" → "[DE]") is that recipient's, whatever dictionary row it was paired with — DIG57's was
+    // judged against "Claimant Name" (false FAIL, QA review 2026-10-26).
+    if (/additionalRecipient/i.test(c.technicalName || '')) {
+      const vals = [addr.name, addr.streetAddress, addr.cityStateZip, ...String(addr.cityStateZip || '').split(/[\s,]+/)].filter(Boolean).map(String);
+      if (vals.length) return { values: vals, value: vals.slice(0, 3).join(' / '), from: 'ClaimCenter (additional recipient)' };
+    }
     if (field && known[field]) return one(known[field], 'ClaimCenter');
     if (/^underco$/i.test(c.technicalName || '')) return one(td.underwritingCompany, 'ClaimCenter'); // signature-block company
     // CC block: the Data Dictionary's "CC" / "Copy …" rows, or a field whose technical name is the additional
@@ -1756,6 +1763,15 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     }
     targets = pendingRetryTargets();
   }
+  // Still failing after every retry for a reason that's about the TEST's own editing, not the template — the typed value
+  // landed in another field, or no editor opened — is BLOCKED (not verifiable), not FAIL: DIG161's Claimant Name was
+  // reported as a defect when the test simply couldn't edit it (QA review 2026-10-26). A field that took the edit but
+  // the value vanished stays FAIL — that can be a real non-editable field.
+  for (const c of interactiveChecks) {
+    if (c.result !== 'FAIL' || !/landed in a different field|did not open a recognized editor/i.test(c.reason || '')) continue;
+    c.result = 'BLOCKED';
+    c.reason = `${c.reason} — the test couldn't edit this field, so its editability isn't verified (not a template defect by itself; check it by hand).`;
+  }
   if (retryRound) {
     const passedAfterRetry = interactiveChecks.filter((c) => c.result === 'PASS').length;
     const failedAfterRetry = interactiveChecks.filter((c) => c.result === 'FAIL').length;
@@ -2552,6 +2568,9 @@ function linkTextFieldsToDictionary(template, requirements, xpathRequirements, r
     if (r.type !== 'dynamicShape' || r.shape !== 'text' || r.enabled === false || !r.fieldName) return r;
     const row = textFieldDictionaryRow(template.digNumber, r);
     if (row === undefined) return r; // the Data Dictionary couldn't be read: nothing to say about this field
+    // A BA note that only says the spot is free text ("Free Form/Editable" — DIG18875 R30) names no data field: the user
+    // types there, nothing to compare — SKIPPED with that reason, not BLOCKED as an unknown field (QA review 2026-10-26).
+    if (!row && /^\s*free\s*form/i.test(r.fieldName)) return { ...r, enabled: false, disabledReason: `"${r.fieldName}" marks a free-text spot the user fills in — no data field behind it to compare.` };
     if (!row) return { ...r, unmappedReason: `"${r.fieldName}" has no matching Data Dictionary row for ${template.digNumber}, so there's no payload value to compare it with — presence not verified.` };
     const xp = xpathRequirements.find((x) => x.dictionaryAttribute === row.attributeName);
     if (xp) {
@@ -2586,8 +2605,11 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
   const referencedByTemplate = (row) => referencingRequirements(row).length > 0 || textFieldRefs.has(row.attributeName);
   const rows = dataDictionaryService.getAttributesForTemplate(template.digNumber)
     .filter((r) => r.xpath && r.xpath.trim())
-    // An overlay form has no text requirements to scope by — check every dictionary field for this DIG.
-    .filter((r) => template.overlayMode || referencedByTemplate(r));
+    // An overlay form whose mapping doc names NO fields (scanned images) has nothing to scope by — check every
+    // dictionary field for this DIG. One whose mapping doc does name its fields (a PDF mapping doc's notes, read since
+    // 2026-10-21) is scoped like any other template: DIG1043 was checked for From Name / Claim Number / Policy Number /
+    // From Email… — dictionary rows that list DIG1043 but aren't on the form (QA review 2026-10-26).
+    .filter((r) => (template.overlayMode && !templateFields.length) || referencedByTemplate(r));
   const requirements = [];
   let n = 0;
   let fieldScoped = 0;
