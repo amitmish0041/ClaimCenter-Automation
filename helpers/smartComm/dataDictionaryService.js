@@ -23,12 +23,26 @@ const { normalizeDig } = require('./catalogService');
 const DEFAULT_DIR = (process.env.SMARTCOMM_DATA_DIR && path.join(process.env.SMARTCOMM_DATA_DIR, 'Requirement'))
   || 'C:\\Users\\amitmish\\Desktop\\CC Cloud\\SmartComm\\Requirement';
 
+// The BA's live copy on S: is tried first (SMARTCOMM_DICTIONARY_DIR overrides it); the SMARTCOMM data copy
+// (DEFAULT_DIR) is the fallback when S: isn't mapped or its file can't be read. CC_UI_SPEC_DIR pins one folder.
+const SHARED_DICTIONARY_DIR = 'S:/Shared Folders/Policy Center Initiative/PolicyCenter/Integration/Future State - Donegal/Data Mapping';
+
+function candidateFiles() {
+  const dirs = process.env.CC_UI_SPEC_DIR ? [process.env.CC_UI_SPEC_DIR]
+    : [process.env.SMARTCOMM_DICTIONARY_DIR || SHARED_DICTIONARY_DIR, DEFAULT_DIR];
+  const files = [];
+  for (const dir of dirs) {
+    try {
+      const hit = fs.readdirSync(dir).find((n) => /^Claims_Attributes_Data_Dictionary.*\.xlsb$/i.test(n) && !n.startsWith('~$'));
+      if (hit) files.push(path.join(dir, hit));
+    } catch { /* folder not reachable — try the next one */ }
+  }
+  if (!files.length) throw new Error(`dataDictionaryService: no "Claims_Attributes_Data_Dictionary*.xlsb" found in ${dirs.join(' or ')}`);
+  return files;
+}
+
 function findFile() {
-  const dir = process.env.CC_UI_SPEC_DIR || DEFAULT_DIR;
-  if (!fs.existsSync(dir)) throw new Error(`dataDictionaryService: directory not found: ${dir}`);
-  const hit = fs.readdirSync(dir).find((n) => /^Claims_Attributes_Data_Dictionary.*\.xlsb$/i.test(n) && !n.startsWith('~$'));
-  if (!hit) throw new Error(`dataDictionaryService: no "Claims_Attributes_Data_Dictionary*.xlsb" found in ${dir}`);
-  return path.join(dir, hit);
+  return candidateFiles()[0];
 }
 
 const clean = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
@@ -58,10 +72,18 @@ function parseForms(raw) {
 let cache = null;
 function loadAttributes({ refresh = false } = {}) {
   if (cache && !refresh) return cache;
-  const file = findFile();
-  const wb = XLSX.readFile(file);
-  const sheetName = wb.SheetNames.find((n) => /^claims attribute$/i.test(n)) || 'Claims Attribute';
-  if (!wb.Sheets[sheetName]) throw new Error(`dataDictionaryService: "${file}" has no "Claims Attribute" tab`);
+  // Use the first candidate that opens and has the "Claims Attribute" tab; a locked/broken S: copy falls back.
+  let file; let wb; let sheetName; let lastErr;
+  for (const candidate of candidateFiles()) {
+    try {
+      const book = XLSX.readFile(candidate);
+      const name = book.SheetNames.find((n) => /^claims attribute$/i.test(n)) || 'Claims Attribute';
+      if (!book.Sheets[name]) throw new Error(`dataDictionaryService: "${candidate}" has no "Claims Attribute" tab`);
+      file = candidate; wb = book; sheetName = name;
+      break;
+    } catch (e) { lastErr = e; }
+  }
+  if (!wb) throw lastErr;
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '' });
   const header = rows[0].map(clean);
   const col = (name) => header.indexOf(name);
