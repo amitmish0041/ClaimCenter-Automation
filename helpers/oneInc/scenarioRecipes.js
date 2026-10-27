@@ -117,7 +117,7 @@ c = cpd('claimant', /^contact\(s\)$/i, /./, true); add('GCCM-759/CPD/TC-021', 'P
 c = cpd('claimant', /^contact\(s\)$/i, /./, true); add('GCCM-759/CPD/TC-027', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
 
 // Vendor payee (Address Book vendor selected by Tax ID — wizardDriver.selectVendorPayee).
-const VENDOR_NOTE = 'Payee = an Approved Vendor (Company) from the TEST Address Book, selected by Tax ID (default: ADJUSTMENT SERVICES INC, 58-1623664).';
+const VENDOR_NOTE = 'Payee = an Approved Vendor (Company) from the TEST Address Book, selected by Tax ID (default: ADJUSTMENT SERVICES INC, 58-1623664). FINDING 2026-10-26: with a vendor as the ONLY payee CC leaves ClaimsPay Type blank (Method has no options) even when the vendor has a Main Email and Business phone (tested by setting an e-mail in ContactManager on both vendors and restoring it), so a FAIL here is product behaviour (CPD.013), not test data. Vendor + contact gives Contact(s) and Vendor.';
 add('GCCM-759/CPD/TC-026', 'AUTO_PA', FULL_INSTRUCTIONS('vendor'),
   [V('ClaimsPay Type', { value: /^vendor$/i }), V('ClaimsPay Method', { value: /vendor preferred/i })], VENDOR_NOTE);
 
