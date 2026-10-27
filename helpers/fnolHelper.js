@@ -2142,6 +2142,13 @@ async function clickCloudAction(page, selector, label, timeout = 15000) {
     // Scoped to the Search Results group only. A page-wide scan matched the
     // Claims History grid's own empty state and produced a false
     // "policy does not exist" on a screen where the policy WAS found.
+    // "The policy search failed: http://…policycenter…: 404" — PolicyCenter's integration is down, so EVERY policy
+    // comes back empty. Not a policy problem: never let the caller mark the policy unusable (CONFIRMED 2026-10-27,
+    // seven good policies were wrongly marked bad during a PolicyCenter outage).
+    if (why.some((t) => /policy search failed/i.test(t))) {
+      throw new Error('ENV_DOWN: PolicyCenter policy search failed (ClaimCenter could not reach PolicyCenter) — ' +
+                      'no new claim can be filed until it is back');
+    }
     const emptyGrid = await page.getByRole('group', { name: /Search Results/i }).first()
       .getByText(/No data to display|No results found|No records found/i).first()
       .isVisible().then(v => (v ? 'No data to display' : null)).catch(() => null);

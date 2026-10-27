@@ -186,6 +186,12 @@ for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnolAs && !F
         // A POLICY problem (claimant numbers used up, policy not in this tier) — remember it and try the next policy;
         // it says nothing about the environment.
         const policyProblem = /claimant number|POLICY_DATA_ERROR|CLOUD_SEARCH_EMPTY|POLICY EXHAUSTED|CLOUD_FIND_POLICY_STUCK/i.test(e.message);
+        if (/^ENV_DOWN/.test(e.message)) {
+          envDown = true;
+          console.log('[Provision] STOPPING — ' + e.message.split('
+')[0]);
+          break;
+        }
         if (!claim && policyProblem) {
           claimPicker.markBadPolicy(profile, pol.policyNumber, e.message.split('\n')[0]);
           console.log(`[Provision] ${profile} ${i}: policy ${pol.policyNumber} marked unusable for new claims — trying another`);

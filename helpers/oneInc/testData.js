@@ -351,11 +351,13 @@ function deriveNeeds(recipe) {
   const out = [];
   const seen = new Set();
   const push = (it) => { if (!seen.has(it.id)) { seen.add(it.id); out.push(it); } };
+  // A case that builds its own $0 line first (checkOps.closeReserveLine, added for fresh claims) does not need one up front.
+  const buildsZero = (recipe.steps || []).some((s) => Array.isArray(s.call) && s.call[0] === 'checkOps.closeReserveLine');
   for (const s of recipe.steps || []) {
     const k = Object.keys(s)[0];
     const v = s[k];
-    if (k === 'call' && v[0] === 'reuseExt.openQuickOnRow') push(D.reserveRow({ cost: v[1] || 'expense', state: v[2] === 'zero' ? 'zero' : (v[2] === 'any' || v[2] == null) ? 'any' : 'open', expo: v[3] || '' }));
-    if ((k === 'reserve' && v === 'zero') || (k === 'open' && s.zeroReserve)) push(D.reserveRow({ cost: '.', state: 'zero' }));
+    if (k === 'call' && v[0] === 'reuseExt.openQuickOnRow') if (!(buildsZero && v[2] === 'zero')) push(D.reserveRow({ cost: v[1] || 'expense', state: v[2] === 'zero' ? 'zero' : (v[2] === 'any' || v[2] == null) ? 'any' : 'open', expo: v[3] || '' }));
+    if (!buildsZero && ((k === 'reserve' && v === 'zero') || (k === 'open' && s.zeroReserve))) push(D.reserveRow({ cost: '.', state: 'zero' }));
     if (k === 'reserve' && typeof v === 'string' && v.startsWith('match:')) push(D.reserveRow({ cost: '.', state: 'open', expo: v.slice(6) }));
     if (k === 'payee' && typeof v === 'string' && !ROLE_PAYEES.test(v)) push(D.contact(v));
   }

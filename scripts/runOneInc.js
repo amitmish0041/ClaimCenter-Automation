@@ -282,7 +282,7 @@ function annotate(r, story, readiness) {
       const made = (claimPicker.readPool()[profile] || []).filter((e) => e.usable && !before.has(e.claim) && String(e.createdAt) >= t0).map((e) => e.claim);
       run.freshClaims[profile] = made;
       log(`[OneInc] fresh data: ${profile} — new claim(s): ${made.join(', ') || 'none'}`);
-      const why = code === 3 ? 'ClaimCenter TEST is not saving new claims right now' : `only ${made.length} of ${want} new ${profile} claim(s) could be created (see the provisioning lines in the log)`;
+      const why = code === 3 ? 'ClaimCenter TEST could not file new claims right now (claim save or PolicyCenter policy search failing — see the provisioning lines)' : `only ${made.length} of ${want} new ${profile} claim(s) could be created (see the provisioning lines in the log)`;
       const queue = made.slice();
       for (const id of payIds) assigned.set(id, queue.length ? [queue.shift()] : { blocked: why });
       const shared = queue.shift() || made[made.length - 1];
