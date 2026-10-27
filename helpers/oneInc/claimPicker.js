@@ -105,7 +105,11 @@ function policyCandidates(profile, { exclude = [] } = {}) {
   const p = PROFILES[profile];
   if (!p) throw new Error(`unknown claim profile "${profile}"`);
   const pool = readPool();
-  const used = new Set([...exclude, ...(pool[profile] || []).map((e) => e.policy), ...(pool._badPolicies || []).map((b) => b.policy)].filter(Boolean));
+  // Never: policies tried in this call or marked bad. Policies the pool already filed a claim on come LAST, not never —
+  // fresh-data runs (2026-10-27) need more new claims than there are untouched policies (21 for PA auto).
+  const used = new Set([...exclude, ...(pool._badPolicies || []).map((b) => b.policy)].filter(Boolean));
+  const poolUse = {};
+  for (const e of pool[profile] || []) if (e.policy) poolUse[e.policy] = (poolUse[e.policy] || 0) + 1;
   const seen = new Set();
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const fmt = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
@@ -121,13 +125,16 @@ function policyCandidates(profile, { exclude = [] } = {}) {
   const ageYears = (r) => (today - new Date(r.lossDate)) / 31557600000;
   return allRecords()
     .filter((r) => r.lob === p.lob && r.state === p.state && p.prefix.test(r.claimNumber || '') && r.policyNumber && r.lossDate
+      && (!p.policies || p.policies.includes(r.policyNumber))
       && (p.minAgeYears ? ageYears(r) >= p.minAgeYears : new Date(r.lossDate) >= yearAgo))
-    .sort((a, b) => (claimsPerPolicy[a.policyNumber] - claimsPerPolicy[b.policyNumber]) || String(b.claimNumber).localeCompare(String(a.claimNumber)))
+    .sort((a, b) => ((poolUse[a.policyNumber] || 0) - (poolUse[b.policyNumber] || 0)) || (claimsPerPolicy[a.policyNumber] - claimsPerPolicy[b.policyNumber]) || String(b.claimNumber).localeCompare(String(a.claimNumber)))
     .filter((r) => { if (seen.has(r.policyNumber) || used.has(r.policyNumber)) return false; seen.add(r.policyNumber); return true; })
     .map((r) => {
       const d = new Date(r.lossDate);
       if (Number.isNaN(d.getTime())) return null;
-      d.setDate(d.getDate() + 1);
+      // A pinned policy (profile.policies) files several claims: spread their loss dates (+1..+20 days) so they are not
+      // flagged as duplicates of each other.
+      d.setDate(d.getDate() + 1 + (p.policies ? Math.floor(Math.random() * 20) : 0));
       return { policyNumber: r.policyNumber, lossDate: fmt(d > today ? today : d), state: r.state, basedOn: `${r.claimNumber} (DoL ${r.lossDate})` };
     })
     .filter(Boolean);

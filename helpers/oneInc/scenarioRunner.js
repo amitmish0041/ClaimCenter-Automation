@@ -30,7 +30,7 @@ const TIER = (process.env.CC_TIER || 'test').toLowerCase();
 const ALLOW_FINISH = process.env.ONEINC_ALLOW_FINISH === '1' && ['test', 'dev'].includes(TIER);
 
 // Claim-level problems: worth retrying the same scenario on the next candidate claim of the profile.
-const CLAIM_LEVEL = /missing test data|reserve line|Reserve Line has no|Name list is empty|wizard did not open|no reserve rows|no "(claimant|insured)" payee|permission|could not open claim|open \(positive\) remaining reserve|Available Reserves/i;
+const CLAIM_LEVEL = /missing test data|no check (with status|to \/|for \$)|Void is disabled for this check|reserve line|Reserve Line has no|Name list is empty|wizard did not open|no reserve rows|no "(claimant|insured)" payee|permission|could not open claim|open \(positive\) remaining reserve|Available Reserves/i;
 
 function describeItem(item) {
   const k = Object.keys(item)[0];
@@ -67,7 +67,8 @@ async function newestCheck(page, amount) {
 // old "validate steps only" test let finishObserve recipes run in parallel under --workers N.
 function isPaymentRecipe(recipe) {
   return [...((recipe && recipe.steps) || []), ...((recipe && recipe.checks) || [])].some((s) => s && (s.validate
-    || (Array.isArray(s.call) && /finish/i.test(String(s.call[0])))
+    // checkOps steps that void / delete / create a check change TEST data like Finish does — same sequential phase.
+    || (Array.isArray(s.call) && /finish|void|deleteCheck|create\w*Check|openOrCreateCheck|ensureOpenReserve/i.test(String(s.call[0])))
     || (typeof s.click === 'string' && /^finish$/i.test(s.click))));
 }
 
@@ -101,7 +102,12 @@ async function runScenario(page, tc, recipe, ctx) {
     return png;
   };
 
-  const claims = (() => {
+  // Fresh-data runs (runOneInc, default on TEST): the scenario gets the new claim(s) made for it in this run, nothing else.
+  const own = ctx.claimsFor ? ctx.claimsFor(tc.scenarioId) : null;
+  if (own && own.blocked) return finish(res, started, 'BLOCKED', `no new test claim for this run: ${own.blocked}`);
+  if (own && own.existing) res.notes = [res.notes, 'Ran on an existing pool claim: this claim type (aged loss date / existing data) cannot be created by FNOL.'].filter(Boolean).join(' ');
+  else if (Array.isArray(own)) res.notes = [res.notes, `Fresh test data: claim ${own[0]} was created for this run.`].filter(Boolean).join(' ');
+  const claims = Array.isArray(own) ? own : (() => {
     try {
       const list = claimPicker.candidates(recipe.profile, ctx.maxClaims || 3);
       // Parallel workers: when the pool holds several claims of this type, worker N starts on the N-th one so two

@@ -61,6 +61,8 @@ FNOL.AUTO_LIEN = { ...FNOL.AUTO_PA, lossDescription: 'OneInc automation — PA a
 
 // Extension profiles carry their own FNOL settings (helpers/oneInc/profiles/*.js → fnol).
 for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnol && !FNOL[name]) FNOL[name] = p.fnol;
+// Profiles that reuse another profile's FNOL (fnolAs), e.g. HO_SNI files PROP_PA claims on a pinned policy.
+for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnolAs && !FNOL[name] && FNOL[p.fnolAs]) FNOL[name] = { ...FNOL[p.fnolAs] };
 
 (async () => {
   const tier = String(process.env.CC_TIER || 'test').toLowerCase();
@@ -75,7 +77,7 @@ for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnol && !FNO
   const verifyProfiles = arg('verify', false) ? profiles : arg('all', false) ? existingOnly : [];
   // Every pool claim (usable or not — a missing item may be buildable now), newest first.
   const verifyAdds = verifyProfiles.flatMap((p) => (claimPicker.readPool()[p] || []).map((e) => `${p}=${e.claim}`));
-  const count = Math.max(1, Math.min(10, Number(arg('count', 2)) || 2));
+  const count = Math.max(1, Math.min(40, Number(arg('count', 2)) || 2)); // fresh-data runs ask for one claim per payment scenario
   const { chromium } = require('playwright');
   let browser = await chromium.launch({ headless: Boolean(arg('headless', false)) || process.env.ONEINC_HEADLESS === '1' }) // headed by default so the run can be watched (user direction 2026-10-20);
   let page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
@@ -161,6 +163,8 @@ for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnol && !FNO
         claimPicker.addToPool(profile, entry);
         summary.push({ profile, ...entry });
         if (chk.usable) made++;
+        // A pinned policy (profile.policies) is the only one allowed — keep it available for the next claim.
+        if ((claimPicker.PROFILES[profile] || {}).policies) tried.splice(tried.indexOf(policyNumber), 1);
         console.log(`[Provision] ${profile} ${i}: ${claim} ${chk.usable ? 'USABLE' : 'NOT usable — ' + chk.problem}` +
           `${chk.repaired.length ? ` [prepared: ${chk.repaired.join('; ')}]` : ''} (${Math.round((Date.now() - started) / 1000)}s)`);
       } catch (e) {

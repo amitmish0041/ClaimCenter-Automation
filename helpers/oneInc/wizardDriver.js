@@ -700,6 +700,17 @@ async function selectPayee(page, who = 'claimant') {
     if (!names.length) await page.waitForTimeout(500);
   }
   if (!names.length) throw new Blocked('payee Name list is empty');
+  // 'sni': the contact CC itself types "Secondary Named Insured" (from the policy) — try candidates until one comes back so.
+  if (who === 'sni') {
+    const parties = page.__oneIncParties || { insured: '' };
+    for (const cand of names.filter((t) => norm(t) !== norm(parties.insured) && !/donegal|insurance|agency|bank|garage|body|services|\binc\b|\bllc\b/i.test(t))) {
+      await select(page, 'Name', cand);
+      await settle(page, 1500);
+      const typ = await page.evaluate(() => { const x = [...document.querySelectorAll('select')].find((e) => /PayeeType|-Type$/.test(e.name || '') && e.offsetParent); return x ? (x.options[x.selectedIndex] || {}).text : ''; }).catch(() => '');
+      if (/secondary named insured/i.test(typ || '')) return cand;
+    }
+    throw new Blocked(`no contact on this claim is typed "Secondary Named Insured" (${names.join(', ')})`);
+  }
   const pick = resolvePayee(page, who, names);
   await select(page, 'Name', pick);
   await settle(page, 1500);
@@ -855,7 +866,9 @@ async function fillLineItem(page, amount = '1.00') {
 // set by the scenario (claim-level for VBR.018); skipAdjuster leaves Adjuster Number blank (VBR.033).
 // Default amount is deliberately odd: CC's duplicate-check flags a new check matching an earlier one's payee+amount
 // ("Possible duplicate payment found"), and the test claims already carry earlier $1.00 checks.
-async function completePaymentsStep(page, { transactionType = 'Partial Payment', amount = '1.37', costType, keepExposure = false, skipAdjuster = false } = {}) {
+// amount 'EXCEED' = Available Reserves + $100 (VBR.050 PMS SC04); lineAmount puts a different amount on the line item than
+// the Total Amount of Payment (VBR.051).
+async function completePaymentsStep(page, { transactionType = 'Partial Payment', amount = '1.37', costType, keepExposure = false, skipAdjuster = false, lineAmount } = {}) {
   if (costType) await select(page, 'Cost Type', costType);
   const exposure = findField(await readScreen(page), 'Exposure');
   if (exposure && exposure.kind === 'select' && !keepExposure && /claim-level|<none>/i.test(exposure.value || '')) {
@@ -867,15 +880,15 @@ async function completePaymentsStep(page, { transactionType = 'Partial Payment',
   if (costTypeField && costTypeField.kind === 'select' && /<none>|^$/i.test(costTypeField.value || '')) await select(page, 'Cost Type', 'Claim Cost').catch(() => {});
   if (findField(await readScreen(page), 'Transaction Type')) await select(page, 'Transaction Type', transactionType).catch(() => {});
   let amt = amount;
-  if (amount === 'AVAILABLE') {
+  if (amount === 'AVAILABLE' || amount === 'EXCEED') {
     const a = await availableReserves(page);
     if (!(a > 0)) throw new Blocked('reserve line has no open Available Reserves to match');
-    amt = a.toFixed(2);
+    amt = (amount === 'EXCEED' ? a + 100 : a).toFixed(2);
   }
   for (const label of ['Total Amount of Payment', 'Confirm Total Amount of Payment']) {
     if (findField(await readScreen(page), label)) await fill(page, label, amt).catch(() => {});
   }
-  await fillLineItem(page, amt);
+  await fillLineItem(page, lineAmount || amt);
   // Service Period is REQUIRED on WC indemnity and medical payments (CONFIRMED on the WC claim 2026-10-20: "Missing
   // required field Service Period Start/End"). Fill only when required and empty, with today's date — never before
   // the loss date (VBR.012).

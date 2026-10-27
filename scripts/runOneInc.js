@@ -164,7 +164,9 @@ function annotate(r, story, readiness) {
   // Work out which claim profiles the SELECTED scenarios need and make sure the claim pool has --pool-size usable
   // claims for each, creating the missing ones with scripts/provisionOneIncClaims.js (fresh FNOL per claim) BEFORE
   // anything executes — per user direction 2026-10-20. TEST tier only (it creates claims).
-  if (arg('provision', false) || process.env.ONEINC_PROVISION === '1') {
+  // Fresh-data runs (below) create their own claims; the older --provision top-up only applies with --reuse-claims.
+  const freshPlanned = tier === 'test' && toRun.length && !arg('reuse-claims', false) && process.env.ONEINC_FRESH !== '0';
+  if (!freshPlanned && (arg('provision', false) || process.env.ONEINC_PROVISION === '1')) {
     const claimPicker = require('../helpers/oneInc/claimPicker');
     const poolSize = Math.max(1, Math.min(10, Number(arg('pool-size', process.env.ONEINC_POOL_SIZE || 1)) || 1));
     const needed = [...new Set(toRun.map(({ tc }) => RECIPES[tc.scenarioId].profile))];
@@ -225,6 +227,63 @@ function annotate(r, story, readiness) {
     }
   }
 
+  // ── Fresh test data per run (default on TEST — user direction 2026-10-27) ─────────────────────────────────────
+  // "Always create new test data with the preconditions the test needs; old claims carrying many earlier payments are
+  // not a real use case." Every run files NEW claims (FNOL + the profile's declared data / prepare, via
+  // scripts/provisionOneIncClaims.js) for the selected scenarios and runs ONLY on them:
+  //   - every scenario that submits a payment / void / delete gets a claim of its own;
+  //   - the read-only screen checks of a profile share one new claim.
+  // Profiles FNOL cannot create (aged-loss-date / existing-claim profiles) keep using their pool claims — the result
+  // says so. A claim that cannot be created makes its scenarios BLOCKED (never silently falls back to an old claim).
+  // Opt out with --reuse-claims or ONEINC_FRESH=0.
+  const fresh = freshPlanned;
+  const assigned = new Map(); // scenarioId → [claim] | { blocked: why } | { existing: true }
+  if (fresh) {
+    const claimPicker = require('../helpers/oneInc/claimPicker');
+    const canFnol = (p) => { const P = claimPicker.PROFILES[p] || {}; const f = P.fnol; return ['AUTO_PA', 'AUTO_MI', 'WC_PA', 'PROP_PA', 'PROP_MORT', 'AUTO_LIEN'].includes(p) || !!P.fnolAs || (f && (f.exposures || []).length > 0); };
+    const byProfile = {};
+    for (const { tc } of toRun) (byProfile[RECIPES[tc.scenarioId].profile] = byProfile[RECIPES[tc.scenarioId].profile] || []).push(tc.scenarioId);
+    run.freshClaims = {};
+    for (const [profile, ids] of Object.entries(byProfile)) {
+      if (!canFnol(profile)) {
+        log(`[OneInc] fresh data: ${profile} needs existing claim data a new FNOL cannot produce (aged loss date, or a check OneInc already acknowledged) — its ${ids.length} scenario(s) use the pool claims`);
+        for (const id of ids) assigned.set(id, { existing: true });
+        continue;
+      }
+      // shareFresh profiles (HO_SNI): one new claim for all their scenarios in this run.
+      const share = !!(claimPicker.PROFILES[profile] || {}).shareFresh;
+      const payIds = share ? [] : ids.filter((id) => isPaymentRecipe(RECIPES[id]));
+      const readIds = share ? ids : ids.filter((id) => !isPaymentRecipe(RECIPES[id]));
+      const want = payIds.length + (readIds.length ? 1 : 0);
+      const before = new Set(claimPicker.poolClaims(profile));
+      const t0 = new Date().toISOString();
+      log(`[OneInc] fresh data: ${profile} — creating ${want} new claim(s) with their test data (${payIds.length} for payment scenarios, ${readIds.length ? 1 : 0} shared by ${readIds.length} screen check(s)); each FNOL takes a few minutes`);
+      const code = await new Promise((resolve) => {
+        const { spawn } = require('child_process');
+        const child = spawn(process.execPath, [path.join(__dirname, 'provisionOneIncClaims.js'), '--profiles', profile, '--count', String(want),
+          ...(arg('headless', false) ? ['--headless'] : [])], { cwd: path.join(__dirname, '..'), env: process.env });
+        let buf = '';
+        child.stdout.on('data', (d) => {
+          buf += d.toString();
+          const lines = buf.split(/\r?\n/);
+          buf = lines.pop();
+          for (const line of lines) if (/^\[(Provision|TestData)\]/.test(line)) log(line);
+        });
+        child.stderr.on('data', () => {});
+        child.on('close', resolve);
+        child.on('error', () => resolve(1));
+      });
+      const made = (claimPicker.readPool()[profile] || []).filter((e) => e.usable && !before.has(e.claim) && String(e.createdAt) >= t0).map((e) => e.claim);
+      run.freshClaims[profile] = made;
+      log(`[OneInc] fresh data: ${profile} — new claim(s): ${made.join(', ') || 'none'}`);
+      const why = code === 3 ? 'ClaimCenter TEST is not saving new claims right now' : `only ${made.length} of ${want} new ${profile} claim(s) could be created (see the provisioning lines in the log)`;
+      const queue = made.slice();
+      for (const id of payIds) assigned.set(id, queue.length ? [queue.shift()] : { blocked: why });
+      const shared = queue.shift() || made[made.length - 1];
+      for (const id of readIds) assigned.set(id, shared ? [shared] : { blocked: why });
+    }
+  }
+
   let browser;
   let page;
   if (toRun.length) {
@@ -254,7 +313,7 @@ function annotate(r, story, readiness) {
   const isPaymentScenario = (id) => isPaymentRecipe(RECIPES[id]);
   const phase1 = toRun.filter(({ tc }) => !isPaymentScenario(tc.scenarioId));
   const phase2 = toRun.filter(({ tc }) => isPaymentScenario(tc.scenarioId));
-  const ctxs = [{ dirs, log, maxClaims: Number(arg('max-claims', 4)) || 4, worker: 0 }];
+  const ctxs = [{ dirs, log, maxClaims: Number(arg('max-claims', 4)) || 4, worker: 0, claimsFor: fresh ? (id) => assigned.get(id) : null }];
   const pages = [page];
   const extraBrowsers = [];
   if (workers > 1 && phase1.length > 1) {

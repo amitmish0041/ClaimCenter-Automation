@@ -27,7 +27,24 @@ test('a test case spans its Id row and the Id-less step rows after it', () => {
   assert.ok(inv._test.isTcHeader(HDR));
 });
 
+test('GCCM-787 layout: empty Id column, id at the start of the name', () => {
+  const rows = [HDR,
+    ['', 'TC001-UIF.001 - Reason for Void Field - Verify', 'Desc', 'Pre', 1, 'Create LOB', 'LOB issued', 'Manual', 'New', 'Medium', ''],
+    ['', '', '', '', 2, 'Void it', 'Voided', '', '', '', ''],
+    ['', 'TC012-VBR.002 - Final Payment', '', '', 1, 'Step', 'Exp', 'Manual', 'New', '', '']];
+  const cases = inv._test.parseCaseRows(rows);
+  assert.deepEqual(cases.map((c) => c.tcId), ['TC-001', 'TC-012']);
+  assert.equal(cases[0].steps.length, 2);
+});
+
+test('review copies next to the workbooks are not inventoried twice', () => {
+  const ids = inv.loadInventory().cases.map((c) => c.scenarioId);
+  assert.equal(ids.length, new Set(ids).size);
+});
+
 test('sheet codes and story keys', () => {
+  assert.equal(inv._test.sheetCodeOf('CHE.001'), 'CHE');
+  assert.equal(inv._test.sheetCodeOf('Add Payment Details'), 'APD');
   assert.equal(inv._test.sheetCodeOf('UIF.001-UIF.070'), 'UIF');
   assert.equal(inv._test.sheetCodeOf('CPD.016 - CPD.022-Leinholder'), 'CPD-Lienholder');
   assert.equal(inv._test.sheetCodeOf('Business Rules VBR.001-037'), 'VBR');

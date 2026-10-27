@@ -14,6 +14,7 @@
  */
 'use strict';
 const { RECIPES } = require('./scenarioRecipes');
+const { REASONS } = require('./caseReasons');
 
 const RULES = [
   { cat: 'MANUAL', re: /webhook|payment feedback received|ExtDigitalPaymentWorkflow|workflow history/i, why: 'Needs OneInc to send payment feedback (webhook) for an existing digital payment — not observable or triggerable from the ClaimCenter UI alone' },
@@ -37,12 +38,14 @@ const RULES = [
 
 function classify(tc, { readiness } = {}) {
   if (RECIPES[tc.scenarioId]) return { automation: 'AUTOMATED', reason: '' };
+  // Case-specific reasons (caseReasons.js) beat the keyword rules, which give generic or wrong ones for some stories.
+  const own = REASONS[tc.scenarioId];
   if (tc.supersededBy) return { automation: 'SUPERSEDED', reason: `Superseded by the "${tc.supersededBy}" sheet (newer revision of the same test cases after JRM feedback)` };
   const story = readiness && readiness.stories && readiness.stories[tc.story];
   const devPending = story && story.readiness === 'DEV_PENDING';
   const hay = [tc.name, tc.description, tc.precondition, ...tc.steps.map((s) => `${s.action} ${s.expected}`)].join(' \n ');
   const rule = RULES.find((r) => r.re.test(hay));
-  const base = rule ? { automation: rule.cat, reason: rule.why } : { automation: 'MANUAL', reason: 'No automation recipe yet — run manually (add a recipe in helpers/oneInc/scenarioRecipes.js to automate)' };
+  const base = own ? { ...own } : rule ? { automation: rule.cat, reason: rule.why } : { automation: 'MANUAL', reason: 'No automation recipe yet — run manually (add a recipe in helpers/oneInc/scenarioRecipes.js to automate)' };
   if (devPending) return { automation: 'DEV_PENDING', reason: `Development not complete in Jira (${story.dev.key}: ${story.dev.status}). ${base.reason}` };
   return base;
 }

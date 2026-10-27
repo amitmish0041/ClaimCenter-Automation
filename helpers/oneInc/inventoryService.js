@@ -62,7 +62,8 @@ function sheetCodeOf(name) {
   if (/leinholder|lienholder/i.test(n)) return 'CPD-Lienholder';
   if (/mortgagee/i.test(n)) return 'CPD-Mortgagee';
   if (/joint payment/i.test(n)) return 'CPD-Joint';
-  const m = /\b(UIF|VBR|CPD|INT)\b/i.exec(n);
+  if (/^add(itional)? payment details$/i.test(n)) return 'APD';
+  const m = /\b(UIF|VBR|CPD|INT|CHE)\b/i.exec(n);
   if (m) return m[1].toUpperCase();
   return 'TC';
 }
@@ -93,7 +94,10 @@ function parseCaseRows(rows) {
   const cases = [];
   let cur = null;
   for (const r of rows.slice(1)) {
-    const id = clean(r[0]);
+    // GCCM-787 leaves the Id column empty and starts the name with the id instead ("TC001-UIF.001 - Reason for
+    // Void Field - ..."); take "TC-001" from there so those cases are not lost.
+    const nameId = !clean(r[0]) && /^TC-?(\d{2,4})\b/i.exec(clean(r[1]));
+    const id = clean(r[0]) || (nameId ? `TC-${nameId[1]}` : '');
     const stepNo = clean(r[4]);
     const stepText = clean(r[5]);
     const expected = clean(r[6]);
@@ -127,6 +131,9 @@ function listWorkbooks(dir = ONEINC_DIR) {
     if (!fs.existsSync(d)) return;
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       if (e.name === RESULTS_DIRNAME || e.name.startsWith('~$')) continue;
+      // Review notes and copies kept next to the designs ("QA Review comment\GCCM-759_previous_version_backup.xlsx")
+      // would inventory the same story twice — only live workbooks count.
+      if (/^qa review/i.test(e.name) || /backup|previous[ _]version/i.test(e.name)) continue;
       const p = path.join(d, e.name);
       if (e.isDirectory()) walk(p);
       else if (/\.xlsx$/i.test(e.name)) out.push(p);
