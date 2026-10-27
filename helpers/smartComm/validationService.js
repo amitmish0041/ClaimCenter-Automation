@@ -1266,6 +1266,10 @@ function buildEditValue(field, n, digNumber, editableValues = []) {
   if (dataType === 'Money' || dataType === 'Number') return String(900 + n);
   if (dataType === 'Time') return buildTimeValue(match.row.sampleValue, n);
   if (/\$\s*\[?\s*$/.test(field.labelContext || '')) return String(900 + n);
+  // A year-only field ("[2026]", DIG27's Year of the Date of Loss) takes a number only: "2026-edited" was reverted to
+  // "2026" by the editor and the edit came out BLOCKED (2026-10-27). A distinct far-future year stays a valid, unique
+  // year the PDF check can find.
+  if (/^\[?\s*(19|20)\d\d\s*\]?$/.test(String(field.stripped || field.text || '').trim())) return String(2090 + n);
   // A field that already shows a value gets that value + "-edited" ("John Smith" -> "John Smith-edited"), so the
   // edited letter reads like real data (user direction 2026-10-18). No brackets (user direction 2026-10-17): they were
   // typed as part of the value and printed in the completed PDF ("RECEIVED OF [QA-EDIT-4] HEREINAFTER…").
@@ -1740,7 +1744,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       // retried with digits — DIG15's Claimant SSN rejected "QA-EDIT-4" every time ("value never appeared", a false FAIL
       // 2026-10-23). Four digits, so a last-4 / short field accepts it too.
       const prior = target.c;
-      const looksNumeric = /ssn|social|zip|postal|phone|fax|amount|number|count|digits/i.test(`${prior.technicalName || ''} ${prior.label || ''} ${prior.dictionaryField || ''}`)
+      const looksNumeric = /ssn|social|zip|postal|phone|fax|amount|number|count|digits|year/i.test(`${prior.technicalName || ''} ${prior.label || ''} ${prior.dictionaryField || ''}`)
         || /^\[?\s*[\d\s().-]*\]?$/.test(String(prior.before || ''));
       const rejectedText = /never appeared|vanish/i.test(prior.reason || '');
       const retryValue = rejectedText && looksNumeric ? String(1000 + n2).slice(-4) : buildEditValue(field, n2, template.digNumber, editableValues);
