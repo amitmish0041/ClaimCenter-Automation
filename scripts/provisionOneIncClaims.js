@@ -56,6 +56,10 @@ FNOL.AUTO_DE_OLD = { policyType: 'Personal Auto', state: 'DE', lossCauseCode: 'L
   exposures: [{ coverageLabel: 'Collision' }] };
 FNOL.AUTO_MD_OLD = { policyType: 'Personal Auto', state: 'MD', lossCauseCode: 'LC15', lossDescription: 'OneInc automation — MD auto, aged DoL (VBR.005/015)', incidents: ['Add Vehicle'],
   exposures: [{ coverageLabel: ['Personal Injury Protection', 'PIP', 'Medical Payments', 'Med Pay', 'Medical Benefits'] }, { coverageLabel: 'Collision' }] };
+// HO claims file WITHOUT the FNOL property-damage incident: on cloud TEST its form stops Step 3 with "Name : Missing
+// required field" (CONFIRMED 2026-10-27, policy 1002228777); the Dwelling exposure brings its own property incident,
+// which the mortgage (testData lienholders 'property') is recorded on.
+FNOL.PROP_PA.incidents = [];
 FNOL.PROP_MORT = { ...FNOL.PROP_PA, lossDescription: 'OneInc automation — HO fire loss with mortgagee' };
 FNOL.AUTO_LIEN = { ...FNOL.AUTO_PA, lossDescription: 'OneInc automation — PA auto collision with lienholder' };
 

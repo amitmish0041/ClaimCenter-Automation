@@ -357,9 +357,7 @@ async function showMessages(page) {
 // Address Book vendor by search text + Tax ID (same picker walk as wizardDriver.selectVendorPayee, for vendors not in
 // the default list — e.g. Insurance Auto Auctions for CPD.015).
 async function selectVendorByTaxId(page, search, taxId) {
-  await page.locator('[id$="PrimaryPayee_Name-PrimaryPayee_NameMenuIcon"]').first().click({ force: true });
-  await page.waitForTimeout(1000);
-  await page.locator('[id$="PrimaryPayee_Name-MenuItem_Search"]').first().click({ force: true });
+  await W.openPayeeSearch(page);
   await W.settle(page, 3500);
   await W.select(page, 'Type', 'Vendor (Company)').catch(() => {});
   await page.getByLabel('Name', { exact: true }).last().fill(search);

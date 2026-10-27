@@ -26,8 +26,9 @@ module.exports = (api) => {
   const msg = (re, present = true) => ({ message: { re, present } });
 
   // ── Check/Payment Details of an existing OneInc check (AUTO_PA) ────────────────────────────────────────────────
-  const ONEINC = op('openCheck', { status: '^(Requesting|Awaiting submission)$' });
-  const DET = 'Opens the newest OneInc check on the claim (status Requesting — on TEST OneInc never moves a check past Requesting, so OneInc-returned values such as External Identifier stay empty).';
+  // Fresh claims start with no checks: the first case makes a $1.4x claimant check, the rest of the run reuses it.
+  const ONEINC = op('openOrCreateCheck', { status: '^(Requesting|Awaiting submission)$' }, { payee: 'claimant' });
+  const DET = 'Opens the newest OneInc check on the claim (created by the run when the fresh claim has none) (status Requesting — on TEST OneInc never moves a check past Requesting, so OneInc-returned values such as External Identifier stay empty).';
   add('GCCM-1013/UIF/TC-004', 'AUTO_PA', [ONEINC], [V('CR Tracking Number', { readonly: true, required: false, value: /\S/ })], DET);
   add('GCCM-1013/UIF/TC-012', 'AUTO_PA', [ONEINC], [H('Expedite / Certified Tracking No.')], DET + ' No tracking number on the check.');
   add('GCCM-1013/UIF/TC-014', 'AUTO_PA', [ONEINC], [H('ClaimsPay Method Id')], DET + ' Not a direct-deposit / recurring check.');
@@ -42,7 +43,7 @@ module.exports = (api) => {
   add('GCCM-1013/UIF/TC-028', 'AUTO_PA', [ONEINC], [V('Void Identifier', { readonly: true })], DET);
   add('GCCM-1013/UIF/TC-029', 'AUTO_PA', [ONEINC], [V('Aggregate ID', { unlessBlocked: 'shows only when OneInc returned an Aggregate ID — none on TEST' })], DET);
   // Vendor payee linked to the Address Book → no Cell Phone / Email (UIF.078 / UIF.079 negative)
-  const VENDOR_CHECK = op('openCheck', { status: '^(Requesting|Awaiting submission)$', payee: 'ADJUSTMENT SERVICES' });
+  const VENDOR_CHECK = op('openOrCreateCheck', { status: '^(Requesting|Awaiting submission)$', payee: 'ADJUSTMENT SERVICES' }, { payee: 'vendor' });
   const VEN = 'Opens the newest OneInc check to ADJUSTMENT SERVICES INC (an Address Book vendor) on the claim.';
   add('GCCM-1013/UIF/TC-006', 'AUTO_PA', [VENDOR_CHECK], [H('Cell Phone')], VEN);
   add('GCCM-1013/UIF/TC-008', 'AUTO_PA', [VENDOR_CHECK], [H('Email')], VEN);

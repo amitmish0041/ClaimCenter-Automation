@@ -20,11 +20,14 @@ const PROFILES = {
   AUTO_PA: { label: 'PA personal auto (vehicle exposure, open reserve)', lob: 'AUTO', state: 'PA', prefix: /^PA-PA-/, seed: ['PA-PA-01-26-0748059'] },
   AUTO_MI: { label: 'MI auto', lob: 'AUTO', state: 'MI', prefix: /^(PA|CA)-MI-/ },
   WC_PA: { label: 'PA workers comp', lob: 'WC', state: 'PA', prefix: /^WC-PA-/ },
-  PROP_PA: { label: 'PA homeowners / property', lob: 'PR', state: 'PA', prefix: /^HO-PA-/ },
+  // HO cases name the insured Robert Charles (has e-mail + phone, so CPD.001 does not override the ClaimsPay defaults) and
+  // the Secondary Named Insured David Thomas — both come from policy 1002228777, so fresh HO claims are filed on it
+  // (fresh-data audit 2026-10-27: a random HO policy has neither, and those cases would fail on the data).
+  PROP_PA: { label: 'PA homeowners / property', lob: 'PR', state: 'PA', prefix: /^HO-PA-/, policies: ['1002228777'] },
   // PA auto claim carrying two Lienholder/Mortgagee contacts and a loan on the vehicle (set up by claimCheck's
   // `lienholders` prepare). Pool only — an arbitrary claim from the test-data sheet has no lienholder.
   // PA homeowners claim with Lienholder/Mortgagee contacts and a mortgage on the fixed-property incident. Pool only.
-  PROP_MORT: { label: 'PA homeowners with mortgagee + mortgage on the property', lob: 'PR', state: 'PA', prefix: /^HO-PA-/, poolOnly: true, fnolAs: 'PROP_PA' },
+  PROP_MORT: { label: 'PA homeowners with mortgagee + mortgage on the property', lob: 'PR', state: 'PA', prefix: /^HO-PA-/, poolOnly: true, fnolAs: 'PROP_PA', policies: ['1002228777'] },
   // Aged state claims for the date-of-loss rules (VBR.004 DE / VBR.005 + VBR.015 MD, user direction 2026-10-21: use
   // the Test Data sheet). New FNOL on a policy whose existing claim is at least minAgeYears old, loss = that DoL + 1.
   AUTO_DE_OLD: { label: 'DE personal auto, loss 2+ years ago (cause of loss LC50)', lob: 'AUTO', state: 'DE', prefix: /^PA-DE-/, poolOnly: true, minAgeYears: 2.05 },

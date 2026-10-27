@@ -173,11 +173,59 @@ async function setCompanyContact(page, name, taxId, value) {
   return `${name}: Main Email|Business phone ${r.before} → ${value}${r.changed ? '' : ' (already set)'}`;
 }
 
+// ── Company primary address (VBR.036: an Address Book payee's address change must reach its unsent checks) ──────────
+// Address Book vendors are read-only in ClaimCenter ("This contact is linked to the Address Book and is in sync", no
+// Edit button — CONFIRMED 2026-10-27 on BAIKOW LEGAL LLC), so the change is made here and reaches ClaimCenter through the
+// Address Book sync. value = 'line1|line2|city|county|state code|zip' (the ledger keeps the original in the same form).
+const ADDR_KEYS = ['AddressLine1', 'AddressLine2', 'City', 'County', 'State', 'PostalCode'];
+const addrSel = (k) => `${k === 'State' ? 'select' : 'input'}[name$="PrimaryAddressInputSet-AddressOwnerInputSet-globalAddressContainer-GlobalAddressInputSet-${k}"]`;
+async function readAddress(cm) {
+  const v = [];
+  for (const k of ADDR_KEYS) v.push(String(await cm.locator(addrSel(k)).first().inputValue().catch(() => '')).replace(/-#+$/, ''));
+  return v.join('|');
+}
+async function applyAddress(page, taxId, value, label) {
+  return withCM(page, async (cm) => {
+    await openVendorEdit(cm, taxId);
+    const before = await readAddress(cm);
+    if (before === value) { await cm.getByRole('button', { name: 'Cancel', exact: true }).first().click().catch(() => {}); return { before, changed: false }; }
+    if (label) {
+      const ledger = readLedger(); if (ledger.some((e) => e.kind === 'address' && e.taxId === taxId)) { /* keep the first original */ } else
+      ledger.push({ kind: 'address', name: label, taxId, field: 'Primary Address', original: before, changedAt: new Date().toISOString() });
+      writeLedger(ledger); // recorded before the edit is saved
+    }
+    const want = String(value).split('|');
+    for (let i = 0; i < ADDR_KEYS.length; i++) {
+      const k = ADDR_KEYS[i];
+      const el = cm.locator(addrSel(k)).first();
+      if (!await el.isVisible().catch(() => false)) continue;
+      if (k === 'State') { await el.selectOption(want[i] || '').catch(() => {}); await cm.waitForTimeout(1500); continue; }
+      // The ZIP box is masked ("18104-####") — type it key by key, like the phone numbers.
+      if (k === 'PostalCode') { await typeInto(cm, addrSel(k), want[i] || ''); continue; }
+      await el.fill(want[i] || ''); await el.press('Tab').catch(() => {}); await cm.waitForTimeout(600);
+    }
+    await cm.getByRole('button', { name: 'Update', exact: true }).first().click();
+    await cm.getByRole('button', { name: 'Edit', exact: true }).first().waitFor({ timeout: 20000 }).catch(async () => {
+      throw new W.Blocked('ContactManager did not save the address: ' + (await cm.locator('.gw-message, [class*=error], [role=alert]').allInnerTexts().catch(() => [])).join(' / ').replace(/\s+/g, ' ').slice(0, 300));
+    });
+    return { before, changed: true };
+  });
+}
+// Test step: sets a vendor's primary address (found by Tax ID) — `which` is a setupE.ADDRESSES key ('A' | 'B') or an
+// explicit 'line1|line2|city|county|state|zip'. Reverted by restoreVendors.
+const CM_ADDRESSES = { A: '1103 Richmont St||Scranton|Lackawanna|PA|18509', B: '1195 River Rd||Marietta|Lancaster|PA|17547' };
+async function setCompanyAddress(page, name, taxId, which = 'B') {
+  const value = CM_ADDRESSES[which] || which;
+  const r = await applyAddress(page, taxId, value, name);
+  return `${name}: primary address ${r.before} → ${value}${r.changed ? '' : ' (already set)'}`;
+}
+
 async function restoreVendors(page) {
   const pending = readLedger();
   for (const e of pending) {
     if (e.kind === 'email') await applyEmail(page, e.who, e.original, null);
     else if (e.kind === 'company') await applyCompany(page, e.taxId, e.original, null);
+    else if (e.kind === 'address') await applyAddress(page, e.taxId, e.original, null);
     else await applyDate(page, e.taxId, e.original, null);
     writeLedger(readLedger().filter((x) => x !== undefined && JSON.stringify(x) !== JSON.stringify(e)));
   }
@@ -192,7 +240,7 @@ async function setTaxValidUntil(page, label, taxId, when) {
   return `${label}: Tax ID Valid Until ${r.before || '<blank>'} → ${value || '<blank>'}${r.changed ? '' : ' (already set)'}`;
 }
 
-module.exports = { setContactEmail, setCompanyContact, setTaxValidUntil, restoreVendors, readLedger, dateFor };
+module.exports = { setContactEmail, setCompanyContact, setTaxValidUntil, setCompanyAddress, restoreVendors, readLedger, dateFor, withCM, CM_ADDRESSES };
 
 if (require.main === module) {
   require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env'), override: false });

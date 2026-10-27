@@ -182,7 +182,7 @@ async function createQuickCheck(page, { txn = 'Partial Payment', costType = 'cla
 // Full Check wizard payment to a claim contact, finished: payee (wizardDriver.selectPayee key) + optional payee Type and
 // joint payees, open reserve line, minimum payment details, Finish (warnings-only pages pressed through). Used to make
 // a OneInc check to look at on Check/Payment Details. Records page.__createdCheck = { amount }.
-async function createFullCheck(page, { payee = 'claimant', type, joint, amount } = {}) {
+async function createFullCheck(page, { payee = 'claimant', type, joint, amount, txn = 'Partial Payment' } = {}) {
   gate('Creating a check');
   const amt = amount || `1.${41 + Math.floor(Math.random() * 58)}`;
   if (!page.__oneIncParties) await W.getParties(page).catch(() => {});
@@ -194,7 +194,7 @@ async function createFullCheck(page, { payee = 'claimant', type, joint, amount }
     if (joint) await W.addJointPayees(page, joint);
     await W.nextFillingServicePeriod(page);
     await W.selectReserveLine(page, 'open');
-    await W.completePaymentsStep(page, { amount: amt });
+    await W.completePaymentsStep(page, { amount: amt, transactionType: txn });
     await W.nextFillingServicePeriod(page);
     await W.answerUnansweredNo(page);
     for (let r = 0; r < 2; r++) if (!(await W.fillRequiredEmpties(page)).length) break;
@@ -213,8 +213,16 @@ async function createFullCheck(page, { payee = 'claimant', type, joint, amount }
   } finally {
     await W.cancelWizard(page).catch(() => {});
   }
-  page.__createdCheck = { amount: amt };
-  return `created a $${amt} Full Check payment to the ${payee}${joint ? ' with joint payee(s)' : ''} as test data${msgs ? ` (warnings at Finish: ${msgs.slice(0, 200)})` : ''}`;
+  page.__createdCheck = { amount: amt, txn };
+  return `created a $${amt} ${txn} Full Check payment to the ${payee}${joint ? ' with joint payee(s)' : ''} as test data${msgs ? ` (warnings at Finish: ${msgs.slice(0, 200)})` : ''}`;
+}
+
+// Fresh claims have no reserve line at $0. Cases that need one (Final / Supplemental / First and Final "with no open
+// reserve") first pay a small Final Payment on an open Claim Cost line, which closes it (fresh-data audit 2026-10-27).
+async function closeReserveLine(page) {
+  const rows = await require('./reuseExt').reserveRows(page).catch(() => []);
+  if (rows.some((r) => /claim cost/i.test(r.cost) && !(r.remaining > 0))) return 'a Claim Cost line at $0 already exists';
+  return createFullCheck(page, { payee: 'claimant', txn: 'Final Payment' });
 }
 
 // Opens the newest check matching spec; when there is none, creates one with createFullCheck(createOpts) and opens it.
@@ -472,6 +480,6 @@ async function deletePendingIfAny(page, payee) {
 module.exports = {
   historyMark, historySince, deletePendingIfAny,
   observe, checkRows, openCheck, openNewestCheck, ensureVoidableCheck, createQuickCheck, createFullCheck, openOrCreateCheck,
-  ensureOpenReserve, toggle, fieldLength, runFinancialsEscalation, escalateChecks, voidButtonState, openVoid, submitVoid,
+  ensureOpenReserve, closeReserveLine, toggle, fieldLength, runFinancialsEscalation, escalateChecks, voidButtonState, openVoid, submitVoid,
   cancelVoid, deleteCheck, openAPD, approvalHistory, workplan, snapshotActivities, activitiesClosedSince, history,
 };

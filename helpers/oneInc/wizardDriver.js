@@ -664,13 +664,24 @@ function vendors() {
 
 // Step 1: Name picker (the arrow beside Name) › Search › Vendor (Company) by name › Select the row with that Tax ID.
 // The picker's own Search item has a stable id — a role/text lookup hits the top-nav "Search" instead (CONFIRMED).
+// Opens the Name picker's Search. On Quick Payment the icon click sometimes leaves the menu closed, and the Search
+// item then exists but is hidden ("Element is not visible" — CONFIRMED 2026-10-27, GCCM-1003 CPD-Joint TC-252):
+// click the icon again until the item shows.
+async function openPayeeSearch(page) {
+  const icon = page.locator('[id$="PrimaryPayee_Name-PrimaryPayee_NameMenuIcon"]').first();
+  const item = page.locator('[id$="PrimaryPayee_Name-MenuItem_Search"]').first();
+  for (let i = 0; i < 4 && !await item.isVisible().catch(() => false); i++) {
+    await icon.click({ force: true }).catch(() => {});
+    await item.waitFor({ state: 'visible', timeout: 2500 }).catch(() => {});
+  }
+  await item.click({ force: true });
+}
+
 async function selectVendorPayee(page, index = 0) {
   const v = vendors()[index];
   if (!v) throw new Blocked(`no vendor #${index + 1} configured (ONEINC_VENDORS)`);
   // force: on Quick Payment a plain click on the icon container never opened the menu (CONFIRMED 2026-10-21).
-  await page.locator('[id$="PrimaryPayee_Name-PrimaryPayee_NameMenuIcon"]').first().click({ force: true });
-  await page.waitForTimeout(1000);
-  await page.locator('[id$="PrimaryPayee_Name-MenuItem_Search"]').first().click({ force: true });
+  await openPayeeSearch(page);
   await settle(page, 3500);
   await select(page, 'Type', 'Vendor (Company)').catch(() => {});
   await page.getByLabel('Name', { exact: true }).last().fill(v.search || v.name);
@@ -992,6 +1003,6 @@ async function currentStep(page) {
 module.exports = {
   Blocked, settle, inWizard, openClaim, newPaymentErrorText, repairSurcharging, assignClaimAndExposures, abilityToPayErrors, abilityToPay, repairVehicleVins, lienholders, addClaimContactWithRole, addVehicleLoan, addIncidentLoan, addDigitalPaymentAccount, repairClaimantAddress, getParties, optionsOf, select, fill, answer, answerUnansweredNo, clickButton,
   visibleMenuItems, openActionsMenu, closeMenus, navigate, openFinancialsRowMenu,
-  openPayment, cancelWizard, selectPayee, addJointPayees, selectVendorPayee, vendors, selectReserveLine, availableReserves, fillLineItem, completePaymentsStep, next, nextFillingServicePeriod, fillRequiredEmpties, serverError, currentStep,
+  openPayment, cancelWizard, selectPayee, addJointPayees, selectVendorPayee, openPayeeSearch, vendors, selectReserveLine, availableReserves, fillLineItem, completePaymentsStep, next, nextFillingServicePeriod, fillRequiredEmpties, serverError, currentStep,
   warningsOnly,
 };

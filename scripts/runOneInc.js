@@ -260,8 +260,14 @@ function annotate(r, story, readiness) {
       log(`[OneInc] fresh data: ${profile} — creating ${want} new claim(s) with their test data (${payIds.length} for payment scenarios, ${readIds.length ? 1 : 0} shared by ${readIds.length} screen check(s)); each FNOL takes a few minutes`);
       const code = await new Promise((resolve) => {
         const { spawn } = require('child_process');
+        // Claims are always CREATED as the standard adjuster from .env (CC_USER), whatever login the run uses: the
+        // provisioner assigns the new claim to whoever is logged in, and a claim created under su is owned by "Super
+        // User", who has no examiner number — every payment on it is then refused ("Exposure owner Super User must
+        // have a valid examiner number", CONFIRMED 2026-10-27 on PA-PA-01-26-0748579).
+        const dotenvUser = (() => { try { return require('dotenv').parse(require('fs').readFileSync(path.join(__dirname, '..', '.env'))); } catch (_) { return {}; } })();
+        const provEnv = { ...process.env, ...(dotenvUser.CC_USER && dotenvUser.CC_PASS ? { CC_USER: dotenvUser.CC_USER, CC_PASS: dotenvUser.CC_PASS } : {}) };
         const child = spawn(process.execPath, [path.join(__dirname, 'provisionOneIncClaims.js'), '--profiles', profile, '--count', String(want),
-          ...(arg('headless', false) ? ['--headless'] : [])], { cwd: path.join(__dirname, '..'), env: process.env });
+          ...(arg('headless', false) ? ['--headless'] : [])], { cwd: path.join(__dirname, '..'), env: provEnv });
         let buf = '';
         child.stdout.on('data', (d) => {
           buf += d.toString();

@@ -68,7 +68,8 @@ async function newestCheck(page, amount) {
 function isPaymentRecipe(recipe) {
   return [...((recipe && recipe.steps) || []), ...((recipe && recipe.checks) || [])].some((s) => s && (s.validate
     // checkOps steps that void / delete / create a check change TEST data like Finish does — same sequential phase.
-    || (Array.isArray(s.call) && /finish|void|deleteCheck|create\w*Check|openOrCreateCheck|ensureOpenReserve/i.test(String(s.call[0])))
+    // (openOrCreateCheck is not one: it makes at most one check that the run's screen checks then share.)
+    || (Array.isArray(s.call) && /finish|void|deleteCheck|\.create\w*Check|ensureOpenReserve|escalate/i.test(String(s.call[0])))
     || (typeof s.click === 'string' && /^finish$/i.test(s.click))));
 }
 

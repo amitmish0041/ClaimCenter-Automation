@@ -617,6 +617,25 @@ async function satisfyNamedRequiredFields(page) {
       }
     }
 
+    // 2b. A required CHECKBOX GROUP: cloud HO "Damage Type" (Fire / Other / Theft / Water / Wind/Hail) blocked every
+    //     cloud HO FNOL at Step 3 (CONFIRMED 2026-10-27 on policy 1002228777). Tick "Fire" (the OneInc HO claims are
+    //     fire losses), else the first box. The group is the field widget whose label is exactly the name.
+    const ticked = await page.evaluate((want) => {
+      const w = [...document.querySelectorAll('.gw-InputWidget')].find((x) => {
+        const l = x.querySelector('.gw-label');
+        return l && (l.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase() === want.toLowerCase();
+      });
+      if (!w) return null;
+      const boxes = [...w.querySelectorAll('input[type="checkbox"], [role="checkbox"]')];
+      if (!boxes.length) return null;
+      if (boxes.some((b) => b.checked || b.getAttribute('aria-checked') === 'true')) return 'already ticked';
+      const nameOf = (b) => ((b.closest('label') || b.parentElement || {}).textContent || b.getAttribute('aria-label') || '').trim();
+      const pick = boxes.find((b) => /^fire$/i.test(nameOf(b))) || boxes[0];
+      pick.click();
+      return nameOf(pick) || 'first box';
+    }, name).catch(() => null);
+    if (ticked) { done.push(name + '=' + ticked); continue; }
+
     // 3. Yes/No — ONLY when the required field is itself a question. Without
     //    this guard the radio branch hijacks a neighbouring question's answer
     //    (see the ordering note above).
@@ -630,6 +649,24 @@ async function satisfyNamedRequiredFields(page) {
     if (await yes.isVisible().catch(() => false)) {
       await yes.check({ force: true }).catch(() => yes.click({ force: true }).catch(() => {}));
       done.push(name + '=Yes');
+      continue;
+    }
+    // Cloud renders these questions as a .gw-InputWidget with role="radio" divs and no role="group" (cloud HO Step 3:
+    // "Is Anyone Injured?", "Smoke Damage Only?" — CONFIRMED 2026-10-27). Answer "No": it adds no follow-up fields.
+    // A DOM el.click() on the radio did not register (CC kept reporting the field missing) — find the widget's id, then
+    // click its "No" radio through Playwright.
+    const wid = await page.evaluate((want) => {
+      const w = [...document.querySelectorAll('.gw-InputWidget')].find((x) => {
+        const l = x.querySelector('.gw-label');
+        return l && (l.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase() === want.toLowerCase();
+      });
+      return w && w.id ? w.id : null;
+    }, name).catch(() => null);
+    const no = wid ? page.locator(`[id="${wid}"]`).getByRole('radio', { name: 'No', exact: true }).first() : null;
+    if (no && await no.isVisible().catch(() => false)) {
+      await no.click().catch(() => {});
+      await page.waitForTimeout(600);
+      done.push(name + '=No');
     }
   }
   return done;

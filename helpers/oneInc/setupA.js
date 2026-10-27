@@ -73,7 +73,16 @@ async function selectByLabel(page, label, want) {
 async function fillByLabel(page, label, value) {
   const f = findField(await readScreen(page), label);
   if (!f) throw new W.Blocked(`"${label}" field is not on the screen`);
-  const inp = page.locator(`[id="${f.id}"] input:not([type=hidden]), [id="${f.id}"] textarea`).first();
+  const sel = `[id="${f.id}"] input:not([type=hidden]), [id="${f.id}"] textarea`;
+  const vis = page.locator(sel).filter({ visible: true }).first();
+  // Time-only widgets ("Time Employee Began Work") keep their input hidden (gw-hidden gw-timeOnly) until the picker opens —
+  // fill() timed out on every new WC claim (CONFIRMED 2026-10-27, WC-PA-01-26-0748573..77). Set it directly then.
+  if (!await vis.isVisible().catch(() => false)) {
+    await page.locator(sel).first().evaluate((el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }, String(value));
+    await W.settle(page, 1000);
+    return;
+  }
+  const inp = vis;
   await inp.fill(String(value));
   await inp.press('Tab').catch(() => {});
   await W.settle(page, 1000);
@@ -482,7 +491,7 @@ async function ensureLostTimeSeverity(page) {
     const d = findField(await readScreen(page), 'Date Disability Began');
     if (d && !d.value) await fillByLabel(page, 'Date Disability Began', dol);
     const t = findField(await readScreen(page), 'Time Employee Began Work');
-    if (t && t.kind === 'input' && !t.value) await fillByLabel(page, 'Time Employee Began Work', '8:00 AM');
+    if (t && t.kind === 'input' && !t.value) await fillByLabel(page, 'Time Employee Began Work', '08:00 AM');
   });
   await W.settle(page, 2000);
   if (!await exposureLink(page, 'Indemnity').isVisible().catch(() => false)) throw new W.Blocked('Severity saved as Lost Time but no Indemnity exposure appeared');

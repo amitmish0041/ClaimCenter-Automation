@@ -12,6 +12,7 @@ const NO_ONEINC = 'OneInc does not report back on TEST (every OneInc check stays
 const WEBHOOK = `Needs OneInc to return a status for the check (Stopped / Issued / Success / Cancelled / Error / Stop Pending) — ${NO_ONEINC}, and the suite cannot send the webhook itself`;
 const PAYLOAD = 'Checks the payload ClaimCenter sends to OneInc (field cleansing / mapping) — needs integration-log or OneInc-side access, not visible in the ClaimCenter UI';
 const DOC_SEND = 'Outcome of sending a linked document to OneInc / retrieving it from ImageRight — integration-side; the document flow does not run on TEST';
+const ALLIANCE = 'Needs an Alliance Glass claim (ExtAllianceGlassClaim = TRUE). The flag is on no ClaimCenter screen — Loss Details (view and edit) has no Alliance / glass field (CONFIRMED 2026-10-27) — it is set only when the claim comes in through the Alliance Glass FNOL intake, which UI automation cannot create';
 
 const M = (why) => ({ automation: 'MANUAL', reason: why });
 const D = (why) => ({ automation: 'NEEDS_DATA', reason: why });
@@ -72,6 +73,11 @@ const REASONS = {
   'GCCM-1013/INT/TC-129': M('Compares the e-mail / phone sent to OneInc on new vs existing payments after editing the payment contact details — ' + PAYLOAD),
   'GCCM-1013/APD/TC-134': M(`"Get Payment Status" must pull the latest status from OneInc — ${NO_ONEINC} (and Cloud shows a "Refresh" button instead, see TC-133)`),
   'GCCM-1013/APD/TC-135': M(WEBHOOK.replace('a status', 'a ClaimsPay Data Change webhook')),
+
+  // ── Manual → automated sweep 2026-10-27 (recipes/manualToAuto.js): the cases of those groups that stay manual ──
+  'GCCM-803/TC/TC-025': M(ALLIANCE),
+  'GCCM-1003/VBR/TC-170': M(ALLIANCE),
+  'GCCM-1003/VBR/TC-088': M('Quick Payment pays ONE reserve line (the Financials row it is opened from) and has no "Add Payment" (CONFIRMED 2026-10-27), so a claim cost and an expense cannot be put on one Quick check and VBR.003 cannot be reached there — BA: confirm the case does not apply to Quick Payment. The rule itself is automated on the Full Check wizard (GCCM-763 VBR TC-006)'),
 };
 
 module.exports = { REASONS };

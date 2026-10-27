@@ -12,7 +12,11 @@
 module.exports = {
   HO_SNI: {
     label: 'PA homeowners claim on a policy with an Insured and a Secondary Named Insured',
-    lob: 'PR', state: 'PA', prefix: /^HO-PA-/, poolOnly: true, fnolAs: 'PROP_PA', policies: ['1002228777'], shareFresh: true,
+    lob: 'PR', state: 'PA', prefix: /^HO-PA-/, poolOnly: true, policies: ['1002228777'], shareFresh: true,
+    // PROP_PA's FNOL without the property-damage incident: on this policy that incident stopped Step 3 with "Damage
+    // Type / Name : Missing required field" (CONFIRMED 2026-10-27).
+    fnol: { policyType: "Homeowner's", state: 'PA', lossCauseCode: 'LC01', lossDescription: 'OneInc automation — HO loss, insured + secondary named insured', incidents: [],
+      exposures: [{ coverageLabel: ['Coverage A Dwelling', 'Coverage B Other Structures', 'Coverage D Loss of Use'] }] },
     seed: ['HO-PA-01-26-0748434'],
   },
 };
