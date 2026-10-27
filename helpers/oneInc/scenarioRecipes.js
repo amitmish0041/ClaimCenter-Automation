@@ -91,9 +91,9 @@ add('GCCM-759/UIF/TC-025', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V(
 add('GCCM-759/UIF/TC-026', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Cause of Loss', { readonly: true, value: /\S/ })]);
 add('GCCM-759/UIF/TC-027', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Payment for a total loss?', { required: true, radios: ['Yes', 'No'] })]);
 add('GCCM-759/UIF/TC-028', 'AUTO_PA', NEW_LINE('Adjuster Expense'), [H('Payment for a total loss?')]);
-add('GCCM-759/UIF/TC-029', 'AUTO_PA', [...FULL_PAYMENTS('claimant', 'existing'), { answer: ['Payment for a total loss?', 'Yes'] }],
+add('GCCM-759/UIF/TC-029', 'AUTO_LIEN', [...FULL_PAYMENTS('claimant', 'open'), { step2: {} }, { answer: ['Payment for a total loss?', 'Yes'] }],
   [{ text: { re: /SELECT NO IF ADVERSE CARRIER IS HANDLING SALVAGE/i, present: true } }],
-  'Checked after answering "Payment for a total loss?" = Yes (the label is not rendered before the question is answered).');
+  'Checked after the payment details are filled and "Payment for a total loss?" = Yes is answered (QA review 2026-10-26: the label is not rendered before the Transaction Type is chosen, so answering right after the reserve line wrongly showed it absent).');
 add('GCCM-759/UIF/TC-030', 'AUTO_PA', FULL_PAYMENTS('claimant', 'new'), [V('Cost Type', { editable: true, includes: ['Claim Cost', 'Adjuster Expense', 'Legal Expense'] })]);
 add('GCCM-759/UIF/TC-031', 'AUTO_PA', FULL_PAYMENTS('claimant', 'new'), [V('Cost Category', { editable: true })]);
 // ClaimsPay defaults (read on Step 3 — where Cloud renders ClaimsPay Type / Method).
@@ -267,15 +267,17 @@ add('GCCM-763/VBR/TC-049', 'AUTO_PA', VAL(PAYDATE('TODAY'), null), [], 'Submits 
 // ── Lienholder payee (AUTO_LIEN claim: Lienholder/Mortgagee contacts + a vehicle loan, set up by claimCheck) ──────
 // Single-payee cases only; joint (insured/claimant + lienholder) cases need "Add Joint Payees" (not automated yet).
 const LIEN_NOTE = 'Payee = an Address Book company with the claim role Lienholder/Mortgagee (ACNB BANK); the vehicle incident has "Is there a loan on the Vehicle?" = Yes with that lienholder.';
+// "Payment for a total loss?" = Yes adds two required questions on the payment step (QA review 2026-10-26).
+const TL_FOLLOWUPS = (totalLoss) => (/^yes$/i.test(totalLoss) ? [{ answer: ['Is the owner keeping this Vehicle?', 'No'] }, { answer: ['Is this vehicle owned by the Insured?', 'Yes'] }, { answer: ['Does this vehicle display on the CLAIM CENTER policy page?', 'Yes'] }] : []);
 const LIEN_FULL = (totalLoss) => [{ open: 'full' }, { payee: 'lienholder' }, { next: true }, { reserve: 'open' },
-  { answer: ['Payment for a total loss?', totalLoss] }, { step2: {} }, { next: true }, { expectStep: 3 }];
-const LIEN_QUICK = (totalLoss) => [QOPEN_LIEN, { payee: 'lienholder' }, { answer: ['Payment for a total loss?', totalLoss] }, { step2: {} }, { next: true }, { expectStep: 2 }];
+  { step2: {} }, { answer: ['Payment for a total loss?', totalLoss] }, ...TL_FOLLOWUPS(totalLoss), { next: true }, { expectStep: 3 }]; // answered AFTER the details: filling them re-renders the form
+const LIEN_QUICK = (totalLoss) => [QOPEN_LIEN, { payee: 'lienholder' }, { step2: {} }, { answer: ['Payment for a total loss?', totalLoss] }, ...TL_FOLLOWUPS(totalLoss), { next: true }, { expectStep: 2 }];
 const QOPEN_LIEN = { open: 'quick', needOpenReserve: true };
 const LIEN_TL = [V('ClaimsPay Type', { value: /^lienholder$/i }), H('ClaimsPay Method')];
 const LIEN_NTL = [V('ClaimsPay Type', { value: /other\s*\/\s*mailed check/i }), V('ClaimsPay Method', { value: /^mailed check$/i }),
   { text: { re: /Non Total Loss Lienholder payments requ/i, present: true } }];
 // GCCM-799 (Full Check)
-add('GCCM-799/CPD-Lienholder/TC-068', 'AUTO_LIEN', LIEN_FULL('Yes'), LIEN_TL, LIEN_NOTE + ' Observed 2026-10-26: still Other/Mailed Check with an e-mail and phone set on ACNB BANK in ContactManager, so the cause is not the payee e-mail/phone alone (open question).');
+add('GCCM-799/CPD-Lienholder/TC-068', 'AUTO_LIEN', LIEN_FULL('Yes'), LIEN_TL, LIEN_NOTE + ' Retested 2026-10-26 with the loan lienholder as payee, total loss = Yes answered after the details plus the follow-up questions, and an e-mail set on the lienholder in ContactManager: ClaimCenter still defaults Other/Mailed Check (BA question).');
 add('GCCM-799/CPD-Lienholder/TC-070', 'AUTO_LIEN', LIEN_FULL('No'), LIEN_NTL, LIEN_NOTE);
 add('GCCM-799/UIF/TC-058', 'AUTO_LIEN', LIEN_FULL('No'), [V('Reason for Check', { required: true, editable: true })],
   LIEN_NOTE + ' Cloud shows the reason as "Reason Details" (read-only) — reported as observed.');

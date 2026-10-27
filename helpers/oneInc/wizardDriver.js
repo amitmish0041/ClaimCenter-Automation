@@ -735,7 +735,9 @@ function resolvePayee(page, who, names) {
   else if (who === 'other') pick = names.find((n) => norm(n) !== norm(parties.insured) && !parties.claimants.some((c) => norm(c) === norm(n)) && !/donegal/i.test(n));
   else if (who === 'first') pick = names[0];
   // A Lienholder/Mortgagee contact set up by claimCheck's lienholders prepare (AUTO_LIEN): ACNB BANK or a configured one.
-  else if (/^lienholder(2)?$/.test(who)) pick = names.filter((n) => ['ACNB BANK', ...lienholders().map((l) => l.name)].some((l) => norm(l) === norm(n)))[who === 'lienholder2' ? 1 : 0];
+  // Order matters (QA review 2026-10-26): the vehicle/property loan is recorded against lienholders()[0] (addIncidentLoan), and the
+  // lienholder defaults (CPD.016/017) only apply to the lienholder named on the loan, so that contact comes first.
+  else if (/^lienholder(2)?$/.test(who)) pick = [...lienholders().map((l) => l.name), 'ACNB BANK'].map((l) => names.find((n) => norm(n) === norm(l))).filter(Boolean)[who === 'lienholder2' ? 1 : 0];
   else pick = names.find((n) => norm(n) === norm(who));
   if (!pick) throw new Blocked(`no "${who}" payee among this claim's contacts (${names.join(', ')}; insured=${parties.insured || '?'}, claimants=${parties.claimants.join('/') || '?'})`);
   return pick;

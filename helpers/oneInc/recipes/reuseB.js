@@ -156,7 +156,7 @@ module.exports = (api) => {
   add('GCCM-759/CPD/TC-029', 'AUTO_PA', FULL_INSTRUCTIONS('vendor'), [CM(/vendor preferred/i), V('Payment Delivery', { value: /^(?!certified$)/i })], VENDOR_NOTE);
   // CPD.015 — Insurance Auto Auctions (Tax ID 95-3790111, an in-network IAA ID)
   const IAA = (tl, quick) => [quick ? QOPEN_LIEN : { open: 'full' }, X('selectVendorByTaxId', 'INSURANCE AUTO AUCTIONS', '95-3790111'),
-    ...(quick ? [] : [{ next: true }, { reserve: 'open' }]), { answer: ['Payment for a total loss?', tl] }, { step2: {} }, { next: true }, { expectStep: quick ? 2 : 3 }];
+    ...(quick ? [] : [{ next: true }, { reserve: 'open' }]), { step2: {} }, { answer: ['Payment for a total loss?', tl] }, ...(/^yes$/i.test(tl) ? [{ answer: ['Is the owner keeping this Vehicle?', 'No'] }, { answer: ['Is this vehicle owned by the Insured?', 'Yes'] }, { answer: ['Does this vehicle display on the CLAIM CENTER policy page?', 'Yes'] }] : []), { next: true }, { expectStep: quick ? 2 : 3 }];
   const IAA_NOTE = 'Payee = Insurance Auto Auctions Inc. from the TEST Address Book by Tax ID 95-3790111.';
   add('GCCM-759/CPD/TC-030', 'AUTO_PA', IAA('Yes'), [CT(/^vendor$/i), CM(/vendor preferred/i)], IAA_NOTE);
   add('GCCM-759/CPD/TC-031', 'AUTO_PA', IAA('No'), [CT(/^vendor$/i), CM(/vendor preferred/i)], IAA_NOTE + ' Standard vendor default (CPD.013) expected.');
