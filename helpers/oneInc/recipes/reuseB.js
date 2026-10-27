@@ -194,8 +194,8 @@ module.exports = (api) => {
   const JSTEP1 = (primary, joint) => [{ open: 'full' }, ...PRIMARY(primary), { joint }];
   add('GCCM-759/UIF/TC-004', 'AUTO_LIEN', JSTEP1(INS, [LIEN]), [{ header: { name: 'Type', present: true } }], JOINT_NOTE + ' The joint-payee grid Type column is checked (its per-row dropdown is not addressable by label).');
   add('GCCM-759/UIF/TC-008', 'AUTO_LIEN', JSTEP1(INS, [LIEN]), [{ header: { name: 'Type', present: true } }, { header: { name: 'ClaimsPay Payee Type', present: false } }], JOINT_NOTE);
-  add('GCCM-759/UIF/TC-005', 'AUTO_PA', [{ open: 'full' }], [H('Type')],
-    'Checked with no payee selected (title: "when nothing is selected"). Its step text ("add a single payee → Type not displayed") conflicts with TC-006, where Type is visible for a single payee — confirm with the BA.');
+  // Updated 759 sheet (QA review 2026-10-26): with nothing selected in the Name, Type displays <none>.
+  add('GCCM-759/UIF/TC-005', 'AUTO_PA', [{ open: 'full' }], [V('Type', { value: /^<none>$/i })], 'Checked with no payee selected: Type is shown with <none> (updated sheet).');
   add('GCCM-799/CPD-Lienholder/TC-075', 'AUTO_LIEN', [{ open: 'full' }, ...PRIMARY(CLM), X('addJoint', [PERSON2, LIEN]), { next: true }, { reserve: 'open' },
     { answer: ['Payment for a total loss?', 'No'] }, { step2: {} }, { next: true }, { expectStep: 3 }], MAILED, JOINT_NOTE + ' ' + PJ_NOTE);
   add('GCCM-799/UIF/TC-064', 'PROP_MORT', MORT_FULL(INS, [MORT]), [V('Request Type', { required: true, editable: true, includes: ['Loss Payment', 'Recoverable Depreciation', 'Supplemental Payment'] })], MORT_NOTE);

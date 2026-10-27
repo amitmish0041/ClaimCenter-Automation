@@ -66,8 +66,9 @@ add('GCCM-759/UIF/TC-006', 'AUTO_PA', FULL_PAYEES('claimant'), [V('Type', { requ
 add('GCCM-759/UIF/TC-007', 'AUTO_PA', FULL_INSTRUCTIONS('claimant'), [{ text: { re: /Tax Reporting/i, present: false } }]);
 add('GCCM-759/UIF/TC-009', 'AUTO_PA', FULL_PAYEES('claimant'), [{ button: { name: 'Edit', present: true } }, V('Pay To The Order Of', { readonly: true }),
   { click: 'Edit' }, V('Pay To The Order Of', { editable: true })]);
-add('GCCM-759/UIF/TC-010', 'AUTO_PA', FULL_INSTRUCTIONS('claimant'), [V('Payment Delivery', { editable: true, includes: PAY_DELIVERY, excludes: NOT_IN_PAY_DELIVERY })],
-  'Payment Delivery renders on Step 3 (Instructions) in Cloud, not on the payee screen named in the test case.');
+// Updated 759 sheet (QA review 2026-10-26): the options are Standard, Certified Mail, Expedite Mail and Print Now (Print Now is no longer excluded).
+add('GCCM-759/UIF/TC-010', 'AUTO_PA', FULL_INSTRUCTIONS('claimant'), [V('Payment Delivery', { editable: true, includes: ['Standard', 'Certified', 'Expedite', 'Print Now'], excludes: ['Hold', 'no_check_needed'] })],
+  'Payment Delivery renders on Step 3 (Instructions) in Cloud, not on the payee screen named in the test case. Updated sheet lists Standard, Certified Mail, Expedite Mail, Print Now; Cloud also offers "Send" (its default), which the sheet does not list.');
 add('GCCM-759/UIF/TC-012', 'AUTO_PA', FULL_PAYEES('claimant'), [V('Mailing Address', { editable: true }), { text: { re: /Do you want to edit the Mailing Address\?/i, present: true } }]);
 add('GCCM-759/UIF/TC-013', 'AUTO_PA', [...FULL_PAYEES('claimant'), { next: true }], [V('Reserve Line', { required: true, editable: true }),
   { step2: { transactionType: 'Partial Payment' }, skipReserve: true }, { next: true }, { message: { re: /Reserve Line/i, present: true } }]);
