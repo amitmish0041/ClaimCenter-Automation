@@ -236,7 +236,8 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
     const r = payloadXpathService.resolveXpath(rawPayloadRoot, row.xpath);
     return r.unsupported || r.value === undefined || r.value === '' ? null : one(r.value, 'payload');
   };
-  const isPlaceholder = (b) => /<<|editable|^-+$|^\s*$/i.test(String(b || '').replace(/[[\]]/g, '')); // incl. "--Editable--" (DIG179)
+  // incl. "--Editable--" (DIG179) and any "--instruction--" ("--Please update Yes or No--" DIG74, "--case assessment--" DIG152)
+  const isPlaceholder = (b) => /<<|editable|^-+$|^\s*$|^\s*-{2,}.*-{2,}\s*$/i.test(String(b || '').replace(/[[\]]/g, ''));
   // Every text value in the payload, read once — for payloadValueMatching below.
   let payloadStrings = null;
   const allPayloadStrings = () => {
@@ -264,6 +265,10 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
   const sameValue = (a, b) => {
     const x = normForKnownValueMatch(String(a || '').replace(/[[\]]/g, '')); const y = normForKnownValueMatch(b);
     if (!x || !y) return false;
+    // "MI" = "Michigan" (DIG201/DIG203 state fields, 2026-10-27); "Wilkinson, Kelly" = "Kelly Wilkinson" (DIG203/DIG210).
+    if (stateName(x) && stateName(x) === stateName(y)) return true;
+    const swap = (s) => { const m = /^\s*([^,]+),\s*([^,]+)\s*$/.exec(String(s || '').replace(/[[\]]/g, '')); return m ? normForKnownValueMatch(`${m[2]} ${m[1]}`) : null; };
+    if ((swap(a) && swap(a) === y) || (swap(b) && swap(b) === x)) return true;
     if (x === y || (Math.min(x.length, y.length) >= 3 && (x.includes(y) || y.includes(x)))) return true;
     const da = new Date(String(a).replace(/[[\]]/g, '')); const db = new Date(b);
     if (!Number.isNaN(da.getTime()) && !Number.isNaN(db.getTime()) && /\d{4}/.test(a) && /\d{4}/.test(b)) return da.toDateString() === db.toDateString();
@@ -1197,6 +1202,10 @@ function pickFieldLabel(n, field, outcome, dictRow) {
     || `(field #${n}: "${(field.stripped || field.text || '').slice(0, 60) || '(empty)'}")`;
 }
 
+const US_STATES = { al: 'alabama', ak: 'alaska', az: 'arizona', ar: 'arkansas', ca: 'california', co: 'colorado', ct: 'connecticut', de: 'delaware', dc: 'district of columbia', fl: 'florida', ga: 'georgia', hi: 'hawaii', id: 'idaho', il: 'illinois', in: 'indiana', ia: 'iowa', ks: 'kansas', ky: 'kentucky', la: 'louisiana', me: 'maine', md: 'maryland', ma: 'massachusetts', mi: 'michigan', mn: 'minnesota', ms: 'mississippi', mo: 'missouri', mt: 'montana', ne: 'nebraska', nv: 'nevada', nh: 'new hampshire', nj: 'new jersey', nm: 'new mexico', ny: 'new york', nc: 'north carolina', nd: 'north dakota', oh: 'ohio', ok: 'oklahoma', or: 'oregon', pa: 'pennsylvania', ri: 'rhode island', sc: 'south carolina', sd: 'south dakota', tn: 'tennessee', tx: 'texas', ut: 'utah', vt: 'vermont', va: 'virginia', wa: 'washington', wv: 'west virginia', wi: 'wisconsin', wy: 'wyoming' };
+// A normalized state code or name → the state's full name, else null.
+function stateName(norm) { return US_STATES[norm] || (Object.values(US_STATES).includes(norm) ? norm : null); }
+
 function normForKnownValueMatch(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
 
 const EDIT_DATE_RE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
@@ -1629,6 +1638,10 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     // itself insured/claimant (fieldConcept) never keeps a recipient-block row; the known-value pass then matches it.
     const concept = fieldConcept({ technicalName: outcome.technicalName, labelContext: field.labelContext });
     if (match && match.row && concept && knownValueConcept(match.row.attributeName) !== concept && /^(to|copy|from)\b/i.test(match.row.attributeName)) match = null;
+    // A technical name that ends in an address part ("InsuredState") never keeps a row without that part ("Insured
+    // Name" — DIG203, 2026-10-27).
+    const addrPart = /(state|city|zip|address)$/i.exec(String(outcome.technicalName || ''));
+    if (match && match.row && addrPart && !new RegExp(addrPart[1], 'i').test(match.row.attributeName)) match = null;
     const dictRow = match && match.row;
     interactiveChecks.push({
       id: `INT${n}`,
@@ -1707,8 +1720,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // never reordered) rather than by a live DOM idx, which is exactly what can no longer be trusted round to
   // round.
   const hopelessIdx = new Set();
-  const normalizeLabelForRematch = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
-  // The authoritative "what still needs work" list, driven entirely by OUR OWN interactiveChecks state (never
+  const normalizeLabelForRematch = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();  // The authoritative "what still needs work" list, driven entirely by OUR OWN interactiveChecks state (never
   // by a live DOM read) — same reasoning as the user-confirmed fix above it: trust what we already recorded,
   // don't re-derive it from a page that may have reflowed.
   function pendingRetryTargets() {
@@ -1732,8 +1744,12 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
         // No labelContext to match on (or no match found) — fall back to the original position, but ONLY if
         // it's STILL editable there. A locked field at the old position is exactly the drift symptom, not a
         // legitimate same-field match.
+        // ...and only while it still shows this field's own original value: DIG27's loss-location retry (2026-10-27)
+        // took the old position, now the year field, and typed over its edit.
         const positional = freshFields.find((f) => f.idx === t.i && !claimed.has(f.idx));
-        if (positional && positional.editable) field = positional;
+        const sameValueThere = positional && normalizeLabelForRematch(String(positional.stripped || positional.text || '').replace(/[[\]]/g, ''))
+          === normalizeLabelForRematch(String(t.c.before || '').replace(/[[\]]/g, ''));
+        if (positional && positional.editable && sameValueThere) field = positional;
       }
       if (field) { claimed.add(field.idx); relocated.push({ field, target: t }); } else { stillMissing.push(t); }
     }
@@ -1747,7 +1763,9 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       const looksNumeric = /ssn|social|zip|postal|phone|fax|amount|number|count|digits|year/i.test(`${prior.technicalName || ''} ${prior.label || ''} ${prior.dictionaryField || ''}`)
         || /^\[?\s*[\d\s().-]*\]?$/.test(String(prior.before || ''));
       const rejectedText = /never appeared|vanish/i.test(prior.reason || '');
-      const retryValue = rejectedText && looksNumeric ? String(1000 + n2).slice(-4) : buildEditValue(field, n2, template.digNumber, editableValues);
+      // A time field ("timeBeganWork", DIG201) rejects text too — it gets a time.
+      const looksTime = /time(?!s)/i.test(`${prior.technicalName || ''} ${prior.dictionaryField || ''}`);
+      const retryValue = rejectedText && looksTime ? buildTimeValue(null, n2) : rejectedText && looksNumeric ? String(1000 + n2).slice(-4) : buildEditValue(field, n2, template.digNumber, editableValues);
       const outcome = await interactiveEditService.inspectAndMaybeEdit(frame, page, field, { newValue: retryValue, fallbackValue: `QA-EDIT-${n2}`, log });
       const existing = target.c; // same object reference as interactiveChecks[target.i]
       if (outcome.attempted && outcome.changed) {
@@ -2454,6 +2472,8 @@ function annotateInteractiveEditFailures(validations, interactiveChecks) {
     const desc = (v.description || '').toLowerCase();
     const expectedNorm = normForKnownValueMatch(v.expected);
     const hits = edited.filter((c) => {
+      // A ticked checkbox ("[ ]" → "X") holds no value — never this row's field (DIG201/203/210 "Claimant Address", 2026-10-27).
+      if (String(c.committedMarker || '') === 'X' && /^\[?\s*\]?$/.test(String(c.before || '').trim())) return false;
       if (c.label && desc.includes(c.label.toLowerCase())) return true;
       if (c.dictionaryField && desc.includes(`"${c.dictionaryField.toLowerCase()}"`)) return true;
       const beforeNorm = normForKnownValueMatch(c.before);
@@ -2680,7 +2700,7 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
       wasEditedByTest: !matchedCheck && editedByTest,
       // What the edited field(s) showed BEFORE the test's edit — checked against the payload value when the edit consumed
       // the only printed occurrence (pdfValidationService.editedBeforeResult).
-      editedBefore: !matchedCheck && editedByTest ? (interactiveChecks || []).filter((c) => c.observedChanged === true && (c.dictionaryField === row.attributeName || [result.value, ...(result.alsoAccept || [])].some((x) => String(x).length >= 4 && sameText(c.before, x)))).map((c) => c.before).filter(Boolean) : undefined,
+      editedBefore: !matchedCheck && editedByTest ? (interactiveChecks || []).filter((c) => c.observedChanged === true && !(String(c.committedMarker || '') === 'X' && /^\[?\s*\]?$/.test(String(c.before || '').trim())) && (c.dictionaryField === row.attributeName || [result.value, ...(result.alsoAccept || [])].some((x) => String(x).length >= 4 && sameText(c.before, x)))).map((c) => c.before).filter(Boolean) : undefined,
       docOrder: Number.MAX_SAFE_INTEGER,
     });
   }

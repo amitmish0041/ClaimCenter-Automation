@@ -397,6 +397,12 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?$/;
 function formatIfIsoDate(value) {
   if (typeof value === 'string' && ISO_DATE_RE.test(value)) {
     const d = toDate(value);
+    // A time of day is stored on 1970-01-01 ("Time Began Work", "Time of Loss" — DIG201 expected "January 01, 1970",
+    // 2026-10-27): it prints as a time, not a date.
+    if (d && /^1970-01-01T/.test(value)) {
+      const h = d.getUTCHours();
+      return `${h % 12 || 12}:${String(d.getUTCMinutes()).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+    }
     if (d) return formatLongDate(d);
   }
   return value;

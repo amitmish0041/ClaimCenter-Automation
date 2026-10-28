@@ -211,7 +211,9 @@ function makeSalutationRequirement(docOrder) {
 // "This field will be selectable in SmartCOMM: ..." (DIG34) is the same kind of note — the user picks the
 // wording in the editor, so there's no single expected value either.
 // "Allow (the) user to dynamically select Yes/No…" too (DIG236, 2026-10-17 — was BLOCKED as an unmapped value).
-const BEHAVIORAL_COMMENTARY_RE = /\b(?:is|are)\s+editable\b|selected manually|free form editable|\bselectable in smartcomm\b|\ballow\s+(?:the\s+)?user\s+to\b|\buser\s+can\s+(?:dynamically|select|choose|update|edit)\b/i;
+// Radio buttons, checkboxes, "Yes/No selection in SmartCOMM" and a bare "Editable Field" too (DIG237B, DIG157, DIG112,
+// DIG168, DIG240 — offline scan of the untested Test_Execution stories, 2026-10-27).
+const BEHAVIORAL_COMMENTARY_RE = /\b(?:is|are)\s+editable\b|selected manually|free form editable|\bselectable in smartcomm\b|\ballow\s+(?:the\s+)?user\s+to\b|\buser\s+can\s+(?:dynamically|select|choose|update|edit)\b|\bradio\s+button\b|\bcheck\s*box(?:es)?\b|\byes\s*\/\s*no\s+selection\b|\bselection\s+in\s+smartcomm\b|^\s*editable\s+field\s*$/i;
 
 // "Dynamic language to display either “Bodily Injury” or “Property Damage” in SmartCOMM." (DIG55) — no single
 // expected value, but exactly one of the named phrases must print; checked as that instead of an unverifiable
