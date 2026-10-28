@@ -682,10 +682,16 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue
   const placement = await field.locator.evaluate((own, needle) => {
     const clean = (t) => (t || '').replace(/\s+/g, ' ').trim();
     // "QA-EDIT-1" must not match a span showing "QA-EDIT-10".
-    const has = (t) => (/^QA-EDIT-\d+$/.test(needle) ? new RegExp(`${needle}(?!\\d)`).test(t || '') : (t || '').includes(needle));
+    // Ignores case and spaces: DIG27's Loss Location (2026-10-28) shows the typed "…44446-4145-edited" wrapped as
+    // "…44446- 4145-edited", so the exact-text search called a successful edit "never appeared".
+    const squash = (t) => (t || '').replace(/\s+/g, '').toLowerCase();
+    const has = (t) => (/^QA-EDIT-\d+$/.test(needle) ? new RegExp(`${needle}(?!\\d)`, 'i').test(t || '') : squash(t).includes(squash(needle)));
     if (has(own.textContent)) return { after: clean(own.textContent) };
     const hit = needle === 'X' ? null : Array.from(own.ownerDocument.querySelectorAll('span.th-data-value-editable')).find((s) => has(s.textContent));
-    if (!hit) return { after: null };
+    // Not in any editable span, but on the page: the field re-rendered its committed value as plain text (DIG27 Loss
+    // Location, 2026-10-28 — the completed PDF has the edit). No other field took it, so it's this field's; the PDF
+    // check (verifyInteractiveEditsInPdf) still confirms it survived.
+    if (!hit) return needle !== 'X' && squash(own.ownerDocument.body.innerText).includes(squash(needle)) ? { after: needle } : { after: null };
     const block = (el) => el.closest('p, li, td, th') || el.parentElement;
     return block(hit) === block(own) ? { after: clean(hit.textContent) } : { after: null, landedElsewhere: clean(hit.textContent) };
   }, plain).catch(() => ({ after: null }));
@@ -709,7 +715,7 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue
   // lets the caller stop re-attempting it instead of burning 3 more retry passes for nothing.
   let vanished = false;
   if (after == null && !placement.landedElsewhere) {
-    const anywhereCount = await frame.evaluate((needle) => document.body.innerText.split(needle).length - 1, plain).catch(() => -1);
+    const anywhereCount = await frame.evaluate((needle) => document.body.innerText.replace(/\s+/g, '').toLowerCase().split(needle.replace(/\s+/g, '').toLowerCase()).length - 1, plain).catch(() => -1);
     vanished = anywhereCount === 0;
   }
   return {
