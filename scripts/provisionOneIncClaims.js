@@ -188,8 +188,7 @@ for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnolAs && !F
         const policyProblem = /claimant number|POLICY_DATA_ERROR|CLOUD_SEARCH_EMPTY|POLICY EXHAUSTED|CLOUD_FIND_POLICY_STUCK/i.test(e.message);
         if (/^ENV_DOWN/.test(e.message)) {
           envDown = true;
-          console.log('[Provision] STOPPING — ' + e.message.split('
-')[0]);
+          console.log('[Provision] STOPPING — ' + e.message.split('\n')[0]);
           break;
         }
         if (!claim && policyProblem) {
