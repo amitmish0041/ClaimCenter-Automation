@@ -1642,6 +1642,10 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     // Name" — DIG203, 2026-10-27).
     const addrPart = /(state|city|zip|address)$/i.exec(String(outcome.technicalName || ''));
     if (match && match.row && addrPart && !new RegExp(addrPart[1], 'i').test(match.row.attributeName)) match = null;
+    // A "...State" row never keeps a field that shows something other than a state (DIG71 2026-10-28: "Insured:" showing
+    // "MARTHA ANTOLICK" paired with "Policy Base State" by the mapping doc's label, then failed on that row's editability).
+    const shown = String(outcome.before || '').replace(/[[\]]/g, '').trim().toLowerCase();
+    if (match && match.row && /state$/i.test(match.row.attributeName) && shown && !stateName(shown)) match = null;
     const dictRow = match && match.row;
     interactiveChecks.push({
       id: `INT${n}`,

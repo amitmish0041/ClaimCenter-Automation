@@ -483,6 +483,12 @@ function evaluateOne(req, haystack, context) {
       if (/^\s*[:;,]/.test(req.expectedValue) && (wordsInOrder(haystack, req.expectedValue, 8) || (layout && wordsInOrder(layout, req.expectedValue, 8)))) {
         return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Printed with a merge-field value inside it (the mapping doc splits this sentence around the field).' };
       }
+      // 5. A ticked inline checkbox between the words ("admission and X discharge reports," — DIG51 2026-10-28, the
+      //    test ticks every checkbox): the wording is intact once the lone "X" marks are ignored.
+      const noTicks = normHaystack.replace(/(^|\s)x(?=\s)/g, '$1').replace(/\s+/g, ' ');
+      if (!/(^|\s)x(\s|$)/i.test(req.expectedValue) && noTicks.includes(normalizeWs(req.expectedValue).toLowerCase())) {
+        return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Printed intact; a ticked checkbox ("X") sits inside the line.' };
+      }
       const near = findNearWording(haystack, req.expectedValue);
       if (near) {
         return {
