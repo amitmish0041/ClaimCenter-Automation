@@ -42,8 +42,10 @@ module.exports = {
 Object.defineProperty(module.exports.C_SURC_PA, 'data', data((D) => [D.surchargingIncomplete()]));
 // Negatives (CA / LC01-only / LC50 outside MI): no Surcharging screen at all on these claims (CONFIRMED 2026-10-21,
 // --verify) — the claim KIND is the precondition, not the Surcharging state.
+// Michigan names the medical coverage "PIP Medical Benefits" (no "Medical Expense" on MI vehicles — CONFIRMED 2026-10-28,
+// PA-MI-70-26-0748656 coverage menu).
 Object.defineProperty(module.exports.C_SURC_MI, 'data', data((D) => [
-  D.vehicleExposure({ coverage: 'Medical Expense', cause: 'Medical Benefits', match: /Medical/i }),
+  D.vehicleExposure({ coverage: 'PIP Medical Benefits', cause: 'Medical Benefits', match: /Medical/i }),
   D.injuryIncident({ exposure: /Medical/i }),
   D.surchargingIncomplete(),
 ]));
