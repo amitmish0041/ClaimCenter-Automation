@@ -21,5 +21,5 @@ module.exports = {
 // Payee-role contacts (CPD.030/031) and the claim-only person payee for VBR.036 (not linked to the Address Book).
 Object.defineProperty(module.exports.E_PA, 'data', data((D) => [
   D.roleContact('stateAgency'), D.roleContact('adverseCarrier'), D.roleContact('attorney'),
-  D.contact('PHILIP ADAMS', 'claim-only person contact (Parties Involved › New Contact › Person, NOT from the Address Book), role Covered Party'),
+  D.personContact({ first: 'PHILIP', last: 'ADAMS', role: 'Other' }), // 'Covered Party' is a POLICY role — not offered for a new contact (CONFIRMED 2026-10-27)
 ]));

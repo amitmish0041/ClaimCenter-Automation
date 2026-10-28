@@ -155,13 +155,22 @@ async function addMedExposure(page, { coverage = 'Medical Benefits', leaf = null
     throw new W.Blocked('the Injury Incident "New Incident..." popup did not open');
   }
   await fillInjuryPopup(page, ins);
-  for (let r = 0; r < 4; r++) {
+  for (let r = 0; r < 8; r++) {
     await W.fillRequiredEmpties(page);
     await W.answerUnansweredNo(page);
     await W.clickButton(page, 'Update');
     await W.settle(page, 2500);
     if (!await page.getByRole('button', { name: 'Update', exact: true }).first().isVisible().catch(() => false)) {
       return `added a "${coverage}${leaf ? ' › ' + leaf : ''}" exposure, Cause of Loss ${cause}, claimant ${ins || '(first)'}`;
+    }
+    // "This claimant number already exists on another claim" — claimant numbers are unique across a policy's claims
+    // (CONFIRMED 2026-10-27 on four new C_SURC_LC50 claims). Try another free number from the screen's own list.
+    const s = await readScreen(page);
+    if (/claimant number already exists/i.test([...s.messages, s.south].join(' '))) {
+      const f = findField(s, 'Claimant Number');
+      const opts = ((f && f.options) || []).filter((o) => /^\d+$/.test(o) && o !== f.value);
+      if (!opts.length) break;
+      await selectIn(page, 'Claimant Number', new RegExp(`^${opts[opts.length - 1 - (r % opts.length)]}$`)).catch(() => {});
     }
   }
   const s = await readScreen(page);

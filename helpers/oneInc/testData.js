@@ -93,7 +93,13 @@ const D = {
       const { k, i } = await exposureIndex(page, exposure);
       if (k < 0) throw new W.Blocked(`no exposure matching /${src(exposure)}/ to set Cause of Loss on`);
       await A().openExposure(page, i);
-      await A().editAndSave(page, `Cause of Loss → ${cause}`, async () => { await A().selectByLabel(page, 'Cause of Loss', new RegExp(cause, 'i')); });
+      // A new cause makes "Cause of Loss Description" required on save (CONFIRMED 2026-10-27, LC01 Fire) — pick its first
+      // option, or let fillRequired fill whatever else the screen now insists on.
+      await A().editAndSave(page, `Cause of Loss → ${cause}`, async () => {
+        await A().selectByLabel(page, 'Cause of Loss', new RegExp(cause, 'i'));
+        await page.waitForTimeout(1500);
+        await A().selectByLabel(page, 'Cause of Loss Description', /^(?!<none>).+/).catch(() => A().fillRequired(page));
+      });
       return `exposure ${i + 1} Cause of Loss set to ${cause}`;
     },
   }),
@@ -256,6 +262,15 @@ const D = {
       return other.length ? `exposure owner(s): ${[...new Set(other)].join(', ')}` : '';
     },
     build: (page) => A().assignExposuresTo(page, who, group),
+  }),
+
+  // A claim-only PERSON contact (Parties Involved › New Contact › Person, not linked to the Address Book) with a role —
+  // built by wizardDriver.addClaimPersonContact (PHILIP ADAMS, role Other, on E_PA for VBR.036).
+  personContact: ({ first, last, role = 'Covered Party' }) => ({
+    id: `contact:${first} ${last}`,
+    label: `Contact "${first} ${last}" on the claim (claim-only person, role ${role})`,
+    check: async (page) => ((await contactsList(page)).some((t) => t.toUpperCase().includes(`${first} ${last}`.toUpperCase())) ? '' : `${first} ${last} is not on Parties Involved`),
+    build: async (page) => ((await W.addClaimPersonContact(page, { first, last, role })) ? `${first} ${last} added (${role}, claim-only person)` : 'already on the claim'),
   }),
 
   // A contact (person or company) on Parties Involved by name. build: null — claim-only person contacts are made by

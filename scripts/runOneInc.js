@@ -265,7 +265,9 @@ function annotate(r, story, readiness) {
         // User", who has no examiner number — every payment on it is then refused ("Exposure owner Super User must
         // have a valid examiner number", CONFIRMED 2026-10-27 on PA-PA-01-26-0748579).
         const dotenvUser = (() => { try { return require('dotenv').parse(require('fs').readFileSync(path.join(__dirname, '..', '.env'))); } catch (_) { return {}; } })();
-        const provEnv = { ...process.env, ...(dotenvUser.CC_USER && dotenvUser.CC_PASS ? { CC_USER: dotenvUser.CC_USER, CC_PASS: dotenvUser.CC_PASS } : {}) };
+        // Assignee: without CC_ASSIGNEE_NAME the assign step can fall to the first name in the list ("Super User", no
+        // examiner number — payments then refused, CONFIRMED 2026-10-27). Benjamin Smith (Recovery Claims Team 2) has one.
+        const provEnv = { CC_ASSIGNEE_NAME: 'Benjamin Smith', ...process.env, ...(dotenvUser.CC_USER && dotenvUser.CC_PASS ? { CC_USER: dotenvUser.CC_USER, CC_PASS: dotenvUser.CC_PASS } : {}) };
         const child = spawn(process.execPath, [path.join(__dirname, 'provisionOneIncClaims.js'), '--profiles', profile, '--count', String(want),
           ...(arg('headless', false) ? ['--headless'] : [])], { cwd: path.join(__dirname, '..'), env: provEnv });
         let buf = '';

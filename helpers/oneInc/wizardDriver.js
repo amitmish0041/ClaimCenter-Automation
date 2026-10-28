@@ -188,18 +188,27 @@ async function addClaimContactWithRole(page, company, role = 'Lienholder/Mortgag
   }
   await row.getByRole('button', { name: 'Select', exact: true }).first().click();
   await settle(page, 4000);
+  return setContactRoleAndUpdate(page, company.name, role);
+}
+
+// New-contact screen (Address Book pick or New Contact form): give the contact `role` on this claim and Update.
+async function setContactRoleAndUpdate(page, name, role) {
   // New contact screen: Roles grid. A pre-filled role row is re-pointed; otherwise Add one.
   // The Roles grid has two selects per row (Related To, Role) — take the one that offers `role`.
-  const markRoleSelect = () => page.evaluate((role) => {
-    const sel = [...document.querySelectorAll('select')].filter((x) => x.offsetParent && !x.disabled)
-      .find((x) => [...x.options].some((o) => o.text.trim().toLowerCase() === role.toLowerCase()));
+  const markRoleSelect = (anySelect) => page.evaluate(([role, anySelect]) => {
+    // The grid's own Role select first (…ClaimContactRolesLV-<n>-Role): a generic role like "Other" is ALSO an Address
+    // Type option, and the page-wide match picked that one (CONFIRMED 2026-10-27, "The contact must have at least one role").
+    const offers = (x) => [...x.options].some((o) => o.text.trim().toLowerCase() === role.toLowerCase());
+    const live = [...document.querySelectorAll('select')].filter((x) => x.offsetParent && !x.disabled);
+    const sel = live.find((x) => /RolesLV-\d+-Role$/.test(x.name || x.id) && offers(x)) || (anySelect ? live.find(offers) : null);
     if (sel) sel.setAttribute('data-oneinc-role', '1');
     return !!sel;
-  }, role);
-  if (!await markRoleSelect()) {
+  }, [role, anySelect]);
+  // Page-wide fallback only AFTER a role row was added (older screens without the RolesLV ids, e.g. Address Book pick).
+  if (!await markRoleSelect(false)) {
     await page.locator('[id*="Role"][id$="_tb-Add"]').first().click().catch(() => clickButton(page, 'Add'));
     await settle(page, 2000);
-    await markRoleSelect();
+    await markRoleSelect(true);
   }
   const roleSel = page.locator('select[data-oneinc-role="1"]').first();
   if (!await roleSel.isVisible().catch(() => false)) {
@@ -212,7 +221,8 @@ async function addClaimContactWithRole(page, company, role = 'Lienholder/Mortgag
   await roleSel.selectOption(want.v);
   await settle(page, 1500);
   // "Related To" defaults to the claim; set it if blank.
-  const rel = page.locator('select[name*="RelatedTo"]:visible').first();
+  // On the New Contact form the column is …RolesLV-<n>-Owner (first real option = the claim itself).
+  const rel = page.locator('select[name*="RelatedTo"]:visible, select[name*="RolesLV"][name$="-Owner"]:visible').first();
   if (await rel.isVisible().catch(() => false) && !(await rel.inputValue().catch(() => ''))) {
     const ro = await rel.locator('option').evaluateAll((os) => os.map((o) => o.value).filter(Boolean));
     if (ro[0]) await rel.selectOption(ro[0]);
@@ -223,9 +233,34 @@ async function addClaimContactWithRole(page, company, role = 'Lienholder/Mortgag
     const why = (await readScreen(page)).messages.join('; ');
     await page.getByRole('button', { name: 'Cancel', exact: true }).first().click().catch(() => {});
     await settle(page, 1500);
-    throw new Error(`adding "${company.name}" as ${role} was refused — ${why.slice(0, 300)}`);
+    throw new Error(`adding "${name}" as ${role} was refused — ${why.slice(0, 300)}`);
   }
   return true;
+}
+
+// Parties Involved › New Contact › Person: a claim-only person (NOT linked to the Address Book) with a Pennsylvania
+// address and `role` on this claim (VBR.036 payee "PHILIP ADAMS" on E_PA, CONFIRMED form 2026-10-27). No-op when a
+// contact of that name is already on the claim.
+async function addClaimPersonContact(page, { first, last, role = 'Covered Party', address = {} }) {
+  const name = `${first} ${last}`;
+  await navigate(page, 'parties');
+  await page.locator('tr[id*="LV-0-"]:visible').first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+  const listed = await page.evaluate(() => [...document.querySelectorAll('[id*="PeopleInvolvedDetailedLV-"][id$="-Name"]')].map((e) => (e.innerText || '').trim().toUpperCase()));
+  if (listed.includes(name.toUpperCase())) return false;
+  await page.locator('[id$="ClaimContacts_CreateNewContactButton"]').first().click();
+  await page.waitForTimeout(1500);
+  await page.getByRole('menuitem', { name: /^Person$/ }).first().click();
+  await settle(page, 4000);
+  const a = { line1: '100 Market St', city: 'Harrisburg', state: 'Pennsylvania', zip: '17101', type: 'Home', ...address };
+  await fill(page, 'First name', first);
+  await fill(page, 'Last name', last);
+  await select(page, 'Country', 'United States').catch(() => {});
+  await fill(page, 'Address 1', a.line1);
+  await fill(page, 'City', a.city);
+  await select(page, 'State', a.state);
+  await fill(page, 'ZIP Code', a.zip);
+  await select(page, 'Address Type', a.type).catch(() => {});
+  return setContactRoleAndUpdate(page, name, role);
 }
 
 // Incident #index: the loan/mortgage question = Yes with a loan row naming `lienholderName` (same ExtLienholderInformationLV
@@ -1001,7 +1036,7 @@ async function currentStep(page) {
 }
 
 module.exports = {
-  Blocked, settle, inWizard, openClaim, newPaymentErrorText, repairSurcharging, assignClaimAndExposures, abilityToPayErrors, abilityToPay, repairVehicleVins, lienholders, addClaimContactWithRole, addVehicleLoan, addIncidentLoan, addDigitalPaymentAccount, repairClaimantAddress, getParties, optionsOf, select, fill, answer, answerUnansweredNo, clickButton,
+  Blocked, settle, inWizard, openClaim, newPaymentErrorText, repairSurcharging, assignClaimAndExposures, abilityToPayErrors, abilityToPay, repairVehicleVins, lienholders, addClaimContactWithRole, addClaimPersonContact, addVehicleLoan, addIncidentLoan, addDigitalPaymentAccount, repairClaimantAddress, getParties, optionsOf, select, fill, answer, answerUnansweredNo, clickButton,
   visibleMenuItems, openActionsMenu, closeMenus, navigate, openFinancialsRowMenu,
   openPayment, cancelWizard, selectPayee, addJointPayees, selectVendorPayee, openPayeeSearch, vendors, selectReserveLine, availableReserves, fillLineItem, completePaymentsStep, next, nextFillingServicePeriod, fillRequiredEmpties, serverError, currentStep,
   warningsOnly,
