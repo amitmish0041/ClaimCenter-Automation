@@ -168,6 +168,11 @@ for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnolAs && !F
         claimPicker.addToPool(profile, entry);
         summary.push({ profile, ...entry });
         if (chk.usable) made++;
+        // The policy lacks a coverage this profile needs — no claim on it can ever carry the data; skip it for this profile.
+        else if (/no vehicle on this policy carries/i.test(chk.problem || '')) {
+          claimPicker.markBadPolicy(profile, policyNumber, chk.problem, { onlyProfile: true });
+          console.log(`[Provision] ${profile} ${i}: policy ${policyNumber} lacks the coverage — skipped for ${profile} from now on`);
+        }
         // A pinned policy (profile.policies) is the only one allowed — keep it available for the next claim.
         if ((claimPicker.PROFILES[profile] || {}).policies) tried.splice(tried.indexOf(policyNumber), 1);
         console.log(`[Provision] ${profile} ${i}: ${claim} ${chk.usable ? 'USABLE' : 'NOT usable — ' + chk.problem}` +

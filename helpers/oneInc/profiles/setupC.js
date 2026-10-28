@@ -30,7 +30,7 @@ module.exports = {
     keepSurcharging: true, fnol: AUTO_FNOL('LC50', 'surcharge MI positive', { state: 'MI' }) },
   // VBR.037 negative: PA personal auto, LC50 (qualifies only for Michigan).
   C_SURC_LC50: { label: 'PA personal auto, LC50, Surcharging incomplete (setup C: VBR.037 non-Michigan negative)', lob: 'AUTO', state: 'PA', prefix: /^PA-PA-/, poolOnly: true,
-    keepSurcharging: true, fnol: AUTO_FNOL('LC50', 'surcharge LC50 PA negative') },
+    keepSurcharging: true, fnol: AUTO_FNOL('LC50', 'surcharge LC50 PA negative', { coverage: ['Medical Expense'] }) },
   // VBR.037 negative: PA personal auto, LC01 only.
   C_SURC_LC01: { label: 'PA personal auto, LC01, Surcharging incomplete (setup C: VBR.037 no qualifying cause)', lob: 'AUTO', state: 'PA', prefix: /^PA-PA-/, poolOnly: true,
     keepSurcharging: true, fnol: AUTO_FNOL('LC01', 'surcharge LC01 negative', { coverage: ['Comprehensive'] }) },

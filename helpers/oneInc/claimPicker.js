@@ -89,9 +89,11 @@ function addToPool(profile, entry) {
 }
 // A policy FNOL can't use (claimant numbers exhausted, not in this environment, …) — remembered on the share so no
 // later run tries it again.
-function markBadPolicy(profile, policy, reason) {
+// onlyProfile: the policy is fine in general but lacks what THIS profile needs (e.g. no Medical Expense coverage for
+// C_SURC_LC50) — skip it for that profile only.
+function markBadPolicy(profile, policy, reason, { onlyProfile = false } = {}) {
   const pool = readPool();
-  pool._badPolicies = (pool._badPolicies || []).filter((b) => b.policy !== policy).concat({ profile, policy, reason: String(reason).slice(0, 300), at: new Date().toISOString() });
+  pool._badPolicies = (pool._badPolicies || []).filter((b) => !(b.policy === policy && (!b.onlyProfile || b.profile === profile))).concat({ profile, policy, reason: String(reason).slice(0, 300), at: new Date().toISOString(), ...(onlyProfile ? { onlyProfile: true } : {}) });
   fs.mkdirSync(path.dirname(POOL_FILE), { recursive: true });
   fs.writeFileSync(POOL_FILE, JSON.stringify(pool, null, 2));
 }
@@ -110,7 +112,7 @@ function policyCandidates(profile, { exclude = [] } = {}) {
   const pool = readPool();
   // Never: policies tried in this call or marked bad. Policies the pool already filed a claim on come LAST, not never —
   // fresh-data runs (2026-10-27) need more new claims than there are untouched policies (21 for PA auto).
-  const used = new Set([...exclude, ...(pool._badPolicies || []).map((b) => b.policy)].filter(Boolean));
+  const used = new Set([...exclude, ...(pool._badPolicies || []).filter((b) => !b.onlyProfile || b.profile === profile).map((b) => b.policy)].filter(Boolean));
   const poolUse = {};
   for (const e of pool[profile] || []) if (e.policy) poolUse[e.policy] = (poolUse[e.policy] || 0) + 1;
   const seen = new Set();
@@ -121,6 +123,10 @@ function policyCandidates(profile, { exclude = [] } = {}) {
   // numbers are unique per policy), while a lightly used policy saved fine.
   const claimsPerPolicy = {};
   for (const r of allRecords()) claimsPerPolicy[r.policyNumber] = (claimsPerPolicy[r.policyNumber] || 0) + 1;
+  // Claimant numbers already taken on each policy (FNOL / exposure ledger) — fewer taken = fewer refused saves.
+  let takenNos = {};
+  try { takenNos = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'results', 'used-claimant-numbers.json'), 'utf8')); } catch (_) {}
+  const taken = (pn) => (takenNos[pn] || []).length;
   // Only policies whose existing claim is recent (loss date within the last year) — an older one's term has likely
   // ended and Find Policy won't attach it (CONFIRMED 2026-10-21 with a 2021 loss date).
   const yearAgo = new Date(today); yearAgo.setFullYear(yearAgo.getFullYear() - 1);
@@ -130,7 +136,7 @@ function policyCandidates(profile, { exclude = [] } = {}) {
     .filter((r) => r.lob === p.lob && r.state === p.state && p.prefix.test(r.claimNumber || '') && r.policyNumber && r.lossDate
       && (!p.policies || p.policies.includes(r.policyNumber))
       && (p.minAgeYears ? ageYears(r) >= p.minAgeYears : new Date(r.lossDate) >= yearAgo))
-    .sort((a, b) => ((poolUse[a.policyNumber] || 0) - (poolUse[b.policyNumber] || 0)) || (claimsPerPolicy[a.policyNumber] - claimsPerPolicy[b.policyNumber]) || String(b.claimNumber).localeCompare(String(a.claimNumber)))
+    .sort((a, b) => ((poolUse[a.policyNumber] || 0) - (poolUse[b.policyNumber] || 0)) || (taken(a.policyNumber) - taken(b.policyNumber)) || (claimsPerPolicy[a.policyNumber] - claimsPerPolicy[b.policyNumber]) || String(b.claimNumber).localeCompare(String(a.claimNumber)))
     .filter((r) => { if (seen.has(r.policyNumber) || used.has(r.policyNumber)) return false; seen.add(r.policyNumber); return true; })
     .map((r) => {
       const d = new Date(r.lossDate);

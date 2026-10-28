@@ -147,9 +147,26 @@ async function checkClaim(page, claim, { prepare = false, lienholders = false, p
         page._currentClaimNumber = claim;
         const reserve = () => require('../financialsHelper').createReserve(page, { reserveAmount: 2500, costType: 'CLPD', costCategory: 'ClaimCost' }).catch((e) => e.message);
         let err = await reserve();
+        // CONFIRMED 2026-10-28: benjsmit has NO "Reserve" item under Actions › New Transaction on cloud TEST (su has it).
+        // Vehicle exposures get an automatic initial reserve, Medical Expense ones (C_SURC_LC50 / C_SURC_MI) do not — so
+        // their first reserve is DATA SETUP done as the admin, in its own window; the cases still run as CC_USER.
+        if (typeof err === 'string' && /has no "Reserve" item/.test(err) && process.env.CC_ADMIN_USER) {
+          const ctx = await page.context().browser().newContext({ viewport: { width: 1600, height: 1000 } });
+          try {
+            const ap = await ctx.newPage();
+            ap.setDefaultTimeout(20000);
+            await require('../claimCenterBase').loginAsAdmin(ap);
+            ap.__oneIncUser = 'admin';
+            await W.openClaim(ap, claim, log);
+            ap._currentClaimNumber = claim;
+            err = await require('../financialsHelper').createReserve(ap, { reserveAmount: 2500, costType: 'CLPD', costCategory: 'ClaimCost' }).catch((e) => e.message);
+            if (!(typeof err === 'string' && err)) out.repaired.push(`reserve added as admin (${process.env.CC_ADMIN_USER} — ${process.env.CC_USER} has no Reserve action)`);
+          } finally { await ctx.close().catch(() => {}); }
+          await W.openClaim(page, claim, log);
+        }
         // Provisioned AUTO/HO claims can come out of FNOL with NO exposure — the New Reserve screen's Exposure list is
         // then empty ("still open with no validation text", CONFIRMED 2026-10-21). Add the profile's exposure, retry.
-        if (typeof err === 'string' && err && exposuresFor(claim)) {
+        if (typeof err === 'string' && err && !/has no "Reserve" item/.test(err) && exposuresFor(claim)) {
           await W.cancelWizard(page).catch(() => {});
           const added = await addExposures(page, claim, exposuresFor(claim));
           if (added) {

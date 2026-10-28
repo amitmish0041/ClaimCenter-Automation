@@ -20,6 +20,8 @@
 'use strict';
 const W = require('../wizardDriver');
 const { readScreen, findField } = require('../screenReader');
+// Per-policy ledger of claimant numbers already taken (results/used-claimant-numbers.json, shared with FNOL).
+const { getUsedClaimantNumbers, addUsedClaimantNumber } = require('../../claimCenterBase');
 
 const TIER = (process.env.CC_TIER || 'test').toLowerCase();
 const testOnly = (what) => { if (TIER !== 'test') throw new W.Blocked(`${what} writes claim data — allowed on the TEST tier only`); };
@@ -155,22 +157,34 @@ async function addMedExposure(page, { coverage = 'Medical Benefits', leaf = null
     throw new W.Blocked('the Injury Incident "New Incident..." popup did not open');
   }
   await fillInjuryPopup(page, ins);
+  // Claimant numbers are unique across a policy's claims (CONFIRMED 2026-10-27 on four new C_SURC_LC50 claims), so pick
+  // one the ledger has not seen on this policy BEFORE the first save — a busy policy otherwise burns a save per taken
+  // number. The ledger learns from every save (and every "already exists" refusal), so later claims go straight through.
+  const policy = page._policyNumber || null;
+  const taken = policy ? getUsedClaimantNumbers(policy) : new Set();
+  const claimantNo = async () => { const f = findField(await readScreen(page), 'Claimant Number'); return f || {}; };
+  const pickFree = async () => {
+    const f = await claimantNo();
+    const free = (f.options || []).filter((o) => /^\d+$/.test(o) && !taken.has(o));
+    if (!free.length) return false;
+    if (f.value !== free[0]) await selectIn(page, 'Claimant Number', new RegExp(`^${free[0]}$`)).catch(() => {});
+    return true;
+  };
+  await pickFree();
   for (let r = 0; r < 8; r++) {
     await W.fillRequiredEmpties(page);
     await W.answerUnansweredNo(page);
+    const tried = (await claimantNo()).value;
     await W.clickButton(page, 'Update');
     await W.settle(page, 2500);
     if (!await page.getByRole('button', { name: 'Update', exact: true }).first().isVisible().catch(() => false)) {
-      return `added a "${coverage}${leaf ? ' › ' + leaf : ''}" exposure, Cause of Loss ${cause}, claimant ${ins || '(first)'}`;
+      if (policy && /^\d+$/.test(tried || '')) addUsedClaimantNumber(policy, tried);
+      return `added a "${coverage}${leaf ? ' › ' + leaf : ''}" exposure, Cause of Loss ${cause}, claimant ${ins || '(first)'}, claimant number ${tried || '?'}`;
     }
-    // "This claimant number already exists on another claim" — claimant numbers are unique across a policy's claims
-    // (CONFIRMED 2026-10-27 on four new C_SURC_LC50 claims). Try another free number from the screen's own list.
     const s = await readScreen(page);
     if (/claimant number already exists/i.test([...s.messages, s.south].join(' '))) {
-      const f = findField(s, 'Claimant Number');
-      const opts = ((f && f.options) || []).filter((o) => /^\d+$/.test(o) && o !== f.value);
-      if (!opts.length) break;
-      await selectIn(page, 'Claimant Number', new RegExp(`^${opts[opts.length - 1 - (r % opts.length)]}$`)).catch(() => {});
+      if (/^\d+$/.test(tried || '')) { taken.add(tried); if (policy) addUsedClaimantNumber(policy, tried); }
+      if (!await pickFree()) break;
     }
   }
   const s = await readScreen(page);
