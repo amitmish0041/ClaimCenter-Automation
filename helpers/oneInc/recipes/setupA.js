@@ -174,6 +174,13 @@ module.exports = (api) => {
   add('GCCM-1003/UIF/TC-055', 'WCA_LW', LW_QUICK('^05', { extra: [{ answer: [RTW, 'Yes'] }] }), [V('Return to Work Type Code', { required: true, editable: true, includes: ['Actual', 'Released'] })], LW_NOTE + ' Return-to-work answered Yes.');
   add('GCCM-1003/UIF/TC-056', 'WCA_LW', LW_QUICK('^05', { extra: [{ answer: [RTW, 'No'] }] }), [V('Has the claim been settled?', { required: true, radios: ['Yes', 'No'] })], LW_NOTE + ' Return-to-work answered No.');
   add('GCCM-1003/UIF/TC-057', 'WCA_LW', LW_QUICK('^05', { extra: [{ answer: [RTW, 'No'] }, { answer: ['Has the claim been settled?', 'Yes'] }] }), [V('What is the settlement date?', { required: true, editable: true })], LW_NOTE + ' Return-to-work No, settled Yes. The "date before the loss date is blocked" half is not checked.');
+  // GCCM-799 Full Check counterparts (UIF TC-016, TC-037..040): ran on WC_PA, which has no Indemnity line, and were BLOCKED
+  // 2026-10-27 — same claim and answers as the passing 1003 Quick Payment cases above.
+  add('GCCM-799/UIF/TC-016', 'WCA_LW', LW_FULL('^05'), [V('Disability Weekly Rate', { required: true, editable: true })], LW_NOTE + ' TTD line category (05).');
+  add('GCCM-799/UIF/TC-037', 'WCA_LW', LW_FULL('^05', { extra: [{ answer: [RTW, 'Yes'] }] }), [V('Date Returned to Work', { required: true, editable: true })], LW_NOTE + ' Return-to-work answered Yes.');
+  add('GCCM-799/UIF/TC-038', 'WCA_LW', LW_FULL('^05', { extra: [{ answer: [RTW, 'Yes'] }] }), [V('Return to Work Type Code', { required: true, editable: true, includes: ['Actual', 'Released'] })], LW_NOTE + ' Return-to-work answered Yes.');
+  add('GCCM-799/UIF/TC-039', 'WCA_LW', LW_FULL('^05', { extra: [{ answer: [RTW, 'No'] }] }), [V('Has the claim been settled?', { required: true, radios: ['Yes', 'No'] })], LW_NOTE + ' Return-to-work answered No.');
+  add('GCCM-799/UIF/TC-040', 'WCA_LW', LW_FULL('^05', { extra: [{ answer: [RTW, 'No'] }, { answer: ['Has the claim been settled?', 'Yes'] }] }), [V('What is the settlement date?', { required: true, editable: true })], LW_NOTE + ' Return-to-work No, settled Yes.');
 
   // ── Medicare beneficiary / MSA payment fields (line category 49, Medicare = Yes on the claim) ─────────────────────
   const MS_NOTE = 'WC claim, Medical exposure "Is Claimant a Medicare Beneficiary?" = Yes; payment on the Indemnity (Lost Wages) reserve line with line category 49 (Lump Sum Indemnity and Medical).';
