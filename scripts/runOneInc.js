@@ -126,6 +126,38 @@ function annotate(r, story, readiness) {
   const unknown = [...selected].filter((id) => !cases.some((c) => c.tc.scenarioId === id));
   if (unknown.length) console.log(`[OneInc] WARNING — unknown scenario id(s) ignored: ${unknown.join(', ')}`);
 
+  // ── "Create test data" step (--data-only; --plan only prints) — user direction 2026-10-27 ───────────────────────
+  // Creates, ahead of the test run, the NEW claims the selected scenarios need (minus the Unused ones already in stock)
+  // and runs no test. The next run takes them from the stock (helpers/oneInc/testClaims.js). TEST tier only.
+  if (arg('data-only', false) || arg('plan', false)) {
+    const testClaims = require('../helpers/oneInc/testClaims');
+    const { isPaymentRecipe: isPay } = require('../helpers/oneInc/scenarioRunner');
+    const plans = Object.values(testClaims.plan(toRun.map(({ tc }) => tc.scenarioId), RECIPES, isPay));
+    console.log(`[OneInc] DATA STEP — ${toRun.length} scenario(s) selected (${scope}), ${plans.length} claim type(s)`);
+    for (const p of plans) {
+      console.log(p.fresh
+        ? `[OneInc] DATA ${p.profile}: needs ${p.want} claim(s) (${p.payIds.length} payment scenario(s) one each${p.readIds.length ? `, ${p.readIds.length} screen check(s) share one` : ''}) — ${p.unused.length} Unused in stock → create ${p.toCreate}`
+        : `[OneInc] DATA ${p.profile}: ${p.payIds.length + p.readIds.length} scenario(s) use existing claims (aged loss date / OneInc-acknowledged check) — nothing to create`);
+    }
+    const total = plans.reduce((n, p) => n + p.toCreate, 0);
+    console.log(`[OneInc] DATA TOTAL ${total} new claim(s) to create`);
+    if (arg('plan', false)) process.exit(0);
+    if (tier !== 'test') { console.log('[OneInc] DATA — claims are only created on the TEST tier'); process.exit(2); }
+    let failed = 0;
+    for (const p of plans.filter((x) => x.toCreate > 0)) {
+      console.log(`[OneInc] DATA ${p.profile}: creating ${p.toCreate} claim(s) — each FNOL takes a few minutes`);
+      const code = await testClaims.provision(p.profile, p.toCreate, { headless: arg('headless', false) });
+      const now = testClaims.unused(p.profile);
+      console.log(`[OneInc] DATA ${p.profile}: ${now.length} Unused claim(s) in stock now${now.length < p.want ? ` — ${p.want - now.length} short (see the provisioning lines)` : ''}`);
+      if (now.length < p.want) failed++;
+      if (code === 3) { console.log('[OneInc] DATA — ClaimCenter TEST is not filing claims right now (claim save or PolicyCenter search failing) — stopping; run the step again later'); failed++; break; }
+    }
+    const sheet = await testClaims.exportSheet();
+    if (sheet) console.log(`[OneInc] DATA sheet: ${sheet}`);
+    console.log(`[OneInc] DATA DONE${failed ? ` — ${failed} claim type(s) short` : ' — stock covers the selection'}`);
+    process.exit(failed ? 1 : 0);
+  }
+
   // ── run setup ────────────────────────────────────────────────────────────────────────────────────────────────
   const runId = report.newRunId(tier);
   const dirs = report.prepareDirs(runId);
@@ -236,59 +268,46 @@ function annotate(r, story, readiness) {
   // Profiles FNOL cannot create (aged-loss-date / existing-claim profiles) keep using their pool claims — the result
   // says so. A claim that cannot be created makes its scenarios BLOCKED (never silently falls back to an old claim).
   // Opt out with --reuse-claims or ONEINC_FRESH=0.
+  // Stock first (helpers/oneInc/testClaims.js, user direction 2026-10-27): Unused claims made earlier — by the Runner's
+  // "Create test data" step or a previous run's spare — are taken (and marked Used at once, so a teammate's run cannot
+  // take them too); new claims are filed only for the shortfall.
   const fresh = freshPlanned;
   const assigned = new Map(); // scenarioId → [claim] | { blocked: why } | { existing: true }
   if (fresh) {
     const claimPicker = require('../helpers/oneInc/claimPicker');
-    const canFnol = (p) => { const P = claimPicker.PROFILES[p] || {}; const f = P.fnol; return ['AUTO_PA', 'AUTO_MI', 'WC_PA', 'PROP_PA', 'PROP_MORT', 'AUTO_LIEN'].includes(p) || !!P.fnolAs || (f && (f.exposures || []).length > 0); };
-    const byProfile = {};
-    for (const { tc } of toRun) (byProfile[RECIPES[tc.scenarioId].profile] = byProfile[RECIPES[tc.scenarioId].profile] || []).push(tc.scenarioId);
+    const testClaims = require('../helpers/oneInc/testClaims');
+    const plans = testClaims.plan(toRun.map(({ tc }) => tc.scenarioId), RECIPES, isPaymentRecipe);
     run.freshClaims = {};
-    for (const [profile, ids] of Object.entries(byProfile)) {
-      if (!canFnol(profile)) {
+    for (const { profile, fresh: canFnol, payIds, readIds, want } of Object.values(plans)) {
+      const ids = [...payIds, ...readIds];
+      if (!canFnol) {
         log(`[OneInc] fresh data: ${profile} needs existing claim data a new FNOL cannot produce (aged loss date, or a check OneInc already acknowledged) — its ${ids.length} scenario(s) use the pool claims`);
         for (const id of ids) assigned.set(id, { existing: true });
         continue;
       }
-      // shareFresh profiles (HO_SNI): one new claim for all their scenarios in this run.
-      const share = !!(claimPicker.PROFILES[profile] || {}).shareFresh;
-      const payIds = share ? [] : ids.filter((id) => isPaymentRecipe(RECIPES[id]));
-      const readIds = share ? ids : ids.filter((id) => !isPaymentRecipe(RECIPES[id]));
-      const want = payIds.length + (readIds.length ? 1 : 0);
-      const before = new Set(claimPicker.poolClaims(profile));
-      const t0 = new Date().toISOString();
-      log(`[OneInc] fresh data: ${profile} — creating ${want} new claim(s) with their test data (${payIds.length} for payment scenarios, ${readIds.length ? 1 : 0} shared by ${readIds.length} screen check(s)); each FNOL takes a few minutes`);
-      const code = await new Promise((resolve) => {
-        const { spawn } = require('child_process');
-        // Claims are always CREATED as the standard adjuster from .env (CC_USER), whatever login the run uses: the
-        // provisioner assigns the new claim to whoever is logged in, and a claim created under su is owned by "Super
-        // User", who has no examiner number — every payment on it is then refused ("Exposure owner Super User must
-        // have a valid examiner number", CONFIRMED 2026-10-27 on PA-PA-01-26-0748579).
-        const dotenvUser = (() => { try { return require('dotenv').parse(require('fs').readFileSync(path.join(__dirname, '..', '.env'))); } catch (_) { return {}; } })();
-        // Assignee: without CC_ASSIGNEE_NAME the assign step can fall to the first name in the list ("Super User", no
-        // examiner number — payments then refused, CONFIRMED 2026-10-27). Benjamin Smith (Recovery Claims Team 2) has one.
-        const provEnv = { CC_ASSIGNEE_NAME: 'Benjamin Smith', ...process.env, ...(dotenvUser.CC_USER && dotenvUser.CC_PASS ? { CC_USER: dotenvUser.CC_USER, CC_PASS: dotenvUser.CC_PASS } : {}) };
-        const child = spawn(process.execPath, [path.join(__dirname, 'provisionOneIncClaims.js'), '--profiles', profile, '--count', String(want),
-          ...(arg('headless', false) ? ['--headless'] : [])], { cwd: path.join(__dirname, '..'), env: provEnv });
-        let buf = '';
-        child.stdout.on('data', (d) => {
-          buf += d.toString();
-          const lines = buf.split(/\r?\n/);
-          buf = lines.pop();
-          for (const line of lines) if (/^\[(Provision|TestData)\]/.test(line)) log(line);
-        });
-        child.stderr.on('data', () => {});
-        child.on('close', resolve);
-        child.on('error', () => resolve(1));
-      });
-      const made = (claimPicker.readPool()[profile] || []).filter((e) => e.usable && !before.has(e.claim) && String(e.createdAt) >= t0).map((e) => e.claim);
-      run.freshClaims[profile] = made;
-      log(`[OneInc] fresh data: ${profile} — new claim(s): ${made.join(', ') || 'none'}`);
-      const why = code === 3 ? 'ClaimCenter TEST could not file new claims right now (claim save or PolicyCenter policy search failing — see the provisioning lines)' : `only ${made.length} of ${want} new ${profile} claim(s) could be created (see the provisioning lines in the log)`;
-      const queue = made.slice();
-      for (const id of payIds) assigned.set(id, queue.length ? [queue.shift()] : { blocked: why });
-      const shared = queue.shift() || made[made.length - 1];
-      for (const id of readIds) assigned.set(id, shared ? [shared] : { blocked: why });
+      const stock = testClaims.unused(profile).slice(0, want);
+      testClaims.markUsed(profile, stock, { runId });
+      const need = want - stock.length;
+      let made = [];
+      let code = 0;
+      if (stock.length) log(`[OneInc] fresh data: ${profile} — using ${stock.length} Unused claim(s) from the test-data stock: ${stock.join(', ')}`);
+      if (need > 0) {
+        const t0 = new Date().toISOString();
+        log(`[OneInc] fresh data: ${profile} — creating ${need} new claim(s) with their test data (${payIds.length} payment scenario(s) need one each, ${readIds.length ? `${readIds.length} screen check(s) share one` : 'no screen checks'}); each FNOL takes a few minutes`);
+        code = await testClaims.provision(profile, need, { log, headless: arg('headless', false) });
+        made = (claimPicker.readPool()[profile] || []).filter((e) => e.usable && e.status === 'Unused' && String(e.createdAt) >= t0).map((e) => e.claim).slice(0, need);
+        testClaims.markUsed(profile, made, { runId });
+        log(`[OneInc] fresh data: ${profile} — new claim(s): ${made.join(', ') || 'none'}`);
+      }
+      const got = [...stock, ...made];
+      run.freshClaims[profile] = got;
+      const why = code === 3 ? 'ClaimCenter TEST could not file new claims right now (claim save or PolicyCenter policy search failing — see the provisioning lines)' : `only ${got.length} of ${want} new ${profile} claim(s) available (see the provisioning lines in the log)`;
+      const queue = got.slice();
+      const usedFor = [];
+      for (const id of payIds) { const c = queue.shift(); assigned.set(id, c ? [c] : { blocked: why }); if (c) usedFor.push({ claim: c, id }); }
+      const shared = queue.shift() || got[got.length - 1];
+      for (const id of readIds) { assigned.set(id, shared ? [shared] : { blocked: why }); if (shared) usedFor.push({ claim: shared, id }); }
+      testClaims.markUsed(profile, got, { runId, scenarios: usedFor });
     }
   }
 

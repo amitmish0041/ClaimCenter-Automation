@@ -231,3 +231,13 @@ test('test data: document + propertyExposure items, PROP_BLDG profile and worker
   for (const id of ['GCCM-763/VBR/TC-016', 'GCCM-1003/VBR/TC-102', 'GCCM-799/UIF/TC-056', 'GCCM-1003/UIF/TC-073']) assert.equal(RECIPES[id].profile, 'PROP_BLDG');
   assert.ok(runner.isPaymentRecipe(RECIPES['GCCM-763/VBR/TC-016']));
 });
+
+test('test-data stock: payment cases need a claim each, screen checks share one, Unused stock is subtracted', () => {
+  const tc = require('../../helpers/oneInc/testClaims');
+  const ids = Object.keys(RECIPES).filter((id) => RECIPES[id].profile === 'AUTO_PA').slice(0, 40);
+  const p = tc.plan(ids, RECIPES, runner.isPaymentRecipe).AUTO_PA;
+  assert.equal(p.payIds.length + p.readIds.length, ids.length);
+  assert.equal(p.want, p.payIds.length + (p.readIds.length ? 1 : 0));
+  assert.equal(p.toCreate, Math.max(0, p.want - p.unused.length));
+  assert.ok(tc.canFnol('AUTO_PA') && !tc.canFnol('VOID_PA'));
+});

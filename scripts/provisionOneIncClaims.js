@@ -162,7 +162,8 @@ for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnolAs && !F
         envFailuresInARow = 0;
         console.log(`[Provision] ${profile} ${i}: claim ${claim} created — checking it`);
         const chk = await checkClaim(page, claim, { prepare: true, lienholders: /^(AUTO_LIEN|PROP_MORT)$/.test(profile), profile });
-        const entry = { claim, policy: policyNumber, lossDate: pol.lossDate, basedOn: pol.basedOn, createdAt: new Date().toISOString(), usable: chk.usable, data: chk.data, payees: chk.payees.map((p) => p.name),
+        // status Unused: stock for the next run (helpers/oneInc/testClaims.js) — a run marks it Used when it takes it.
+        const entry = { claim, policy: policyNumber, lossDate: pol.lossDate, basedOn: pol.basedOn, createdAt: new Date().toISOString(), status: 'Unused', usable: chk.usable, data: chk.data, payees: chk.payees.map((p) => p.name),
           payeeWithDetails: chk.payeeWithDetails, reserveLines: chk.reserveLines, repaired: chk.repaired, problem: chk.problem };
         claimPicker.addToPool(profile, entry);
         summary.push({ profile, ...entry });
@@ -208,5 +209,7 @@ for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnolAs && !F
   console.log('[Provision] DONE');
   for (const s of summary) console.log(`[Provision] ${s.profile}: ${s.claim || '(no claim)'} ${s.usable ? 'USABLE' : 'not usable'}${s.problem ? ' — ' + s.problem : ''}`);
   console.log(`[Provision] pool: ${claimPicker.POOL_FILE}`);
+  const sheet = await require('../helpers/oneInc/testClaims').exportSheet();
+  if (sheet) console.log(`[Provision] test-claims sheet: ${sheet}`);
   if (envDown) process.exit(3);
 })().catch((e) => { console.error('[Provision] fatal:', e.stack || e.message); process.exit(1); });
