@@ -150,7 +150,12 @@ async function run({ only = null, log = console.log } = {}) {
     // Skip a case whose latest result is the one already written (same run + same finish time) — only new results cost time.
     const key = `${runId}|${r.finishedAt || ''}`;
     if (!only && built[id] === key && fs.existsSync(file)) continue;
-    try { fs.writeFileSync(file, await build(r, runId)); built[id] = key; wrote++; } catch (e) { log(`[CaseReviews] ${id}: ${e.message}`); }
+    // Write beside it, then swap in: a document opened (or downloaded) while a run rewrites it is never half-written
+    // (2026-10-28: team got "Word experienced an error trying to open the file"). A copy open in Word blocks the swap —
+    // the old document stays and the next run retries.
+    const tmp = `${file}.${process.pid}.tmp`;
+    try { fs.writeFileSync(tmp, await build(r, runId)); fs.renameSync(tmp, file); built[id] = key; wrote++; }
+    catch (e) { try { fs.unlinkSync(tmp); } catch (_) { /* not written */ } log(`[CaseReviews] ${id}: ${e.message}`); }
   }
   fs.writeFileSync(stamp, JSON.stringify(built));
 
