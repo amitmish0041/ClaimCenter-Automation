@@ -136,6 +136,21 @@ async function run({ only = null, log = console.log } = {}) {
     try { j = JSON.parse(fs.readFileSync(path.join(repDir, f), 'utf8')); } catch (_) { continue; }
     for (const r of j.results || []) if (['PASS', 'FAIL', 'BLOCKED'].includes(r.status)) last[r.scenarioId] = { r, runId: j.run && j.run.runId };
   }
+  // A workbook update can delete or renumber cases (GCCM-759 2026-10-28: UIF.010 EFT and CPD.015 Negative deleted, CPD
+  // renumbered TC031-TC060), so an old result is kept only while its id still names the SAME case in the current
+  // workbooks; documents of ids that no longer do are moved to CaseReviews\superseded rather than shown as current.
+  try {
+    const norm = (s) => String(s || '').replace(/^TC-?\d+\s*-\s*/i, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const current = {};
+    for (const c of require('../helpers/oneInc/inventoryService').loadInventory().cases) current[c.scenarioId] = norm(c.name);
+    for (const id of Object.keys(last)) if (current[id] !== norm(last[id].r.name)) delete last[id];
+    const oldDir = path.join(outDir, 'superseded');
+    for (const f of fs.readdirSync(outDir)) {
+      if (!/\.docx$/i.test(f) || Object.keys(last).some((id) => `${safe(id)}.docx` === f)) continue;
+      fs.mkdirSync(oldDir, { recursive: true });
+      try { fs.renameSync(path.join(outDir, f), path.join(oldDir, f)); } catch (e) { log(`[CaseReviews] ${f} not moved: ${e.message}`); }
+    }
+  } catch (e) { log(`[CaseReviews] workbooks not read (${e.message}) — every result kept`); }
   // The HTML pages this replaces (and the old phone copies) — removed so nobody opens a stale one.
   for (const f of fs.readdirSync(outDir)) if (/\.html$/i.test(f) && f !== 'index.html') fs.unlinkSync(path.join(outDir, f));
 

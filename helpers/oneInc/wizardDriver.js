@@ -951,6 +951,16 @@ async function completePaymentsStep(page, { transactionType = 'Partial Payment',
   return amt;
 }
 
+// Test step (recipes: { call: ['wizardDriver.fillTotalAmount', amt] }): types the Total Amount of Payment and, when Cloud
+// shows it, its Confirm box (Cloud TEST 2026-10-28 shows ONE masked box on the Expense step), then lets the page refresh.
+async function fillTotalAmount(page, amt) {
+  if (!findField(await readScreen(page), 'Total Amount of Payment')) throw new Blocked('"Total Amount of Payment" is not on the screen');
+  for (const label of ['Total Amount of Payment', 'Confirm Total Amount of Payment']) {
+    if (findField(await readScreen(page), label)) await fill(page, label, String(amt));
+  }
+  await settle(page, 2000);
+}
+
 async function next(page) {
   await clickButton(page, 'Next');
   return readScreen(page);
@@ -1036,7 +1046,7 @@ async function currentStep(page) {
 }
 
 module.exports = {
-  Blocked, settle, inWizard, openClaim, newPaymentErrorText, repairSurcharging, assignClaimAndExposures, abilityToPayErrors, abilityToPay, repairVehicleVins, lienholders, addClaimContactWithRole, addClaimPersonContact, addVehicleLoan, addIncidentLoan, addDigitalPaymentAccount, repairClaimantAddress, getParties, optionsOf, select, fill, answer, answerUnansweredNo, clickButton,
+  Blocked, fillTotalAmount, settle, inWizard, openClaim, newPaymentErrorText, repairSurcharging, assignClaimAndExposures, abilityToPayErrors, abilityToPay, repairVehicleVins, lienholders, addClaimContactWithRole, addClaimPersonContact, addVehicleLoan, addIncidentLoan, addDigitalPaymentAccount, repairClaimantAddress, getParties, optionsOf, select, fill, answer, answerUnansweredNo, clickButton,
   visibleMenuItems, openActionsMenu, closeMenus, navigate, openFinancialsRowMenu,
   openPayment, cancelWizard, selectPayee, addJointPayees, selectVendorPayee, openPayeeSearch, vendors, selectReserveLine, availableReserves, fillLineItem, completePaymentsStep, next, nextFillingServicePeriod, fillRequiredEmpties, serverError, currentStep,
   warningsOnly,

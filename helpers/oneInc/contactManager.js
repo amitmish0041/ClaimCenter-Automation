@@ -32,7 +32,7 @@ function dateFor(when) {
 }
 
 async function login(cm) {
-  if (!process.env.CM_USER || !process.env.CM_PASS) throw new W.Blocked('ContactManager credentials not provided (set CM_USER / CM_PASS in the environment)');
+  if (!process.env.CM_USER || !process.env.CM_PASS) throw new W.Blocked('ContactManager credentials not provided — enter your ContactManager username and password in the Runner Settings tab (or set CM_USER / CM_PASS)');
   await cm.goto(CM_URL, { waitUntil: 'domcontentloaded' });
   await cm.getByLabel('Username').waitFor({ timeout: 30000 });
   await cm.getByLabel('Username').fill(process.env.CM_USER);

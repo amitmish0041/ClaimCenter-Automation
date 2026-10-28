@@ -69,33 +69,35 @@ add('GCCM-759/UIF/TC-009', 'AUTO_PA', FULL_PAYEES('claimant'), [{ button: { name
 // Updated 759 sheet (QA review 2026-10-26): the options are Standard, Certified Mail, Expedite Mail and Print Now (Print Now is no longer excluded).
 add('GCCM-759/UIF/TC-010', 'AUTO_PA', FULL_INSTRUCTIONS('claimant'), [V('Payment Delivery', { editable: true, includes: ['Standard', 'Certified', 'Expedite', 'Print Now'], excludes: ['Hold', 'no_check_needed'] })],
   'Payment Delivery renders on Step 3 (Instructions) in Cloud, not on the payee screen named in the test case. Updated sheet lists Standard, Certified Mail, Expedite Mail, Print Now; Cloud also offers "Send" (its default), which the sheet does not list.');
-add('GCCM-759/UIF/TC-012', 'AUTO_PA', FULL_PAYEES('claimant'), [V('Mailing Address', { editable: true }), { text: { re: /Do you want to edit the Mailing Address\?/i, present: true } }]);
-add('GCCM-759/UIF/TC-013', 'AUTO_PA', [...FULL_PAYEES('claimant'), { next: true }], [V('Reserve Line', { required: true, editable: true }),
+add('GCCM-759/UIF/TC-011', 'AUTO_PA', FULL_PAYEES('claimant'), [V('Mailing Address', { editable: true }), { text: { re: /Do you want to edit the Mailing Address\?/i, present: true } }]);
+add('GCCM-759/UIF/TC-012', 'AUTO_PA', [...FULL_PAYEES('claimant'), { next: true }], [V('Reserve Line', { required: true, editable: true }),
   { step2: { transactionType: 'Partial Payment' }, skipReserve: true }, { next: true }, { message: { re: /Reserve Line/i, present: true } }]);
-add('GCCM-759/UIF/TC-014', 'WC_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Claimant', { readonly: true })]);
-add('GCCM-759/UIF/TC-015', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [H('Claimant')]);
-add('GCCM-759/UIF/TC-016', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Transaction Type', { required: true, editable: true, includes: TXN_TYPES })]);
-add('GCCM-759/UIF/TC-017', 'AUTO_PA', NEW_LINE('Adjuster Expense'), [H('Transaction Type')]);
-add('GCCM-759/UIF/TC-018', 'AUTO_PA', [...FULL_PAYMENTS('claimant', 'existing'), { select: ['Transaction Type', 'Partial Payment'] }], [V('Payment Type', { readonly: true, value: /partial/i })]);
-add('GCCM-759/UIF/TC-019', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [H('Eroding'), H('Eroding?')]);
-add('GCCM-759/UIF/TC-020', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [H('Comments'), { header: { name: 'Comments', present: false } }]);
-add('GCCM-759/UIF/TC-021', 'AUTO_PA', NEW_LINE('Adjuster Expense'), [V('Adjuster Number', { required: true, editable: true })],
+// Updated 759 sheet (QA review 2026-10-28): UIF.013 flipped — Claimant is HIDDEN on Step 2 for WC and SHOWN for non-WC.
+add('GCCM-759/UIF/TC-013', 'WC_PA', FULL_PAYMENTS('claimant', 'existing'), [H('Claimant')]);
+add('GCCM-759/UIF/TC-014', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Claimant', { value: /S/ })]);
+add('GCCM-759/UIF/TC-015', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Transaction Type', { required: true, editable: true, includes: TXN_TYPES })]);
+add('GCCM-759/UIF/TC-016', 'AUTO_PA', NEW_LINE('Adjuster Expense'), [H('Transaction Type')]);
+add('GCCM-759/UIF/TC-017', 'AUTO_PA', [...FULL_PAYMENTS('claimant', 'existing'), { select: ['Transaction Type', 'Partial Payment'] }], [V('Payment Type', { readonly: true, value: /partial/i })]);
+add('GCCM-759/UIF/TC-018', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [H('Eroding'), H('Eroding?')]);
+add('GCCM-759/UIF/TC-019', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [H('Comments'), { header: { name: 'Comments', present: false } }]);
+add('GCCM-759/UIF/TC-020', 'AUTO_PA', NEW_LINE('Adjuster Expense'), [V('Adjuster Number', { required: true, editable: true })],
   'Test case text is self-contradictory (title "Expense", precondition "Claim Cost or null"); checked per the Test Data: CostType != Claim Cost (expense).');
-add('GCCM-759/UIF/TC-022', 'AUTO_PA', NEW_LINE('Claim Cost'), [H('Adjuster Number')]);
-add('GCCM-759/UIF/TC-023', 'AUTO_PA', [...NEW_LINE('Adjuster Expense'), { select: ['Adjuster Number', 0] }], [V('NAIC Expense Reporting', { value: /allocated|unallocated/i })],
+add('GCCM-759/UIF/TC-021', 'AUTO_PA', NEW_LINE('Claim Cost'), [H('Adjuster Number')]);
+add('GCCM-759/UIF/TC-022', 'AUTO_PA', [...NEW_LINE('Adjuster Expense'), { select: ['Adjuster Number', 0] }], [V('NAIC Expense Reporting', { value: /allocated|unallocated/i })],
   'Checked for an expense payment, where NAIC Expense Reporting applies (business review: "applicable to Expense type payments not claim cost").');
-add('GCCM-759/UIF/TC-024', 'AUTO_PA', NEW_LINE('Claim Cost'), [H('NAIC Expense Reporting')]);
-add('GCCM-759/UIF/TC-025', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Total Amount of Payment', { required: true, editable: true }),
+add('GCCM-759/UIF/TC-023', 'AUTO_PA', NEW_LINE('Claim Cost'), [H('NAIC Expense Reporting')]);
+add('GCCM-759/UIF/TC-024', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Total Amount of Payment', { required: true, editable: true }),
   { fieldKind: { label: 'Total Amount of Payment', kind: 'masked' } }, H('Check Amount'),
-  { select: ['Transaction Type', 'Partial Payment'] }, { next: true }, { message: { re: /Total Amount of Payment|amount/i, present: true } }]);
-add('GCCM-759/UIF/TC-026', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Cause of Loss', { readonly: true, value: /\S/ })]);
-add('GCCM-759/UIF/TC-027', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Payment for a total loss?', { required: true, radios: ['Yes', 'No'] })]);
-add('GCCM-759/UIF/TC-028', 'AUTO_PA', NEW_LINE('Adjuster Expense'), [H('Payment for a total loss?')]);
-add('GCCM-759/UIF/TC-029', 'AUTO_LIEN', [...FULL_PAYMENTS('claimant', 'open'), { step2: {} }, { answer: ['Payment for a total loss?', 'Yes'] }],
+  { select: ['Transaction Type', 'Partial Payment'] }, { next: true }, { message: { re: /does not match the total amount of the check/i, present: true } }],
+  'Updated 759 sheet (QA review 2026-10-28): proceeding without the amount must show "This amount does not match the total amount of the check."');
+add('GCCM-759/UIF/TC-025', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Cause of Loss', { readonly: true, value: /\S/ })]);
+add('GCCM-759/UIF/TC-026', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Payment for a total loss?', { required: true, radios: ['Yes', 'No'] })]);
+add('GCCM-759/UIF/TC-027', 'AUTO_PA', NEW_LINE('Adjuster Expense'), [H('Payment for a total loss?')]);
+add('GCCM-759/UIF/TC-028', 'AUTO_LIEN', [...FULL_PAYMENTS('claimant', 'open'), { step2: {} }, { answer: ['Payment for a total loss?', 'Yes'] }],
   [{ text: { re: /SELECT NO IF ADVERSE CARRIER IS HANDLING SALVAGE/i, present: true } }],
   'Checked after the payment details are filled and "Payment for a total loss?" = Yes is answered (QA review 2026-10-26: the label is not rendered before the Transaction Type is chosen, so answering right after the reserve line wrongly showed it absent).');
-add('GCCM-759/UIF/TC-030', 'AUTO_PA', FULL_PAYMENTS('claimant', 'new'), [V('Cost Type', { editable: true, includes: ['Claim Cost', 'Adjuster Expense', 'Legal Expense'] })]);
-add('GCCM-759/UIF/TC-031', 'AUTO_PA', FULL_PAYMENTS('claimant', 'new'), [V('Cost Category', { editable: true })]);
+add('GCCM-759/UIF/TC-029', 'AUTO_PA', FULL_PAYMENTS('claimant', 'new'), [V('Cost Type', { editable: true, includes: ['Claim Cost', 'Adjuster Expense', 'Legal Expense'] })]);
+add('GCCM-759/UIF/TC-030', 'AUTO_PA', FULL_PAYMENTS('claimant', 'new'), [V('Cost Category', { editable: true })]);
 // ClaimsPay defaults (read on Step 3 — where Cloud renders ClaimsPay Type / Method).
 const cpd = (who, type, method, gateHasDetails) => ({
   steps: [...FULL_PAYEES(who), { snapshotWarning: NO_CONTACT_DETAILS }, { next: true }, { reserve: 'open' }, { step2: {} }, { next: true }, { expectStep: 3 }],
@@ -109,16 +111,16 @@ const cpd = (who, type, method, gateHasDetails) => ({
   ],
 });
 const CPD_NOTE = 'Run on the HO claim (profile PROP_PA): its insured/claimant Robert Charles has an e-mail and phone. CPD.001 (no e-mail on a payee gives Other/Mailed Check) overrides the other defaults, and the PA auto claims insured DMG LMB TEST has no e-mail (QA review 2026-10-26). The payee Type is set to the role the case names.';
-let c = cpd('claimant', /other\s*\/\s*mailed check/i, /^(mailed )?check$/i, false); add('GCCM-759/CPD/TC-032', 'AUTO_PA', c.steps, c.checks);
-c = cpd('insured', /^contact\(s\)$/i, /customer choice|let customer pick/i, true); add('GCCM-759/CPD/TC-005', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
-c = cpd('claimant', /^contact\(s\)$/i, /customer choice|let customer pick/i, true); add('GCCM-759/CPD/TC-007', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
-c = cpd('insured', /^contact\(s\)$/i, /./, true); add('GCCM-759/CPD/TC-019', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
-c = cpd('claimant', /^contact\(s\)$/i, /./, true); add('GCCM-759/CPD/TC-021', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
-c = cpd('claimant', /^contact\(s\)$/i, /./, true); add('GCCM-759/CPD/TC-027', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
+let c = cpd('claimant', /other\s*\/\s*mailed check/i, /^(mailed )?check$/i, false); add('GCCM-759/CPD/TC-031', 'AUTO_PA', c.steps, c.checks);
+c = cpd('insured', /^contact\(s\)$/i, /customer choice|let customer pick/i, true); add('GCCM-759/CPD/TC-035', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
+c = cpd('claimant', /^contact\(s\)$/i, /customer choice|let customer pick/i, true); add('GCCM-759/CPD/TC-037', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
+c = cpd('insured', /^contact\(s\)$/i, /./, true); add('GCCM-759/CPD/TC-049', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
+c = cpd('claimant', /^contact\(s\)$/i, /./, true); add('GCCM-759/CPD/TC-051', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
+c = cpd('claimant', /^contact\(s\)$/i, /./, true); add('GCCM-759/CPD/TC-057', 'PROP_PA', c.steps, c.checks, CPD_NOTE);
 
 // Vendor payee (Address Book vendor selected by Tax ID — wizardDriver.selectVendorPayee).
 const VENDOR_NOTE = 'Payee = an Approved Vendor (Company) from the TEST Address Book, selected by Tax ID (default: ADJUSTMENT SERVICES INC, 58-1623664). FINDING 2026-10-26: with a vendor as the ONLY payee CC leaves ClaimsPay Type blank (Method has no options) even when the vendor has a Main Email and Business phone (tested by setting an e-mail in ContactManager on both vendors and restoring it), so a FAIL here is product behaviour (CPD.013), not test data. Vendor + contact gives Contact(s) and Vendor.';
-add('GCCM-759/CPD/TC-026', 'AUTO_PA', FULL_INSTRUCTIONS('vendor'),
+add('GCCM-759/CPD/TC-056', 'AUTO_PA', FULL_INSTRUCTIONS('vendor'),
   [V('ClaimsPay Type', { value: /^vendor$/i }), V('ClaimsPay Method', { value: /vendor preferred/i })], VENDOR_NOTE);
 
 // ══ GCCM-799 — Common UI Updates Part 2 (Full Check wizard) ════════════════════════════════════════════════════
@@ -131,9 +133,11 @@ add('GCCM-799/UIF/TC-002', 'AUTO_PA', [...NEW_LINE('Legal Expense'), { select: [
 add('GCCM-799/UIF/TC-003', 'AUTO_PA', NEW_LINE('Adjuster Expense'), [H('Is the legal expense for a legal opinion on coverage or to litigate a coverage issue?')]);
 add('GCCM-799/UIF/TC-004', 'AUTO_MI', FULL_PAYMENTS('claimant', 'existing'), [V('Original Billed Amount', { editable: true, unlessBlocked: MI_MCCA })]);
 add('GCCM-799/UIF/TC-005', 'PROP_PA', FULL_PAYMENTS('claimant', 'existing'), [H('Original Billed Amount')]);
+// Updated GCCM-800 test plan (QA review 2026-10-28): enter the Total Amount of Payment (the page refreshes) BEFORE reading 1099 Box Number.
+const TOTAL_AMOUNT = (amt) => [{ call: ['wizardDriver.fillTotalAmount', amt] }];
 add('GCCM-799/UIF/TC-006', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('PA Tort Code', { required: true, editable: true, unlessBlocked: PA_TORT })]);
 add('GCCM-799/UIF/TC-007', 'PROP_PA', FULL_PAYMENTS('claimant', 'existing'), [H('PA Tort Code')]);
-add('GCCM-799/UIF/TC-008', 'AUTO_PA', [{ open: 'full' }, { payee: 'vendor' }, { next: true }, { reserve: 'new' }, { select: ['Cost Type', 'Adjuster Expense'] }, { select: ['Adjuster Number', 0] }],
+add('GCCM-799/UIF/TC-008', 'AUTO_PA', [{ open: 'full' }, { payee: 'vendor' }, { next: true }, { reserve: 'new' }, { select: ['Cost Type', 'Adjuster Expense'] }, { select: ['Adjuster Number', 0] }, ...TOTAL_AMOUNT('1.41')],
   [V('1099 Box Number', { required: true, editable: true, value: /^07/, includes: ['06-Medical Payments to Providers', '07-All Other Taxable Payments', '14-Gross Proceeds Paid to an Attorney'] })],
   VENDOR_NOTE + ' Expense payment (new line, Adjuster Expense) with an adjuster number that is not a "no tax ID" code; expects the Box 7 default.');
 add('GCCM-799/UIF/TC-010', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [{ header: { name: 'Category', present: true } }]);

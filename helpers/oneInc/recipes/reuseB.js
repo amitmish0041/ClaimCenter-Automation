@@ -124,14 +124,14 @@ module.exports = (api) => {
   const REST = { call: ['contactManager.restoreVendors'] };
   const HOJ = (primary, joint, setDT) => [...(setDT ? [SET_DT] : []), { open: 'full' }, ...PRIMARY(primary), { joint }, { next: true }, { reserve: 'open' }, { step2: {} }, { next: true }, { expectStep: 3 }];
   const DT = { who: 'David Thomas', type: 'Additional Claimant' };
-  add('GCCM-759/CPD/TC-018', 'PROP_PA', HOJ(VENDOR, [INS]), [CT(C_AND_V)], VJ_NOTE + HO_NOTE);
-  add('GCCM-759/CPD/TC-020', 'PROP_PA', HOJ(VENDOR, [CLM]), [CT(C_AND_V)], VJ_NOTE + HO_NOTE);
+  add('GCCM-759/CPD/TC-048', 'PROP_PA', HOJ(VENDOR, [INS]), [CT(C_AND_V)], VJ_NOTE + HO_NOTE);
+  add('GCCM-759/CPD/TC-050', 'PROP_PA', HOJ(VENDOR, [CLM]), [CT(C_AND_V)], VJ_NOTE + HO_NOTE);
   add('GCCM-799/UIF/TC-060', 'AUTO_PA', VJ([INS]), [CT(C_AND_V), V('Approval Required', { required: true, editable: true })], VJ_NOTE);
   const SNI_NOTE = MORT_NOTE + ' Secondary insured = the contact CC types "Secondary Named Insured" (from the policy).';
-  add('GCCM-759/CPD/TC-009', 'PROP_MORT', MORT_FULL(INS, [SNI_REAL]), [CT(CONTACTS), CM(CHOICE)], SNI_NOTE + ' ' + 'CPD.001 (no email → Other/Mailed Check) may take precedence; reported as observed.');
-  add('GCCM-759/CPD/TC-023', 'PROP_MORT', MORT_FULL(INS, [SNI_REAL]), [CT(CONTACTS)], SNI_NOTE);
-  add('GCCM-759/CPD/TC-010', 'PROP_MORT', MORT_FULL(VENDOR, [INS, SNI_REAL]), [CT(C_AND_V)], SNI_NOTE + ' ' + VJ_NOTE);
-  add('GCCM-759/CPD/TC-022', 'PROP_MORT', MORT_FULL(VENDOR, [INS, SNI_REAL]), [CT(C_AND_V), V('Approval Required')],
+  add('GCCM-759/CPD/TC-039', 'PROP_MORT', MORT_FULL(INS, [SNI_REAL]), [CT(CONTACTS), CM(CHOICE)], SNI_NOTE + ' ' + 'CPD.001 (no email → Other/Mailed Check) may take precedence; reported as observed.');
+  add('GCCM-759/CPD/TC-053', 'PROP_MORT', MORT_FULL(INS, [SNI_REAL]), [CT(CONTACTS)], SNI_NOTE);
+  add('GCCM-759/CPD/TC-040', 'PROP_MORT', MORT_FULL(VENDOR, [INS, SNI_REAL]), [CT(C_AND_V)], SNI_NOTE + ' ' + VJ_NOTE);
+  add('GCCM-759/CPD/TC-052', 'PROP_MORT', MORT_FULL(VENDOR, [INS, SNI_REAL]), [CT(C_AND_V), V('Approval Required')],
     SNI_NOTE + ' ' + VJ_NOTE + ' PCON/SCON_Approval_Reqd are payload flags (not on screen); the visible "Approval Required" field is checked instead.');
   add('GCCM-799/CPD-Joint/TC-80', 'PROP_MORT', MORT_FULL(VENDOR, [INS, SNI_REAL]), [CT(C_AND_V), { text: { re: /3 or more payees/i, present: false } }],
     SNI_NOTE + ' ' + VJ_NOTE + ' Test text says "less than 3 payees (i.e.) 2 insured contacts and a vendor" — the exempt 3-payee combination; checked as written (Contact(s) and Vendor, not "3 or more payees").');
@@ -140,28 +140,28 @@ module.exports = (api) => {
     { answer: ['Payment for a total loss?', 'No'] }, { step2: {} }, { next: true }, { expectStep: 3 }];
   const PJ_NOTE = 'Secondary claimant = a second PERSON contact on the claim (not the insured / exposure claimant), typed "Additional Claimant" in the joint payee grid.';
   const DT_NOTE = ' Secondary claimant = David Thomas (typed Additional Claimant); his Main Email/phone are set in ContactManager for the case and restored afterwards.' + HO_NOTE;
-  add('GCCM-759/CPD/TC-011', 'PROP_PA', HOJ(CLM, [DT], true), [CT(CONTACTS), CM(CHOICE), REST], PJ_NOTE + DT_NOTE);
-  add('GCCM-759/CPD/TC-025', 'PROP_PA', HOJ(CLM, [DT], true), [CT(CONTACTS), REST], PJ_NOTE + DT_NOTE);
-  add('GCCM-759/CPD/TC-012', 'PROP_PA', HOJ(VENDOR, [CLM, DT], true), [CT(C_AND_V), REST], PJ_NOTE + DT_NOTE + ' ' + VJ_NOTE);
-  add('GCCM-759/CPD/TC-024', 'PROP_PA', HOJ(VENDOR, [CLM, DT], true), [CT(C_AND_V), V('Approval Required'), REST], PJ_NOTE + DT_NOTE + ' ' + VJ_NOTE);
+  add('GCCM-759/CPD/TC-041', 'PROP_PA', HOJ(CLM, [DT], true), [CT(CONTACTS), CM(CHOICE), REST], PJ_NOTE + DT_NOTE);
+  add('GCCM-759/CPD/TC-055', 'PROP_PA', HOJ(CLM, [DT], true), [CT(CONTACTS), REST], PJ_NOTE + DT_NOTE);
+  add('GCCM-759/CPD/TC-042', 'PROP_PA', HOJ(VENDOR, [CLM, DT], true), [CT(C_AND_V), REST], PJ_NOTE + DT_NOTE + ' ' + VJ_NOTE);
+  add('GCCM-759/CPD/TC-054', 'PROP_PA', HOJ(VENDOR, [CLM, DT], true), [CT(C_AND_V), V('Approval Required'), REST], PJ_NOTE + DT_NOTE + ' ' + VJ_NOTE);
   // CPD.001 negative (QA review 2026-10-26): BOTH the primary and the secondary payee must have an e-mail. Primary = the insured
   // Robert Charles (has one); secondary = David Thomas, whose Address Book record has none — his Main Email is set in ContactManager
   // for the case and put back afterwards (contactManager.js ledger).
-  add('GCCM-759/CPD/TC-002', 'PROP_PA', [{ call: ['contactManager.setContactEmail', 'David Thomas', 'Thomas', '19073', 'davidthomas@example.com|7175550142'] },
+  add('GCCM-759/CPD/TC-032', 'PROP_PA', [{ call: ['contactManager.setContactEmail', 'David Thomas', 'Thomas', '19073', 'davidthomas@example.com|7175550142'] },
     ...FULL_PAYEES('insured'), { joint: [{ who: 'David Thomas' }] }, { next: true }, { reserve: 'open' }, { step2: {} }, { next: true }, { expectStep: 3 }],
     [CT(NOT_MAILED), { call: ['contactManager.restoreVendors'] }], 'Primary Robert Charles (insured, has e-mail) + joint payee David Thomas (Secondary Named Insured, e-mail set in ContactManager for this case and restored after).');
   // CPD.014 — vendor Mailed Check → Certified delivery
-  add('GCCM-759/CPD/TC-028', 'AUTO_PA', [...FULL_INSTRUCTIONS('vendor'), { select: ['ClaimsPay Method', /mailed check/i] }],
+  add('GCCM-759/CPD/TC-058', 'AUTO_PA', [...FULL_INSTRUCTIONS('vendor'), { select: ['ClaimsPay Method', /mailed check/i] }],
     [V('Payment Delivery', { value: /certified/i, includes: ['Certified', 'Expedite'], excludes: ['Standard'] })], VENDOR_NOTE);
-  add('GCCM-759/CPD/TC-029', 'AUTO_PA', FULL_INSTRUCTIONS('vendor'), [CM(/vendor preferred/i), V('Payment Delivery', { value: /^(?!certified$)/i })], VENDOR_NOTE);
+  add('GCCM-759/CPD/TC-059', 'AUTO_PA', FULL_INSTRUCTIONS('vendor'), [CM(/vendor preferred/i), V('Payment Delivery', { value: /^(?!certified$)/i })], VENDOR_NOTE);
   // CPD.015 — Insurance Auto Auctions (Tax ID 95-3790111, an in-network IAA ID)
   const IAA = (tl, quick) => [quick ? QOPEN_LIEN : { open: 'full' }, X('selectVendorByTaxId', 'INSURANCE AUTO AUCTIONS', '95-3790111'),
     ...(quick ? [] : [{ next: true }, { reserve: 'open' }]), { step2: {} }, { answer: ['Payment for a total loss?', tl] }, ...(/^yes$/i.test(tl) ? [{ answer: ['Is the owner keeping this Vehicle?', 'No'] }, { answer: ['Is this vehicle owned by the Insured?', 'Yes'] }, { answer: ['Does this vehicle display on the CLAIM CENTER policy page?', 'Yes'] }] : []), { next: true }, { expectStep: quick ? 2 : 3 }];
   const IAA_NOTE = 'Payee = Insurance Auto Auctions Inc. from the TEST Address Book by Tax ID 95-3790111.';
-  add('GCCM-759/CPD/TC-030', 'AUTO_PA', IAA('Yes'), [CT(/^vendor$/i), CM(/vendor preferred/i)], IAA_NOTE);
-  add('GCCM-759/CPD/TC-031', 'AUTO_PA', IAA('No'), [CT(/^vendor$/i), CM(/vendor preferred/i)], IAA_NOTE + ' Standard vendor default (CPD.013) expected.');
+  add('GCCM-759/CPD/TC-060', 'AUTO_PA', IAA('Yes'), [CT(/^vendor$/i), CM(/vendor preferred/i)], IAA_NOTE);
   // 1099 Box on a medical cause of loss (DE PIP line), vendor, claim cost → Box 6
-  add('GCCM-799/UIF/TC-009', 'AUTO_DE_AGED', [{ open: 'full' }, { payee: 'vendor' }, { next: true }, { reserve: 'open' }],
+  add('GCCM-799/UIF/TC-009', 'AUTO_DE_AGED', [{ open: 'full' }, { payee: 'vendor' }, { next: true }, { reserve: 'open' },
+    { call: ['wizardDriver.fillTotalAmount', '1.42'] }], // updated GCCM-800 plan: amount first, page refreshes
     [V('Cause of Loss', { value: /personal injury protection|medical/i }), V('1099 Box Number', { required: true, editable: true, value: /^06/ })],
     VENDOR_NOTE + ' Claim cost on the DE claim\'s PIP (Personal Injury Protection) exposure — a medical-related cause of loss.');
 

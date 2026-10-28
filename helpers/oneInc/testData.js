@@ -382,7 +382,7 @@ function deriveNeeds(recipe) {
 // Data the suite needs but automation cannot create — for the requirements sheet (scripts/oneIncDataRequirements.js).
 // cases: scenario ids; unblock: what a person / decision must supply.
 const MANUAL_DATA = [
-  { id: 'approver-no-contact', label: 'Active TEST user (payment approver) with NO email and NO phone', cases: ['GCCM-759/CPD/TC-003', 'GCCM-1003/CPD/TC-210'], unblock: 'name such a user, or allow an admin to blank a test user\'s email/phone (CPD.002 positive)' },
+  { id: 'approver-no-contact', label: 'Active TEST user (payment approver) with NO email and NO phone', cases: ['GCCM-759/CPD/TC-033', 'GCCM-1003/CPD/TC-210'], unblock: 'name such a user, or allow an admin to blank a test user\'s email/phone (CPD.002 positive)' },
   { id: 'owner-no-info', label: 'Exposure owner with no first/last name, email, phone', cases: ['GCCM-763/VBR/TC-004', 'GCCM-1003/VBR/TC-086'], unblock: 'name such a user (candidate: Austin Acheson, Inactive Users — VBR.026 may fire first) (VBR.002)' },
   { id: 'pre-2013-dol', label: 'Policy with a pre-2013 loss date', cases: [], unblock: 'a 2012 policy in TEST (none exists)' },
   { id: 'emb-coverage', label: 'Policy with Extraordinary/Extended Medical Benefits coverage', cases: ['GCCM-763/VBR/TC-045', 'GCCM-763/VBR/TC-046', 'GCCM-763/VBR/TC-047', 'GCCM-1003/VBR/TC-128', 'GCCM-1003/VBR/TC-129', 'GCCM-1003/VBR/TC-130'], unblock: 'a TEST policy carrying EMB (VBR.016)' },

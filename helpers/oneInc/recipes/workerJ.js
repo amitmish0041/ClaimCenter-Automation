@@ -48,7 +48,7 @@ module.exports = (api) => {
   const WFULL = (amount) => [{ open: 'full' }, { payee: PAYEE }, { next: true }, { reserve: 'match:Wage' }, { step2: { transactionType: 'Partial Payment', amount } }, { next: true }, { expectStep: 3 }];
   const WQUICK = (amount) => [X('openQuickOnRow', 'claim cost', 'open', 'Wage'), { payee: PAYEE }, { step2: { transactionType: 'Partial Payment', amount } }, { next: true }, { expectStep: 2 }];
   const WN = 'F_DE_WAGE claim PA-DE-01-25-0746526: "(3) 1st Party Wage Benefits - MATTHEW SPONG - PIP" (PIP › Wage Loss Benefits, Cause of Loss Personal Injury Protection = LC57), approved $2,500 Claim Cost reserve; payee MATTHEW SPONG. Wizard cancelled — nothing submitted.';
-  add('GCCM-799/UIF/TC-048', 'F_DE_WAGE', WFULL('1000.00'), [V(WAGE, { editable: true, required: false })], WN + ' Amount $1,000.00 (>= $1,000).');
+  add('GCCM-799/UIF/TC-048', 'F_DE_WAGE', WFULL('1000.00'), [V(WAGE, { editable: true, required: true })], WN + ' Amount $1,000.00 (>= $1,000). Updated GCCM-800 plan (2026-10-28): the question is now REQUIRED (Required condition: Check.isWagePayment()).');
   add('GCCM-799/UIF/TC-049', 'F_DE_WAGE', WFULL('999.99'), [H(WAGE)], WN + ' Amount $999.99 (< $1,000).');
   add('GCCM-1003/UIF/TC-065', 'F_DE_WAGE', WQUICK('1000.00'), [V(WAGE, { editable: true, required: true })], WN + ' Quick Payment, amount $1,000.00 (>= $1,000).');
   add('GCCM-1003/UIF/TC-066', 'F_DE_WAGE', WQUICK('999.99'), [H(WAGE)], WN + ' Quick Payment, amount $999.99 (< $1,000).');
