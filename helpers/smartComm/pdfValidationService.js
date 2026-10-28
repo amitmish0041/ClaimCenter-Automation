@@ -589,6 +589,7 @@ function evaluateOne(req, haystack, context) {
       // where this field actually is, a false PASS that verifies nothing.
       // Report it honestly as unverified rather than a misleading pass.
       if (req.shape === 'text') {
+        if (req.noSourceValue) return { expected: '(no value in ClaimCenter)', actual: 'Nothing to print', result: 'PASS', reason: req.unmappedReason };
         return { expected: '<unspecified — no shape or test-data field known>', actual: 'N/A', result: 'BLOCKED', reason: req.unmappedReason || 'No specific shape or test-data field mapped for this dynamic value — presence not verified' };
       }
       const m = haystack.match(shapeRegex(req.shape));
@@ -611,6 +612,12 @@ function evaluateOne(req, haystack, context) {
             expected: `(from ${req.expectedSource})`, actual: 'Not Found', result: 'FAIL',
             reason: `The SmartCOMM payload downloaded fine for this scenario, but has no "${field}" value this run — the generating user's own ClaimCenter profile doesn't currently have this field set, so the letter's signature block renders with "${field}" genuinely blank. CONFIRMED live: this is a real document defect (an incomplete signature block goes out to the recipient), not a test-data or environment limitation.`,
           };
+        }
+        // ClaimCenter itself has no value (claim data / payload read fine, field empty): the document showing nothing
+        // matches the source — PASS (user direction 2026-10-28, all templates). Unreadable payload stays BLOCKED.
+        const sourceRead = req.expectedSource.startsWith('payload.') ? Boolean(context.payload) : true;
+        if (sourceRead) {
+          return { expected: `(from ${req.expectedSource})`, actual: 'Nothing to print', result: 'PASS', reason: `ClaimCenter has no "${field}" value for this claim${req.expectedSource.startsWith('recipient.') ? ' (selected recipient)' : ''}, so the document correctly has nothing to show.` };
         }
         const reason = req.expectedSource.startsWith('recipient.')
           ? `The selected recipient has no "${field}" value on this claim (not present on its Recipients-tab row) — presence not verified.`

@@ -46,11 +46,12 @@ test('a text-shaped field the dictionary maps becomes a payload value check', ()
   assert.equal(pdf.evaluateRequirements([r], 'Appraisal amount: 1000.00', {})[0].result, 'FAIL');
 });
 
-test('fields that cannot be compared stay BLOCKED and say why', () => {
+test('no value in ClaimCenter passes; fields that cannot be compared stay BLOCKED and say why', () => {
   const { linked } = run([textCheck('R1', 'NADA Value'), textCheck('R2', 'Damage Modifier'), textCheck('R3', 'Both Check Label')]);
   const why = linked.map((r) => pdf.evaluateRequirements([r], 'x', {})[0]);
-  assert.deepEqual(why.map((w) => w.result), ['BLOCKED', 'BLOCKED', 'BLOCKED']);
-  assert.match(why[0].reason, /"NADA Value" Xpath found no value in this scenario's payload/);
+  // R1: the Xpath reads fine but ClaimCenter has no value — nothing to print, PASS (user direction 2026-10-28).
+  assert.deepEqual(why.map((w) => w.result), ['PASS', 'BLOCKED', 'BLOCKED']);
+  assert.match(why[0].reason, /ClaimCenter has no value for this field/);
   assert.match(why[1].reason, /"Damage Modifier" has no Xpath/);
   assert.match(why[2].reason, /no matching Data Dictionary row/);
 });

@@ -2594,6 +2594,9 @@ function linkTextFieldsToDictionary(template, requirements, xpathRequirements, r
     if (row === undefined) return r; // the Data Dictionary couldn't be read: nothing to say about this field
     // A BA note that only says the spot is free text ("Free Form/Editable" — DIG18875 R30) names no data field: the user
     // types there, nothing to compare — SKIPPED with that reason, not BLOCKED as an unknown field (QA review 2026-10-26).
+    // ...and a formatting note like "(redact all numbers with X except last 4)" (DIG201 R54, 2026-10-28) is about how a
+    // neighbouring field prints, not a field of its own.
+    if (!row && /^\s*\(?\s*(redact|mask)\b/i.test(r.fieldName)) return { ...r, enabled: false, disabledReason: `"${r.fieldName}" is a formatting note for a neighbouring field, not a data field of its own.` };
     if (!row && /^\s*free\s*form/i.test(r.fieldName)) return { ...r, enabled: false, disabledReason: `"${r.fieldName}" marks a free-text spot the user fills in — no data field behind it to compare.` };
     if (!row) return { ...r, unmappedReason: `"${r.fieldName}" has no matching Data Dictionary row for ${template.digNumber}, so there's no payload value to compare it with — presence not verified.` };
     const xp = xpathRequirements.find((x) => x.dictionaryAttribute === row.attributeName);
@@ -2604,6 +2607,11 @@ function linkTextFieldsToDictionary(template, requirements, xpathRequirements, r
     const why = !row.xpath || !row.xpath.trim() ? `its Data Dictionary row "${row.attributeName}" has no Xpath`
       : !rawPayloadRoot ? "this scenario's payload couldn't be read"
       : `its Data Dictionary row "${row.attributeName}" Xpath found no value in this scenario's payload`;
+    // ClaimCenter holds no value for this field on this claim (the Xpath reads fine, just empty): nothing to print, so
+    // the document showing nothing matches the source — PASS (user direction 2026-10-28, all templates).
+    if (row.xpath && row.xpath.trim() && rawPayloadRoot && !payloadXpathService.resolveXpath(rawPayloadRoot, row.xpath).unsupported) {
+      return { ...r, noSourceValue: true, unmappedReason: `"${r.fieldName}": ClaimCenter has no value for this field on this claim (Data Dictionary "${row.attributeName}" Xpath is empty in the payload), so the document correctly has nothing to show.` };
+    }
     return { ...r, unmappedReason: `"${r.fieldName}": ${why}, so there's nothing to compare it with — presence not verified.` };
   });
 }
