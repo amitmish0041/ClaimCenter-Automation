@@ -12,7 +12,8 @@ const oktaSessionStore = require('./oktaSessionStore');
 const S3_ADMIN_URL = 'https://intadmin-develop-donegal-dngldev-gwjutro.beta5-andromeda.guidewire.net/s3';
 const LOGIN_EMAIL = process.env.SMARTCOMM_OKTA_LOGIN_EMAIL || 'amitmishra@donegalgroup.com';
 
-async function renewSharedSession({ log = console.log, headed = false, timeoutMs = 120000 } = {}) {
+// waitForHuman: keep the (headed) window open for a person to finish a password/MFA prompt instead of giving up.
+async function renewSharedSession({ log = console.log, headed = false, timeoutMs = 120000, waitForHuman = false } = {}) {
   const browser = await chromium.launch({ headless: !headed, channel: 'chromium' });
   try {
     const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
@@ -26,12 +27,12 @@ async function renewSharedSession({ log = console.log, headed = false, timeoutMs
         log(`[S3 renew] Renewed — shared session saved to ${oktaSessionStore.SESSION_FILE}`);
         return true;
       }
-      if (await page.locator('input[type="password"]').first().isVisible().catch(() => false)
-        || await page.getByText(/verify|push notification|security key|enter a code/i).first().isVisible().catch(() => false)) {
+      if (!waitForHuman && await page.locator('input[type="password"]').first().isVisible().catch(() => false)
+        || !waitForHuman && await page.getByText(/verify|push notification|security key|enter a code/i).first().isVisible().catch(() => false)) {
         log('[S3 renew] Okta asked for a password/MFA — can\'t renew unattended. Run "node scripts/establishS3Session.js" at the desk.');
         return false;
       }
-      if (await page.getByText(/GENERAL_NONSUCCESS|Login Failed/i).first().isVisible().catch(() => false)) {
+      if (!waitForHuman && await page.getByText(/GENERAL_NONSUCCESS|Login Failed/i).first().isVisible().catch(() => false)) {
         log('[S3 renew] Okta rejected the email-only sign-in (GENERAL_NONSUCCESS). Run "node scripts/establishS3Session.js" at the desk.');
         return false;
       }
