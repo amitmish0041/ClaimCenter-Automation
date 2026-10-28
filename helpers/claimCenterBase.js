@@ -432,12 +432,30 @@ async function openExistingClaim(page, claimNumber) {
     page.getByRole('link', { name: /^Search$/ }).first(),
     page.getByRole('button', { name: /^Search$/ }).first(),
   ];
-  let searchClicked = false;
-  for (const nav of searchNav) {
-    if (!await nav.isVisible().catch(() => false)) continue;
-    await nav.click({ timeout: 8000 }).catch(() => {});
-    searchClicked = true;
-    break;
+  // Wait for the nav instead of one instant look: a 3rd scenario's fresh page can still be loading here (DIG27-AUTO-OH,
+  // 2026-10-28 — the same claim opened fine by hand). Still nothing after 30s: reload once, signing in if a login form
+  // shows, and look again.
+  const clickSearchNav = async (ms) => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      for (const nav of searchNav) {
+        if (!await nav.isVisible().catch(() => false)) continue;
+        await nav.click({ timeout: 8000 }).catch(() => {});
+        return true;
+      }
+      await page.waitForTimeout(1000);
+    }
+    return false;
+  };
+  let searchClicked = await clickSearchNav(30000);
+  if (!searchClicked) {
+    console.log('openExistingClaim: Search nav not showing after 30s — reloading ClaimCenter and trying again');
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+    if (await page.getByRole('textbox', { name: /Username/i }).first().waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false)) {
+      await loginToClaimCenter(page);
+    }
+    searchClicked = await clickSearchNav(45000);
   }
   if (!searchClicked) {
     throw new Error('openExistingClaim: no Search navigation found (tried <a>, menuitem, link and ' +
