@@ -162,6 +162,9 @@ module.exports = (api) => {
     add(full, 'WCA_LW', LW_FULL(cat, opt), checks, LW_NOTE + note);
     add(quick, 'WCA_LW', LW_QUICK(cat, opt), checks, LW_NOTE + note + ' Quick Payment "Enter payment basics" screen.');
   }
+  // 799 UIF TC-014: Average Weekly Wage on the payment is offered on an Indemnity (Lost Wages) line only — the WC_PA claim
+  // it ran on has none (BLOCKED 2026-10-27), so it runs on WCA_LW like the other indemnity cases (overrides scenarioRecipes).
+  add('GCCM-799/UIF/TC-014', 'WCA_LW', LW_FULL('^05'), [V('Average Weekly Wage', { required: true, editable: true })], LW_NOTE + ' TTD line category (05).');
   // Quick Payment-only return-to-work questions (GCCM-1003 UIF.040-044)
   const RTW = 'Did the claimant return to work?';
   add('GCCM-1003/UIF/TC-052', 'WCA_LW', LW_QUICK('^05'), [V(RTW, { required: true, radios: ['Yes', 'No'] })], LW_NOTE);
