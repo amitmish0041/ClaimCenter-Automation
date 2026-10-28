@@ -32,6 +32,8 @@ function shouldSkip(srcPath, name) {
   if (EXCLUDE_NAMES.has(name)) return true;
   if (EXCLUDE_EXT.has(path.extname(name))) return true;
   if (name.startsWith('~$')) return true; // transient Office lock files (e.g. ~$Claims_Documents_Index.xlsx) - not real content
+  // Per-env Playwright output folders ("test-results-qa", "test-results-explore" — 1.2GB of traces, 2026-10-27).
+  if (/^(test-results|playwright-report)-/.test(name)) return true;
   return false;
 }
 
