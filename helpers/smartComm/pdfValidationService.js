@@ -531,13 +531,19 @@ function evaluateOne(req, haystack, context) {
       if (req.fieldValue === undefined) {
         return { expected: req.expectedValue, actual: 'N/A', result: 'BLOCKED', reason: 'No captured interactive field value to compare against for this requirement.' };
       }
-      const normField = normalizeWs(req.fieldValue).toLowerCase();
+      // The live editor wraps a field's value in brackets ("[12:00]").
+      const normField = normalizeWs(req.fieldValue).replace(/^\[+|\]+$/g, '').trim().toLowerCase();
       const normExpected = normalizeWs(req.expectedValue).toLowerCase();
       if (normField === normExpected || (normField && normExpected && (normField.includes(normExpected) || normExpected.includes(normField)))) {
         return { expected: req.expectedValue, actual: req.fieldValue, result: 'PASS' };
       }
       if ((req.alsoAccept || []).some((a) => normField && normField.includes(normalizeWs(a).toLowerCase()))) {
         return { expected: req.expectedValue, actual: req.fieldValue, result: 'PASS', reason: req.alsoAcceptNote || 'Accepted alternative value.' };
+      }
+      // A time field showing the clock time without AM/PM ("12:00" for the payload's "12:00 AM" — DIG201 Time of Loss).
+      const tm = normExpected.match(/^(\d{1,2}):(\d{2})\s*[ap]\.?m\.?$/);
+      if (tm && new RegExp(`^0?${Number(tm[1])}:${tm[2]}$`).test(normField)) {
+        return { expected: req.expectedValue, actual: req.fieldValue, result: 'PASS', reason: 'Same clock time; the field shows it without AM/PM.' };
       }
       const fieldDate = dateVariants(req.expectedValue).find((d) => String(req.fieldValue || '').includes(d));
       if (fieldDate) return { expected: req.expectedValue, actual: req.fieldValue, result: 'PASS', reason: `Same date, printed in the template's format ("${fieldDate}").` };

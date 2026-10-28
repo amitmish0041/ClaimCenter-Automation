@@ -2695,7 +2695,9 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
           : printedNumberForms(result.value).length
             ? { alsoAccept: [...(result.alsoAccept || []), ...printedNumberForms(result.value)], alsoAcceptNote: result.alsoAcceptNote || 'Same number as the payload, printed with thousands separators / a dollar sign / cents.' }
             : { alsoAccept: result.alsoAccept, alsoAcceptNote: result.alsoAcceptNote }),
-      fieldValue: matchedCheck ? (matchedCheck.committedMarker || matchedCheck.after || matchedCheck.before) : undefined,
+      // The field's own shown value. Never the marker we typed: matchedCheck excludes edits that took, so a marker here is
+      // one that did NOT land (DIG201 2026-10-28: "QA-EDIT-25" compared with Time Began Work while the field showed 12:00).
+      fieldValue: matchedCheck ? (matchedCheck.before || matchedCheck.after) : undefined,
       fieldLabel: matchedCheck ? matchedCheck.label : undefined,
       wasEditedByTest: !matchedCheck && editedByTest,
       // What the edited field(s) showed BEFORE the test's edit — checked against the payload value when the edit consumed
