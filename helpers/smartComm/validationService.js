@@ -1111,7 +1111,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // precondition failure too. GENERATE_TIMEOUT (neither a result nor an
     // error ever showed up) stays an ERROR — that's an unexplained hang, not
     // a confirmed CC-side "can't run this" response.
-    if (err.message.startsWith('TEMPLATE_NOT_FOUND') || err.message.startsWith('GENERATE_FAILED') || err.message.startsWith('INTERACTIVE_NOT_ENABLED') || err.message.startsWith('INTERACTIVE_NEEDS_APPROVAL')) {
+    if (err.message.startsWith('TEMPLATE_NOT_FOUND') || err.message.startsWith('GENERATE_FAILED') || err.message.startsWith('GENERATE_NO_DOCUMENT') || err.message.startsWith('INTERACTIVE_NOT_ENABLED') || err.message.startsWith('INTERACTIVE_NEEDS_APPROVAL')) {
       console.log(`[SmartComm] BLOCKED ${scenario.scenarioId}: ${err.message}`);
       // An approval-gated document still had its editor checked (fields, locked text) before the block — keep
       // those results; a failure among them is a real finding even without a completed PDF.

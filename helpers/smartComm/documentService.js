@@ -894,7 +894,17 @@ async function generateOnDemand(page, { fileNamePrefix = 'SmartComm' } = {}) {
   const winner = await Promise.race([
     resultRow.waitFor({ state: 'visible', timeout: 120000 }).then(() => 'row').catch(() => 'row-timeout'),
     errorBanner.waitFor({ state: 'visible', timeout: 120000 }).then(() => 'error').catch(() => 'error-timeout'),
+    // DIG4 (CONFIRMED live 2026-10-29, 3/3 claims): Generate closes the whole Create New Document panel -
+    // no row, no error, no popup/download, nothing filed on the claim. Waiting the full 120s for a row
+    // that can't come looked like a stuck run; notice the closed wizard instead.
+    page.getByRole('tab', { name: L.create.tab, exact: true }).waitFor({ state: 'detached', timeout: 120000 })
+      .then(async () => { await page.waitForTimeout(3000); return (await resultRow.isVisible().catch(() => false)) ? 'row' : 'closed'; })
+      .catch(() => 'closed-timeout'),
   ]);
+
+  if (winner === 'closed') {
+    throw new Error('GENERATE_NO_DOCUMENT: clicking Generate closed the Create New Document wizard without producing a document (no results row, no error, nothing filed on the claim). ClaimCenter/SmartCOMM side - not an automation failure.');
+  }
 
   if (winner === 'error') {
     const message = (await errorBanner.innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
