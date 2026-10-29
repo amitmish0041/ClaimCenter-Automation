@@ -358,19 +358,11 @@ async function showMessages(page) {
 // the default list — e.g. Insurance Auto Auctions for CPD.015).
 async function selectVendorByTaxId(page, search, taxId) {
   await W.openPayeeSearch(page);
-  await W.settle(page, 3500);
-  await W.select(page, 'Type', 'Vendor (Company)').catch(() => {});
-  await page.getByLabel('Name', { exact: true }).last().fill(search);
-  await page.getByRole('button', { name: 'Search', exact: true }).last().click();
-  await W.settle(page, 4500);
-  const row = page.locator('tr').filter({ hasText: taxId }).filter({ has: page.getByRole('button', { name: 'Select', exact: true }) }).last();
-  if (!await row.isVisible().catch(() => false)) {
+  if (!await W.searchAddressBookVendor(page, search, taxId)) {
     const found = await page.evaluate(() => [...document.querySelectorAll('tr')].filter((r) => !r.querySelector('tr') && /\d\d-\d{7}/.test(r.innerText || '')).map((r) => (r.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 90)).slice(0, 5)).catch(() => []);
     await page.getByRole('button', { name: 'Cancel', exact: true }).first().click().catch(() => {});
     throw new W.Blocked(`vendor "${search}" with Tax ID ${taxId} not found in the TEST Address Book${found.length ? ` (search returned: ${found.join(' | ')})` : ' (search returned nothing)'}`);
   }
-  await row.getByRole('button', { name: 'Select', exact: true }).first().click();
-  await W.settle(page, 3500);
 }
 
 // Add Joint Payees with an extra resolver: who '@person' = a PERSON contact on the claim who is neither the insured

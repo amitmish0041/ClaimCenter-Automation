@@ -702,14 +702,41 @@ function vendors() {
 // Opens the Name picker's Search. On Quick Payment the icon click sometimes leaves the menu closed, and the Search
 // item then exists but is hidden ("Element is not visible" — CONFIRMED 2026-10-27, GCCM-1003 CPD-Joint TC-252):
 // click the icon again until the item shows.
+// Opens the Address Book search from the Primary Payee Name menu and waits for its Search button. The menu sometimes
+// never shows (GCCM-799 CPD-Joint TC-81, 2026-10-27, two workers): a force-click on the hidden item did nothing and the
+// next fill landed on the payee Name <select>. So the whole open is retried, and a search screen that never appears is
+// reported as such.
 async function openPayeeSearch(page) {
   const icon = page.locator('[id$="PrimaryPayee_Name-PrimaryPayee_NameMenuIcon"]').first();
   const item = page.locator('[id$="PrimaryPayee_Name-MenuItem_Search"]').first();
-  for (let i = 0; i < 4 && !await item.isVisible().catch(() => false); i++) {
-    await icon.click({ force: true }).catch(() => {});
-    await item.waitFor({ state: 'visible', timeout: 2500 }).catch(() => {});
+  const searchBtn = page.getByRole('button', { name: 'Search', exact: true }).last();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    for (let i = 0; i < 4 && !await item.isVisible().catch(() => false); i++) {
+      await icon.click({ force: true }).catch(() => {});
+      await item.waitFor({ state: 'visible', timeout: 2500 }).catch(() => {});
+    }
+    if (await item.isVisible().catch(() => false)) await item.click({ force: true }).catch(() => {});
+    if (await searchBtn.waitFor({ state: 'visible', timeout: 8000 }).then(() => true, () => false)) return;
+    await page.keyboard.press('Escape').catch(() => {});
+    await settle(page, 1500);
   }
-  await item.click({ force: true });
+  throw new Error('the Address Book search did not open from the Primary Payee Name menu (3 tries)');
+}
+
+// On the Address Book search screen (after openPayeeSearch): search vendors by name and Select the row with `taxId`.
+// Returns false (search cancelled) when no such row comes back. The Name box is taken as a textbox so it can never be
+// the wizard's payee Name dropdown.
+async function searchAddressBookVendor(page, search, taxId) {
+  await settle(page, 3500);
+  await select(page, 'Type', 'Vendor (Company)').catch(() => {});
+  await page.getByRole('textbox', { name: 'Name', exact: true }).last().fill(search);
+  await page.getByRole('button', { name: 'Search', exact: true }).last().click();
+  await settle(page, 4500);
+  const row = page.locator('tr').filter({ hasText: taxId }).filter({ has: page.getByRole('button', { name: 'Select', exact: true }) }).last();
+  if (!await row.isVisible().catch(() => false)) return false;
+  await row.getByRole('button', { name: 'Select', exact: true }).first().click();
+  await settle(page, 3500);
+  return true;
 }
 
 async function selectVendorPayee(page, index = 0) {
@@ -717,18 +744,10 @@ async function selectVendorPayee(page, index = 0) {
   if (!v) throw new Blocked(`no vendor #${index + 1} configured (ONEINC_VENDORS)`);
   // force: on Quick Payment a plain click on the icon container never opened the menu (CONFIRMED 2026-10-21).
   await openPayeeSearch(page);
-  await settle(page, 3500);
-  await select(page, 'Type', 'Vendor (Company)').catch(() => {});
-  await page.getByLabel('Name', { exact: true }).last().fill(v.search || v.name);
-  await page.getByRole('button', { name: 'Search', exact: true }).last().click();
-  await settle(page, 4500);
-  const row = page.locator('tr').filter({ hasText: v.taxId }).filter({ has: page.getByRole('button', { name: 'Select', exact: true }) }).last();
-  if (!await row.isVisible().catch(() => false)) {
+  if (!await searchAddressBookVendor(page, v.search || v.name, v.taxId)) {
     await page.getByRole('button', { name: 'Cancel', exact: true }).first().click().catch(() => {});
     throw new Blocked(`vendor "${v.name}" (Tax ID ${v.taxId}) not found in the Address Book search`);
   }
-  await row.getByRole('button', { name: 'Select', exact: true }).first().click();
-  await settle(page, 3500);
   return `${v.name} (${v.taxId})`;
 }
 
@@ -1048,6 +1067,6 @@ async function currentStep(page) {
 module.exports = {
   Blocked, fillTotalAmount, settle, inWizard, openClaim, newPaymentErrorText, repairSurcharging, assignClaimAndExposures, abilityToPayErrors, abilityToPay, repairVehicleVins, lienholders, addClaimContactWithRole, addClaimPersonContact, addVehicleLoan, addIncidentLoan, addDigitalPaymentAccount, repairClaimantAddress, getParties, optionsOf, select, fill, answer, answerUnansweredNo, clickButton,
   visibleMenuItems, openActionsMenu, closeMenus, navigate, openFinancialsRowMenu,
-  openPayment, cancelWizard, selectPayee, addJointPayees, selectVendorPayee, openPayeeSearch, vendors, selectReserveLine, availableReserves, fillLineItem, completePaymentsStep, next, nextFillingServicePeriod, fillRequiredEmpties, serverError, currentStep,
+  openPayment, cancelWizard, selectPayee, addJointPayees, selectVendorPayee, openPayeeSearch, searchAddressBookVendor, vendors, selectReserveLine, availableReserves, fillLineItem, completePaymentsStep, next, nextFillingServicePeriod, fillRequiredEmpties, serverError, currentStep,
   warningsOnly,
 };
