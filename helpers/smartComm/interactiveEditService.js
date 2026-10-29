@@ -660,6 +660,8 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue
   // would never be found as this field's edit — use the short fallback marker (QA-EDIT-n) for that field instead.
   const maxLength = Number(await popupInput.getAttribute('maxlength').catch(() => null)) || 0;
   if (fallbackValue && /-edited[.,;:!?]*$/.test(newValue) && maxLength > 0 && newValue.length > maxLength) newValue = fallbackValue;
+  // Every editable span's text before typing (editor open) — to tell a twin rendering of this field's data from another field.
+  const spansBefore = await field.locator.evaluate((own) => Array.from(own.ownerDocument.querySelectorAll('span.th-data-value-editable')).map((x) => (x.textContent || '').replace(/\s+/g, ' ').trim())).catch(() => []);
   await popupInput.fill(newValue).catch((e) => log(`[Interactive] Could not fill the inline editor for "${field.stripped}": ${e.message}`));
   // CONFIRMED live 2026-09-30 (65-template sweep, DIG239): a <textarea>-based field is otherwise identical
   // to the <input> one, but Enter there inserts a newline instead of committing — every unedited required
@@ -695,6 +697,21 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue
     const block = (el) => el.closest('p, li, td, th') || el.parentElement;
     return block(hit) === block(own) ? { after: clean(hit.textContent) } : { after: null, landedElsewhere: clean(hit.textContent) };
   }, plain).catch(() => ({ after: null }));
+  // The same data item drawn twice (DIG210 2026-10-29: three spans bound to ClaimantAddressLine1, all showing
+  // "[800-877-0600 x4316]"): the edit shows in a twin span that held exactly this field's value before — that's
+  // this field's edit, not a different field's. A span that held something else (DIG242's "Our Insured") still isn't.
+  if (placement.landedElsewhere && spansBefore.length) {
+    const twin = await field.locator.evaluate((own, [needle, before, was]) => {
+      const sq = (t) => (t || '').replace(/\s+/g, '').toLowerCase();
+      const spans = Array.from(own.ownerDocument.querySelectorAll('span.th-data-value-editable'));
+      // By value, not index: the snapshot is taken with the editor open, so this field's own span may be missing from it.
+      const hit = spans.find((x) => x !== own && sq(x.textContent).includes(sq(needle)));
+      const plainOf = (t) => sq(t).replace(/[[\]]/g, '');
+      const copied = plainOf(needle) === `${plainOf(before)}-edited`;
+      return hit && copied && was.some((t) => plainOf(t) === plainOf(before)) && !sq(own.textContent).includes(sq(needle)) ? (hit.textContent || '').replace(/\s+/g, ' ').trim() : null;
+    }, [plain, String(before), spansBefore]).catch(() => null);
+    if (twin) { log(`[Interactive] "${plain}" shows in a twin span of the same data (it held "${before}" too) — counted as this field's edit.`); placement.after = twin; delete placement.landedElsewhere; }
+  }
   const after = placement.after;
   if (placement.landedElsewhere) log(`[Interactive] "${plain}" typed for "${field.labelContext || field.stripped}" landed in a different field ("${placement.landedElsewhere}") — not counted as this field's edit.`);
   // `after` is the LIVE EDITOR's own display text, which CONFIRMED live double-wraps an already-bracketed
@@ -899,6 +916,9 @@ async function readOverlayTextFields(frame) {
       const pageH = (img && Number(img.getAttribute('height'))) || form.clientHeight;
       form.querySelectorAll('.th-overlay-textfield').forEach((el) => {
         if (el.closest('.th-frag-locked') || el.querySelector('.th-frag-locked')) return;
+        // A box holding a merge field ("Ashley Heaps" — DIG2118/DIG210, 2026-10-29) is a data field the interactive
+        // check already edits, not a blank line; typing "OVn" after its value never took.
+        if (el.querySelector('span.th-data-value, span.th-data-value-editable')) return;
         const px = (p) => parseFloat(el.style[p]) || 0;
         const text = (el.textContent || '').replace(/[¶ ]/g, ' ').replace(/\s+/g, ' ').trim();
         out.push({ id: el.id, page, pageW, pageH, left: px('left'), top: px('top'), width: px('width'), height: px('height'), text });
@@ -919,7 +939,11 @@ async function typeIntoOverlayField(frame, page, field, value) {
     await page.keyboard.type(value);
     await page.waitForTimeout(120);
     const now = await box.evaluate((el) => (el.textContent || '').replace(/[¶ ]/g, ' ').replace(/\s+/g, ' ').trim()).catch(() => '');
-    return { typed: now.includes(value), after: now };
+    if (now.includes(value)) return { typed: true, after: now };
+    // Tiny neighbouring boxes (DIG2118 "OV50OV51", 2026-10-29): the click focused the next box and the text went there.
+    const neighbour = await box.evaluate((el, v) => Array.from((el.closest('.th-overlay-form') || document).querySelectorAll('.th-overlay-textfield'))
+      .some((o) => o !== el && (o.textContent || '').includes(v)), value).catch(() => false);
+    return { typed: false, after: now, landedInNeighbour: neighbour };
   } catch (e) {
     return { typed: false, after: '', error: e.message.split('\n')[0] };
   }

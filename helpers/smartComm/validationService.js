@@ -2165,7 +2165,7 @@ async function editOverlayFields(frame, page, log) {
     const kind = isOverlayCheckbox(f) ? 'checkbox' : 'text';
     const value = kind === 'checkbox' ? 'X' : `OV${++textN}`;
     const r = await interactiveEditService.typeIntoOverlayField(frame, page, f, value);
-    edits.push({ ...f, kind, value, typed: r.typed, error: r.error || null });
+    edits.push({ ...f, kind, value, typed: r.typed, landedInNeighbour: !!r.landedInNeighbour, error: r.error || null });
   }
   const sum = (k) => { const all = edits.filter((e) => e.kind === k); return `${all.filter((e) => e.typed).length}/${all.length}`; };
   log(`overlay form: typed into ${sum('checkbox')} checkbox(es) ("X") and ${sum('text')} free-form line(s) ("OVn")`);
@@ -2278,9 +2278,11 @@ async function buildOverlayChecks(edits, pdfPath, log, mappingFreeForm = []) {
       id: `OVL-T${i + 1}`,
       description: `Free-form line "${label}" (page ${e.page + 1}) can be typed into and prints what was typed`,
       expected: e.value,
-      actual: !e.typed ? 'Could not type into it' : e.printed ? e.value : 'Not printed in its box',
-      result: e.typed && e.printed ? 'PASS' : 'FAIL',
-      reason: !e.typed
+      actual: !e.typed ? (e.landedInNeighbour ? 'Typed text went into the next box' : 'Could not type into it') : e.printed ? e.value : 'Not printed in its box',
+      result: e.typed && e.printed ? 'PASS' : !e.typed && e.landedInNeighbour ? 'BLOCKED' : 'FAIL',
+      reason: !e.typed && e.landedInNeighbour
+        ? `The click landed in a neighbouring box (they sit very close), so "${e.value}" went there — the test's own click, not a template defect; check this line by hand.`
+        : !e.typed
         ? `The mapping doc marks this line "Free Form/Editable", but typing into it in the editor didn't take${e.error ? ` (${e.error})` : ''}.`
         : e.printed ? '' : `"${e.value}" was typed into this line in the editor but isn't printed inside its box in the generated PDF.`,
     });
@@ -2508,6 +2510,8 @@ function annotateInteractiveEditFailures(validations, interactiveChecks) {
     const beforeValues = hits.map((h) => h.before).filter(Boolean);
     const beforeOk = beforeValues.some((b) => {
       const bn = normForKnownValueMatch(b);
+      // A short value equal to what the field showed ("GMC" / "[GMC]" — DIG128 2026-10-29) is a match too.
+      if (bn && bn === expectedNorm) return true;
       return expectedNorm.length >= minLen && bn.length >= minLen && (expectedNorm.includes(bn) || bn.includes(expectedNorm));
     });
     v.intentionalEdit = true; // report renderers: still show Expected/Actual for this one
@@ -2855,7 +2859,9 @@ function buildMetadataChecks(meta, { template, claimNumber }) {
   const norm = (s) => String(s == null ? '' : s).trim().toUpperCase().replace(/\s+/g, ' ');
   const checks = [];
   const dig = String(template.digNumber || '');
-  const digOk = !!dig && new RegExp(`\\b${dig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(meta.Description || '');
+  // "DIG 102 Auto Affidavit Theft" names DIG102 too (2026-10-29) — a space after "DIG" is allowed.
+  const digPattern = dig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/^DIG/i, 'DIG\\s*');
+  const digOk = !!dig && new RegExp(`\\b${digPattern}\\b`, 'i').test(meta.Description || '');
   checks.push({
     id: 'META1',
     description: 'Archive .json Description identifies this template (DIG number present)',

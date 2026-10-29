@@ -247,8 +247,11 @@ function findNearWording(haystack, expectedValue, maxExtra = 2) {
 // only. Returns { value, accept[], note } or null for any other row / a value that isn't a date.
 function dateLossPart(attributeName, value) {
   const which = (String(attributeName || '').match(/\b(day|month|year)\s*$/i) || [])[1];
-  if (!which) return null;
+  // Only parts of a date ("Date of Loss Year"): "Vehicle Year" 2016 went through new Date("2016") — midnight UTC, Dec 31
+  // 2015 in US time — and expected "2015" (DIG128, 2026-10-29).
+  if (!which || !/date|loss|\bD\/?O\/?L\b/i.test(attributeName)) return null;
   const s = String(value || '').trim();
+  if (/^\d{4}$/.test(s)) return /year/i.test(which) ? { value: s, accept: [s], note: `"${attributeName}" is one part of a date (${s}).` } : null;
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   const d = iso ? new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])) : new Date(s);
   if (Number.isNaN(d.getTime())) return null;
@@ -488,6 +491,20 @@ function evaluateOne(req, haystack, context) {
       const noTicks = normHaystack.replace(/(^|\s)x(?=\s)/g, '$1').replace(/\s+/g, ' ');
       if (!/(^|\s)x(\s|$)/i.test(req.expectedValue) && noTicks.includes(normalizeWs(req.expectedValue).toLowerCase())) {
         return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Printed intact; a ticked checkbox ("X") sits inside the line.' };
+      }
+      // 6. A word hyphenated across a line break ("comple- tos", "físi- cas", "WC- 117" — DIG150MIS, 2026-10-29): rejoin and look again.
+      const joinBreaks = (t) => normalizeWs(String(t || '').replace(/(\p{L})[-­]\s+(\p{Ll}|\d)/gu, '$1$2')).toLowerCase();
+      const wantJoined = joinBreaks(req.expectedValue);
+      if (!/_{3,}/.test(req.expectedValue) && /\p{L}[-­]\s+[\p{Ll}\d]/u.test(`${haystack}\n${layout}`)
+        && [haystack, layout].some((t) => t && (joinBreaks(t).includes(wantJoined) || wordsInOrder(joinBreaks(t), wantJoined)))) {
+        return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Printed intact; a word is hyphenated across a line break.' };
+      }
+      // 7. A form caption printed under a blank ("(TRANSFEROR’S NAME)") lands mid-sentence in the PDF text —
+      //    "DESCRIBED BELOW / (TRANSFEROR’S NAME) / NOW READS ____" (DIG128, 2026-10-29). Drop caption-only lines; a blank of any length is a blank.
+      const captionless = haystack.replace(/\n[ \t]*\([^()\n]{2,40}\)[ \t]*(?=\n)/g, ' ');
+      const blanks = (t) => normalizeWs(t).toLowerCase().replace(/\s*_{3,}\s*/g, ' ___ ').replace(/\s+/g, ' ');
+      if (captionless !== haystack && blanks(captionless).includes(blanks(req.expectedValue))) {
+        return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Printed intact; a form caption from the line above sits inside it in the PDF text.' };
       }
       const near = findNearWording(haystack, req.expectedValue);
       if (near) {
