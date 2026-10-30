@@ -219,9 +219,14 @@ async function execute(page, items, res, ctx, capture) {
     if (!screen) { screen = await readScreen(page); captured = false; }
     return screen;
   };
-  const record = async (row) => {
+  const record = async (row, focus) => {
     const s = await current();
-    if (!captured) { row.screenshot = await capture(`check-${res.checks.length + 1}`, s); captured = true; }
+    // ClaimCenter scrolls inside its own panel, so fullPage only ever shows the top of the screen. A check about a
+    // field/column gets its own shot with that label scrolled into view and highlighted.
+    if (focus && await reveal(page, focus)) {
+      row.screenshot = await capture(`check-${res.checks.length + 1}`, s);
+      await unreveal(page);
+    } else if (!captured) { row.screenshot = await capture(`check-${res.checks.length + 1}`, s); captured = true; }
     res.checks.push(row);
     ctx.log(`[OneInc] ${res.scenarioId}:   ${row.result} — ${row.description} (actual: ${String(row.actual).slice(0, 140)})`);
   };
@@ -306,6 +311,31 @@ async function resolveValue(page, value) {
   return `${String(base.getMonth() + 1).padStart(2, '0')}/${String(base.getDate()).padStart(2, '0')}/${base.getFullYear()}`;
 }
 
+// Scrolls the on-screen label `text` (field label or column header) into the middle of its scrolling panel and marks it
+// yellow for the evidence shot. False when no visible label matches, so the caller falls back to the plain shot.
+async function reveal(page, text) {
+  return page.evaluate((want) => {
+    const n = (t) => String(t || '').replace(/\s+/g, ' ').trim().replace(/[?*:]+$/, '').trim().toLowerCase();
+    const w = n(want);
+    const hits = [...document.querySelectorAll('label, th, td, div, span')].filter((e) => e.offsetParent !== null
+      && n(e.textContent) === w && ![...e.children].some((c) => n(c.textContent) === w));
+    const el = hits.find((e) => /label/i.test(e.tagName + ' ' + e.className)) || hits[0];
+    if (!el) return false;
+    el.scrollIntoView({ block: 'center', inline: 'nearest' });
+    el.setAttribute('data-oneinc-reveal', el.getAttribute('style') || '');
+    el.style.background = '#fff200';
+    el.style.outline = '2px solid #e0a800';
+    return true;
+  }, text).catch(() => false);
+}
+
+async function unreveal(page) {
+  await page.evaluate(() => document.querySelectorAll('[data-oneinc-reveal]').forEach((e) => {
+    e.setAttribute('style', e.getAttribute('data-oneinc-reveal'));
+    e.removeAttribute('data-oneinc-reveal');
+  })).catch(() => {});
+}
+
 function row(type, description, expected, actual, result, extra = {}) {
   return { type, description, expected, actual, result, ...extra };
 }
@@ -340,7 +370,7 @@ async function evaluate(item, s, state, record) {
     if (q.radios && !q.radios.every(has)) problems.push(`choices are ${opts.join('/') || 'none'}`);
     if (q.value && !q.value.test(f.value || '')) problems.push(`value is "${f.value || ''}"`);
     const actual = `shown${f.required ? ', required' : ''}${editable ? ', editable' : ', read-only'}${f.value ? `, value "${String(f.value).slice(0, 60)}"` : ''}${opts.length ? `, options: ${opts.slice(0, 15).join(' | ')}` : ''}${problems.length ? ' — ' + problems.join('; ') : ''}`;
-    return record(row('field', `"${q.label}" shown`, expected, actual, problems.length ? 'FAIL' : 'PASS', { missing }));
+    return record(row('field', `"${q.label}" shown`, expected, actual, problems.length ? 'FAIL' : 'PASS', { missing }), q.label);
   }
   if (item.absent) {
     const lbl = norm(item.absent.label).replace(/[?*:]+$/, '');
@@ -350,13 +380,13 @@ async function evaluate(item, s, state, record) {
   if (item.fieldKind) {
     const f = findField(s, item.fieldKind.label);
     const ok = f && f.kind === item.fieldKind.kind;
-    return record(row('fieldKind', `"${item.fieldKind.label}" is a ${item.fieldKind.kind} entry`, item.fieldKind.kind, f ? f.kind : 'not on the screen', ok ? 'PASS' : 'FAIL', { missing: !f }));
+    return record(row('fieldKind', `"${item.fieldKind.label}" is a ${item.fieldKind.kind} entry`, item.fieldKind.kind, f ? f.kind : 'not on the screen', ok ? 'PASS' : 'FAIL', { missing: !f }), f && item.fieldKind.label);
   }
   if (item.header) {
     const present = s.headers.some((h) => norm(h) === norm(item.header.name));
     const ok = present === item.header.present;
     return record(row('header', `Column "${item.header.name}" ${item.header.present ? 'shown' : 'not shown'}`, item.header.present ? 'column shown' : 'column not shown',
-      present ? 'column shown' : `not shown (columns: ${s.headers.slice(0, 20).join(', ')})`, ok ? 'PASS' : 'FAIL', { missing: !present && item.header.present }));
+      present ? 'column shown' : `not shown (columns: ${s.headers.slice(0, 20).join(', ')})`, ok ? 'PASS' : 'FAIL', { missing: !present && item.header.present }), present && item.header.name);
   }
   if (item.button) {
     const present = s.buttons.some((b) => norm(b) === norm(item.button.name));
