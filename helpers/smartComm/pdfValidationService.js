@@ -507,6 +507,14 @@ function evaluateOne(req, haystack, context) {
         return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Printed intact; a form caption from the line above sits inside it in the PDF text.' };
       }
       const near = findNearWording(haystack, req.expectedValue);
+      // The "near" line swaps a real word for another ("Name of Purchaser(s)" vs the printed "Name of the Seller(s)" —
+      // DIG128MI 2026-10-30, where Purchaser/Lessee/Lessor all "matched" the one Seller line): that's a DIFFERENT line,
+      // so this wording is missing, not reworded.
+      const words = (t) => new Set((String(t).toLowerCase().match(/\p{L}{5,}/gu) || []));
+      const nw = near ? words(near) : new Set();
+      if (near && /\(please print\)|\bname of\b/i.test(req.expectedValue) && [...words(req.expectedValue)].some((w) => !nw.has(w) && ![...nw].some((x) => x.startsWith(w.slice(0, 4))))) {
+        return { expected: req.expectedValue, actual: 'Not Found', result: 'FAIL', reason: `Not printed: the closest line in the document ("${near.replace(/\s+/g, ' ').trim()}") is a different line, not this one reworded.` };
+      }
       if (near) {
         return {
           expected: req.expectedValue, actual: near, result: 'FAIL',
@@ -780,14 +788,20 @@ function evaluateOne(req, haystack, context) {
   }
 }
 
+const STATE_CODES = { alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA', colorado: 'CO', connecticut: 'CT', delaware: 'DE', 'district of columbia': 'DC', florida: 'FL', georgia: 'GA', hawaii: 'HI', idaho: 'ID', illinois: 'IL', indiana: 'IN', iowa: 'IA', kansas: 'KS', kentucky: 'KY', louisiana: 'LA', maine: 'ME', maryland: 'MD', massachusetts: 'MA', michigan: 'MI', minnesota: 'MN', mississippi: 'MS', missouri: 'MO', montana: 'MT', nebraska: 'NE', nevada: 'NV', 'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY', 'north carolina': 'NC', 'north dakota': 'ND', ohio: 'OH', oklahoma: 'OK', oregon: 'OR', pennsylvania: 'PA', 'rhode island': 'RI', 'south carolina': 'SC', 'south dakota': 'SD', tennessee: 'TN', texas: 'TX', utah: 'UT', vermont: 'VT', virginia: 'VA', washington: 'WA', 'west virginia': 'WV', wisconsin: 'WI', wyoming: 'WY' };
+
 function evaluateRequirements(requirements, text, context) {
   const haystack = text || '';
-  return requirements.map(req => ({
-    id: req.id,
-    description: req.description,
-    docOrder: req.docOrder,
-    ...evaluateOne(req, haystack, context),
-  }));
+  return requirements.map((req) => {
+    let res = evaluateOne(req, haystack, context);
+    // A state value the payload spells out ("Michigan") that the letter prints as its code ("MI 49740-8400" — DIG152
+    // Accident State, 2026-10-29). Upper-case whole word only, so "in"/"or"/"me" in running text never count.
+    const code = res.result === 'FAIL' && STATE_CODES[normalizeWs(req.expectedValue).toLowerCase()];
+    if (code && new RegExp(`(^|[^A-Za-z])${code}(?![A-Za-z])`).test(haystack)) {
+      res = { expected: req.expectedValue, actual: code, result: 'PASS', reason: `Printed as the state's code "${code}".` };
+    }
+    return { id: req.id, description: req.description, docOrder: req.docOrder, ...res };
+  });
 }
 
 module.exports = { extractPdfText, evaluateRequirements, normalizeWs, dateLossPart, claimantsOf, wholeWord };

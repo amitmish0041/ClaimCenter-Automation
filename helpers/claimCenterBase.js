@@ -274,6 +274,24 @@ async function loginToClaimCenter(page, { username, password } = {}) {
     // login form — the credentials were dropped — so the old single 30s wait for Search always failed. The 3rd
     // scenario's login then worked, which is why every other scenario errored on teammates' admin-only runs.
     // Now: let the form settle, and if it comes back still showing an empty login form, fill and submit again.
+    // CONFIRMED 2026-10-30 (bulk run, 13 scenarios on DIG37/39/40/77/118/119): after a scenario whose Complete
+    // Document hit "HTTP status: 503", the next login's page never showed the login form — it was either still
+    // signed in from the previous scenario or a ClaimCenter error page. Signed in → drop the session cookies and
+    // reload; neither form nor app → reload (up to 3 tries) instead of failing on the first 30s wait.
+    for (let loadTry = 1; ; loadTry++) {
+      const deadline = Date.now() + 30_000;
+      let state = 'none';
+      while (Date.now() < deadline) {
+        if (await usernameField.isVisible().catch(() => false)) { state = 'form'; break; }
+        if (await searchMenu.isVisible().catch(() => false)) { state = 'in-app'; break; }
+        await page.waitForTimeout(500);
+      }
+      if (state === 'form') break;
+      if (loadTry >= 3) break; // the waitFor below reports the timeout as before
+      console.log(`CC Login: no login form after loading ClaimCenter (${state === 'in-app' ? 'still signed in from an earlier scenario — signing out' : 'page didn\'t load'}), retrying (${loadTry}/2)`);
+      if (state === 'in-app') await page.context().clearCookies().catch(() => {});
+      await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+    }
     for (let attempt = 1; ; attempt++) {
       await usernameField.waitFor({ state: 'visible', timeout: 30_000 });
       await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});

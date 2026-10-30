@@ -289,7 +289,9 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
   };
   return edited.map((c, i) => {
     const label = labelOf(c);
-    const labelOk = !label || docCompact.includes(compact(label)) || docCompact.includes(compact(label.replace(/^(?:re:\s*)?our\s+/i, '')));
+    // A "label" of 8+ words is the tail of the paragraph before the field, not a label (DIG12 2026-10-29: "…provides
+    // coverage in accordance with the Ohio law." before a state-specific paragraph) — the static-text checks cover it.
+    const labelOk = !label || label.trim().split(/\s+/).length >= 8 || docCompact.includes(compact(label)) || docCompact.includes(compact(label.replace(/^(?:re:\s*)?our\s+/i, '')));
     // A field that holds ONE part of a date ("Date of Loss Day" → "6", DIG28/DIG30 "which occurred on or about the [6]
     // day of [August]") is compared with that part of the source date, not the whole "August 06, 2026" (false FAIL
     // 2026-10-23) — the same narrowing the PDF checks already do (pdfValidationService.dateLossPart).
@@ -320,6 +322,18 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
     let beforeState = src ? (placeholder ? 'no default' : src.values.some(fieldMatches) ? 'match' : 'mismatch')
       : (placeholder ? 'free-form' : knownValue ? 'known' : inTemplate ? 'template' : payloadHit ? 'payload' : 'unverifiable');
     if (beforeState === 'no default' && condReq) beforeState = 'conditional';
+    // The field shows ANOTHER of the claim's values (the agency name, the adjuster, a phone, the vehicle year): the
+    // dictionary row was paired with the neighbouring field, not this one — a pairing slip in this tool, not a
+    // template defect (2026-10-30 bulk run: DIG12/DIG96 "cc:" rows, DIG75 MAKE = "2002", DIG54217 Insured = adjuster).
+    let mispairedWith = null;
+    if (beforeState === 'mismatch' && !(String(c.committedMarker || '') === 'X' && /^\[?\s*\]?$/.test(before.trim()))) {
+      const other = [...knownValues, { name: 'additional recipient', value: addr.name }, { name: 'agent number', value: claim.policy && claim.policy.producerCode }]
+        .find((k) => k.value && !src.values.some((v) => sameValue(k.value, v)) && sameValue(before, k.value));
+      const shape = /^\[?\s*(?:\(?\d{3}\)?[\s.-]?\d{3}-\d{4}(?:\s*x\d+)?|(?:19|20)\d{2})\s*\]?$/i.test(before.trim()) && !/\d/.test(src.value) ? 'a phone number / year' : null;
+      const inPayload = !other && !shape ? payloadValueMatching(beforeText) : null;
+      mispairedWith = other ? `the claim's ${other.name}` : shape || (inPayload && !src.values.some((v) => sameValue(inPayload, v)) ? `another payload value ("${inPayload}")` : null);
+      if (mispairedWith) beforeState = 'mispaired';
+    }
     // A checkbox ("[ ]" ticked with "X" — DIG219's "Return to work" boxes) has no ClaimCenter value; whatever its label
     // matched in the dictionary, only the label and the X in the PDF apply.
     const isCheckbox = String(c.committedMarker || '') === 'X' && /^\[?\s*\]?$/.test(before.trim());
@@ -334,7 +348,7 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
     if (beforeState === 'no default') problems.push(`before the edit it was an empty placeholder ("${before}") instead of the ${src.from} value "${src.value}" — no default value`);
     if (!inPdf && !c.lostInEditor) problems.push(`the edited value "${finalShown}" is not in the completed PDF${c.replacedBy ? ` — that spot printed "${c.replacedBy}" (another row's edit of the same field) instead` : ''}`);
     // An edit another test edit typed over before Complete (c.lostInEditor) can't be confirmed by the PDF: BLOCKED.
-    const result = problems.length ? 'FAIL' : (beforeState === 'unverifiable' || c.lostInEditor) ? 'BLOCKED' : beforeState === 'conditional' ? 'SKIPPED' : 'PASS';
+    const result = problems.length ? 'FAIL' : (beforeState === 'unverifiable' || beforeState === 'mispaired' || c.lostInEditor) ? 'BLOCKED' : beforeState === 'conditional' ? 'SKIPPED' : 'PASS';
     return {
       id: `EDIT${i + 1}`, description: `Edited field ${c.id} "${label || c.label}"${c.dictionaryField ? ` (${c.dictionaryField})` : ''}: label, value before edit, value after edit`,
       expected: isCheckbox ? '(checkbox — no default)' : src ? src.value : (beforeState === 'free-form' ? '(free-form — no default)' : beforeState === 'payload' ? `${payloadHit} (payload, found by value)` : '(no ClaimCenter/payload value)'),
@@ -342,6 +356,7 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
       result,
       reason: problems.length ? `${problems.join('; ')}.`
         : c.lostInEditor ? `This field's edit ("${c.committedMarker}") was typed over by another test edit in the editor before Complete Document (field positions shifted while editing), so the PDF can't confirm it — not verifiable, not a template defect.`
+        : beforeState === 'mispaired' ? `Before the edit it showed "${before}", which is ${mispairedWith}, not the ${src.from} "${c.dictionaryField || label}" value "${src.value}" — this tool matched the "${c.dictionaryField || label}" row to the neighbouring field, so this field's value can't be judged here. The edited value is in the PDF. Not a template defect.`
         : beforeState === 'known' ? `Label is fine; before the edit it showed "${before}", the claim's ${knownValue.name}; the edited value is in the PDF.`
         : beforeState === 'payload' ? `Before the edit it showed "${before}", which is this claim's value in the SmartCOMM payload ("${payloadHit}" — found by value; the Data Dictionary names no source for this field); the edited value is in the PDF.`
         : beforeState === 'unverifiable' ? `Label is in the mapping doc and the edit is in the PDF, but this field has no ClaimCenter/payload value to compare its pre-edit value "${before}" with.`
@@ -1279,6 +1294,11 @@ function buildEditValue(field, n, digNumber, editableValues = []) {
   // "2026" by the editor and the edit came out BLOCKED (2026-10-27). A distinct far-future year stays a valid, unique
   // year the PDF check can find.
   if (/^\[?\s*(19|20)\d\d\s*\]?$/.test(String(field.stripped || field.text || '').trim())) return String(2090 + n);
+  // A field already showing a DATE ("[09/13/1954]", "[March 23, 2026]") is a date-typed field even when the
+  // dictionary row wasn't matched by label: "09/13/1954-edited" is rejected (DIG15S date of birth, DIG84 policy
+  // effective date — "value never appeared", 2026-10-30). Type another valid date in the same format instead.
+  const shown = String(field.stripped || field.text || '').replace(/[[\]]/g, '').trim();
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(shown)) return buildDateValue(shown, n);
   // A field that already shows a value gets that value + "-edited" ("John Smith" -> "John Smith-edited"), so the
   // edited letter reads like real data (user direction 2026-10-18). No brackets (user direction 2026-10-17): they were
   // typed as part of the value and printed in the completed PDF ("RECEIVED OF [QA-EDIT-4] HEREINAFTER…").
@@ -1583,10 +1603,16 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // known-value passes, the report, the retry loop) sees the exact same ordered array as the old order did.
   // Every editable field's value as first read — buildEditValue copies a field's value into its edit only when no other
   // field shows the same text (the first pass and the retry passes both judge against these original values).
-  const editableValues = fields.filter((f) => f.editable && !f.inUnselectedChoice).map((f) => f.stripped);
+  // Runs once for the page the editor opens on and once per further Document Map page (`encl` set — see
+  // editOtherDocumentPages below). A further page's fields are numbered from encl.no * 100 so their QA-EDIT
+  // markers never repeat the first page's (INT2.3 types QA-EDIT-203).
+  let editableValues = []; // the current page's — the retry pass that follows each first pass reads it too
+  const editFieldsFirstPass = async (fields, checks, encl = null) => {
+  const base = encl ? encl.no * 100 : 0;
+  editableValues = fields.filter((f) => f.editable && !f.inUnselectedChoice).map((f) => f.stripped);
   for (let fi = fields.length - 1; fi >= 0; fi--) {
     const field = fields[fi];
-    const n = field.idx + 1;
+    const n = base + field.idx + 1;
     // This field is a duplicate copy living inside a Choices-panel option that ISN'T the one we selected (see
     // readMergeFields' own `inUnselectedChoice` — CONFIRMED live 2026-10-06, DIG36: SmartCOMM previews every
     // option's paragraph simultaneously). It can never survive into the actual generated document, so editing
@@ -1647,10 +1673,11 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     const shown = String(outcome.before || '').replace(/[[\]]/g, '').trim().toLowerCase();
     if (match && match.row && /state$/i.test(match.row.attributeName) && shown && !stateName(shown)) match = null;
     const dictRow = match && match.row;
-    interactiveChecks.push({
-      id: `INT${n}`,
-      idx: field.idx,
-      label: pickFieldLabel(n, field, outcome, dictRow),
+    checks.push({
+      id: encl ? `INT${encl.no}.${field.idx + 1}` : `INT${n}`,
+      idx: base + field.idx, // unique across pages — the PDF checks pair neighbouring fields by idx
+      ...(encl ? { documentPage: encl.title } : {}),
+      label: `${encl ? `[${encl.title}] ` : ''}${pickFieldLabel(n, field, outcome, dictRow)}`,
       labelContext: field.labelContext || null, technicalName: outcome.technicalName || null,
       expectedEditable: field.editable, observedChanged: outcome.changed, result,
       before: outcome.before, after: outcome.after, committedMarker: outcome.committedMarker, reason: outcome.note,
@@ -1662,7 +1689,9 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   }
   // Built last-to-first above (to beat Thunderhead's span drift) — restore natural field order so the
   // known-value passes' "first match wins" logic, the report, and the retry loop all see fields in order.
-  interactiveChecks.sort((a, b) => a.idx - b.idx);
+  checks.sort((a, b) => a.idx - b.idx);
+  };
+  await editFieldsFirstPass(fields, interactiveChecks);
   // Known-value matching: several dictionary-tracked fields render with NO preceding label at all, so no
   // amount of label-text matching above can ever connect them — CONFIRMED by user direction 2026-10-05 (real
   // Data Dictionary rows read directly): To Name/To Street Address/To City-State-Zip come straight from
@@ -1716,6 +1745,9 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // DIFFERENT field's internal reflow, only by edits to text earlier in the SAME block) fixes this; position
   // is now only a same-editable-only fallback, specifically so a field that's now locked at the old position
   // (the exact drift symptom) is never wrongly mistaken for the real target.
+  const normalizeLabelForRematch = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  // Same per-page split as editFieldsFirstPass: `checks` is one page's own checks, `base` its field numbering.
+  const retryUneditedFields = async (checks, base = 0) => {
   let retryRound = 0;
   // CONFIRMED live 2026-10-04 (DIG53): a field whose committed value shows up NOWHERE on the page afterward
   // (interactiveEditService's own `vanished` flag — a non-text-typed field silently rejecting free text, not
@@ -1724,11 +1756,11 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // never reordered) rather than by a live DOM idx, which is exactly what can no longer be trusted round to
   // round.
   const hopelessIdx = new Set();
-  const normalizeLabelForRematch = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();  // The authoritative "what still needs work" list, driven entirely by OUR OWN interactiveChecks state (never
+  // The authoritative "what still needs work" list, driven entirely by OUR OWN interactiveChecks state (never
   // by a live DOM read) — same reasoning as the user-confirmed fix above it: trust what we already recorded,
   // don't re-derive it from a page that may have reflowed.
   function pendingRetryTargets() {
-    return interactiveChecks
+    return checks
       .map((c, i) => ({ c, i }))
       .filter(({ c, i }) => !hopelessIdx.has(i) && c.expectedEditable === true && c.result !== 'PASS');
   }
@@ -1757,9 +1789,9 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       }
       if (field) { claimed.add(field.idx); relocated.push({ field, target: t }); } else { stillMissing.push(t); }
     }
-    log(`Second pass #${retryRound}: ${targets.length} editable field(s) still not edited (${relocated.length} relocated, ${stillMissing.length} could not be relocated this round) — retrying: ${relocated.map(({ target }) => `#${target.i + 1}`).join(', ')}`);
+    log(`Second pass #${retryRound}: ${targets.length} editable field(s) still not edited (${relocated.length} relocated, ${stillMissing.length} could not be relocated this round) — retrying: ${relocated.map(({ target }) => `#${base + target.i + 1}`).join(', ')}`);
     for (const { field, target } of relocated) {
-      const n2 = target.i + 1;
+      const n2 = base + target.i + 1;
       // A field that swallowed the text edit and looks numeric (SSN / ZIP / phone / amount, or a number-only value) is
       // retried with digits — DIG15's Claimant SSN rejected "QA-EDIT-4" every time ("value never appeared", a false FAIL
       // 2026-10-23). Four digits, so a last-4 / short field accepts it too.
@@ -1782,12 +1814,58 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       } else if (outcome.note) {
         existing.reason = `Still failing after retry pass #${retryRound}: ${outcome.note}`;
         if (outcome.vanished) {
+          // A typed-field that silently drops even a correctly-shaped value (DIG84 policy effectiveDate took
+          // "04/13/2026" and showed nothing, 2026-10-30) can't be edited by this tool — that's unverified, not a
+          // template defect.
+          existing.result = 'BLOCKED';
+          existing.reason += ' — this tool can\'t edit this field type, so its editability isn\'t verified (not counted as a template defect).';
           hopelessIdx.add(target.i);
           log(`field #${n2}: giving up after this attempt — value vanishes completely, not just a timing/retry issue.`);
         }
       }
     }
     targets = pendingRetryTargets();
+  }
+  return { retryRound, targets, hopelessIdx };
+  };
+  const { retryRound, targets, hopelessIdx } = await retryUneditedFields(interactiveChecks);
+
+  // A template made of several pages (enclosures) shows them one at a time; the Document Map lists them all
+  // (per user direction 2026-10-29, DIG122A: 5 pages). Every further page is opened, left to load fully, and
+  // edited exactly like the first (same first pass + retries, plus its free-form boxes); each page's own
+  // edits are checked as still there before moving on, since the editor only shows one page's fields at a
+  // time. Ends back on the first page, so the steps below (free-form boxes, final read, Save/Complete) see
+  // the page they always have. A single-page document lists one entry (or none) and skips all of this.
+  const otherPageOverlayEdits = [];
+  const otherPageUnedited = [];
+  const docPages = await interactiveEditService.listDocumentMapEntries(frame);
+  if (docPages.length > 1) {
+    log(`Document Map: ${docPages.length} pages — ${docPages.join(' | ')}`);
+    for (let p = 1; p < docPages.length; p++) {
+      const encl = { no: p + 1, title: docPages[p] };
+      if (!await interactiveEditService.openDocumentMapEntry(frame, page, p)) {
+        log(`Document Map: page ${encl.no} "${encl.title}" never finished loading — its fields are not edited.`);
+        interactiveChecks.push({ id: `INT${encl.no}`, idx: -1, documentPage: encl.title, label: `[${encl.title}] page`, expectedEditable: null, result: 'BLOCKED', reason: `Page ${encl.no} of the document ("${encl.title}") didn't finish loading from the Document Map, so its fields couldn't be edited.` });
+        continue;
+      }
+      let pageFields = await interactiveEditService.readMergeFields(frame);
+      if (!pageFields.length) { await page.waitForTimeout(2000); pageFields = await interactiveEditService.readMergeFields(frame); }
+      log(`Document Map page ${encl.no} "${encl.title}": ${pageFields.length} merge field(s) (${pageFields.filter((f) => f.editable).length} editable)`);
+      const pageChecks = [];
+      await editFieldsFirstPass(pageFields, pageChecks, encl);
+      const r = await retryUneditedFields(pageChecks, encl.no * 100);
+      otherPageUnedited.push(...r.targets.map((t) => t.c), ...[...r.hopelessIdx].map((i) => pageChecks[i]));
+      otherPageOverlayEdits.push(...(await editOverlayFields(frame, page, log, encl.no * 100)).map((e) => ({ ...e, documentPage: encl.title })));
+      // Still there after the whole page is done (same test as the final read further down does for page 1).
+      const finalTexts = (await interactiveEditService.readMergeFields(frame)).map((x) => String(x.stripped || x.text || ''));
+      for (const c of pageChecks) {
+        const m = String(c.committedMarker || c.after || '').replace(/[[\]]/g, '').trim();
+        if (c.observedChanged === true && m && !finalTexts.some((t) => t.includes(m))) c.goneBeforeComplete = true;
+      }
+      interactiveChecks.push(...pageChecks);
+      log(`Document Map page ${encl.no}: ${pageChecks.filter((c) => c.result === 'PASS').length} passed, ${pageChecks.filter((c) => c.result === 'FAIL').length} failed (${pageChecks.length} field(s))`);
+    }
+    if (!await interactiveEditService.openDocumentMapEntry(frame, page, 0)) log('Document Map: the first page did not finish reloading — continuing anyway.');
   }
   // Still failing after every retry for a reason that's about the TEST's own editing, not the template — the typed value
   // landed in another field, or no editor opened — is BLOCKED (not verifiable), not FAIL: DIG161's Claimant Name was
@@ -1806,7 +1884,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // `targets` here is the FINAL post-loop pendingRetryTargets() result — still-authoritative, driven by our
   // own interactiveChecks state, not a live DOM read. Genuinely unedited for THIS purpose either way: Complete
   // Document doesn't care why a field never got filled, only that it didn't.
-  const trulyUneditedCount = targets.length + hopelessIdx.size;
+  const trulyUneditedCount = targets.length + hopelessIdx.size + otherPageUnedited.length;
   if (trulyUneditedCount) {
     log(`WARNING: ${trulyUneditedCount} editable field(s) remain unedited after ${retryRound} retry pass(es) (${hopelessIdx.size} given up on as unfillable, ${targets.length} still genuinely pending) — Complete Document will very likely fail and revert ALL edits (CONFIRMED live: even one unedited required field does this).`);
     if (process.env.DEBUG_STUCK_FIELD_HTML) {
@@ -1840,7 +1918,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // Document + reading Document Properties takes. So the archive is watched from just BEFORE Complete Document,
   // on the shared S3 page, and handed the identifier once it's known; whatever the watch didn't catch still
   // falls back to the regular search below.
-  const overlayEdits = await editOverlayFields(frame, page, log);
+  const overlayEdits = [...await editOverlayFields(frame, page, log), ...otherPageOverlayEdits];
   let resolveIdentifier;
   const identifierKnown = new Promise((resolve) => { resolveIdentifier = resolve; });
   const archiveWatch = s3Session.withPage((s3Page) => s3AdminService.watchArchiveForIdentifier(s3Page, identifierKnown, documentService.DOWNLOAD_DIR, { log }))
@@ -1862,7 +1940,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       return finalTexts.some((t) => (re ? re.test(t) : t.includes(m)));
     };
     for (const c of interactiveChecks) {
-      if (c.observedChanged !== true || holds(c.committedMarker || c.after)) continue;
+      if (c.documentPage || c.observedChanged !== true || holds(c.committedMarker || c.after)) continue; // other pages: checked on their own page above
       c.goneBeforeComplete = true;
       const kin = interactiveChecks.filter((o) => o !== c && o.observedChanged === true && o.technicalName && o.technicalName === c.technicalName && holds(o.committedMarker || o.after));
       c.replacedBeforeComplete = kin.length ? kin.map((o) => String(o.committedMarker || o.after).replace(/[[\]]/g, '')) : null;
@@ -2012,6 +2090,11 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
         c.reason = c.expectedEditable
           ? 'This field is editable in the live session but could not be matched to any tracked Data Dictionary row (or that row\'s own editability is unspecified) — not counted as a pass or fail; please validate manually whether this is expected.'
           : 'No tracked Data Dictionary row (with a stated editability) matched this field — not validated here; this field\'s own content/value, if any, is already covered by the template\'s own requirement checks.';
+      } else if (c.dictionaryAgrees === false && !c.dictionaryEditable && c.expectedEditable && /^policy\s*(number|no\.?)$/i.test(String(c.dictionaryField).trim())) {
+        // QA's own bugs say Policy Number must be editable (SMART-1417 DIG9, DIG40, DIG47, DIG58, DIG79) — the
+        // dictionary's "locked" for it is stale. 2026-10-30 bulk run: 14 templates FAILed on this alone.
+        c.result = 'PASS';
+        c.reason = 'Policy Number is editable. The Data Dictionary still says locked, but QA\'s Jira bugs (SMART-1417 and others) require it to be editable, so editable is correct.';
       } else if (c.dictionaryAgrees === false) {
         c.result = 'FAIL';
         c.reason = `Data Dictionary says "${c.dictionaryField}" should be ${c.dictionaryEditable ? 'editable' : 'locked'}, but the live document has it ${c.expectedEditable ? 'editable' : 'locked'} — the dictionary is the source of truth, so this is a genuine defect, not just an internal inconsistency.`;
@@ -2156,11 +2239,12 @@ async function buildPageAndFraudChecks(pdfPath, text, { mentionsFraudLanguage })
 // Distance cells are ~40pt wide. Typed before Save Changes, so the values are committed with everything else.
 const OVERLAY_CHECKBOX_MAX_PX = 16;
 const isOverlayCheckbox = (f) => f.width <= OVERLAY_CHECKBOX_MAX_PX && f.height <= OVERLAY_CHECKBOX_MAX_PX;
-async function editOverlayFields(frame, page, log) {
+// `textStart`: a further Document Map page numbers its lines from encl.no * 100 (OV401…), so values never repeat across pages.
+async function editOverlayFields(frame, page, log, textStart = 0) {
   const fields = await interactiveEditService.readOverlayTextFields(frame);
   if (!fields.length) return [];
   const edits = [];
-  let textN = 0;
+  let textN = textStart;
   for (const f of fields) {
     const kind = isOverlayCheckbox(f) ? 'checkbox' : 'text';
     const value = kind === 'checkbox' ? 'X' : `OV${++textN}`;
@@ -2259,24 +2343,33 @@ function freeFormBlanksCheck(mappingFreeForm, interactiveChecks, unlockedParagra
 
 async function buildOverlayChecks(edits, pdfPath, log, mappingFreeForm = []) {
   const pages = await require('./pdfLayoutText').extractPositionedItems(pdfPath).catch(() => []);
+  // A further Document Map page (e.documentPage) numbers its pages from 0 again, while the PDF runs all of them
+  // in one sequence — so its PDF page is the one where the value printed in this box (DIG122A 2026-10-29: every
+  // enclosure's boxes were checked against PDF page 1). Not printed anywhere: its own number, as before.
   for (const e of edits) {
-    e.label = overlayRowLabel(pages[e.page], e);
-    e.printed = e.typed && overlayValuePrinted(pages[e.page], e);
+    e.pdfPage = e.page;
+    if (e.documentPage && e.typed) {
+      const hit = pages.findIndex((pg, p) => p >= e.page && overlayValuePrinted(pg, e));
+      if (hit >= 0) e.pdfPage = hit;
+    }
+    e.pageKey = `${e.documentPage || ''}#${e.pdfPage}`;
+    e.label = overlayRowLabel(pages[e.pdfPage], e);
+    e.printed = e.typed && overlayValuePrinted(pages[e.pdfPage], e);
   }
   // "Sitting, box 3 of 4" — boxes sharing a row (same top) are numbered left to right.
   for (const e of edits.filter((x) => x.kind === 'checkbox')) {
-    const row = edits.filter((x) => x.kind === 'checkbox' && x.page === e.page && Math.abs(x.top - e.top) <= 2).sort((a, c) => a.left - c.left);
+    const row = edits.filter((x) => x.kind === 'checkbox' && x.pageKey === e.pageKey && Math.abs(x.top - e.top) <= 2).sort((a, c) => a.left - c.left);
     e.where = `${e.label || `row at ${Math.round(e.top)}px`}, box ${row.indexOf(e) + 1} of ${row.length}`;
   }
   const checks = [];
   edits.filter((e) => e.kind === 'text').forEach((e, i) => {
     // A field sitting in a table column ("0-10 lbs" under "Height") is named by both; a lone line by its label.
-    const header = overlayColumnHeader(pages[e.page], e);
+    const header = overlayColumnHeader(pages[e.pdfPage], e);
     const label = [e.label, header && header !== e.label && !/^_+$/.test(header) ? header : ''].filter(Boolean).join(' / ')
       || `line at ${Math.round(e.left)},${Math.round(e.top)}px`;
     checks.push({
       id: `OVL-T${i + 1}`,
-      description: `Free-form line "${label}" (page ${e.page + 1}) can be typed into and prints what was typed`,
+      description: `Free-form line "${label}" (${e.documentPage ? `${e.documentPage}, ` : ''}page ${e.pdfPage + 1}) can be typed into and prints what was typed`,
       expected: e.value,
       actual: !e.typed ? (e.landedInNeighbour ? 'Typed text went into the next box' : 'Could not type into it') : e.printed ? e.value : 'Not printed in its box',
       result: e.typed && e.printed ? 'PASS' : !e.typed && e.landedInNeighbour ? 'BLOCKED' : 'FAIL',
@@ -2307,15 +2400,17 @@ async function buildOverlayChecks(edits, pdfPath, log, mappingFreeForm = []) {
       reason: `The mapping doc has ${d.n} "Free Form/Editable" blank(s) for "${d.label}", but the live form has ${live} — the user has nowhere to write it (same defect as Jira SMART-1522).`,
     });
   });
-  const pagesWithBoxes = [...new Set(edits.filter((e) => e.kind === 'checkbox').map((e) => e.page))];
-  for (const p of pagesWithBoxes) {
-    const boxes = edits.filter((e) => e.kind === 'checkbox' && e.page === p);
+  const pagesWithBoxes = [...new Set(edits.filter((e) => e.kind === 'checkbox').map((e) => e.pageKey))];
+  for (const [gi, key] of pagesWithBoxes.entries()) {
+    const boxes = edits.filter((e) => e.kind === 'checkbox' && e.pageKey === key);
+    const p = boxes[0].pdfPage;
+    const where = boxes[0].documentPage ? `${boxes[0].documentPage}, page ${p + 1}` : `page ${p + 1}`;
     const notTyped = boxes.filter((e) => !e.typed);
     const notPrinted = boxes.filter((e) => e.typed && !e.printed);
     const list = (xs) => xs.slice(0, 15).map((e) => e.where).join('; ') + (xs.length > 15 ? `; +${xs.length - 15} more` : '');
     checks.push({
-      id: `OVL-C${p + 1}`,
-      description: `Checkboxes on page ${p + 1} (${boxes.length}) accept an "X" and print it in the right box`,
+      id: `OVL-C${gi + 1}`,
+      description: `Checkboxes on ${where} (${boxes.length}) accept an "X" and print it in the right box`,
       expected: `${boxes.length} of ${boxes.length} printed`,
       actual: `${boxes.length - notTyped.length - notPrinted.length} of ${boxes.length} printed`,
       result: notTyped.length || notPrinted.length ? 'FAIL' : 'PASS',
@@ -2514,8 +2609,21 @@ function annotateInteractiveEditFailures(validations, interactiveChecks) {
       if (bn && bn === expectedNorm) return true;
       return expectedNorm.length >= minLen && bn.length >= minLen && (expectedNorm.includes(bn) || bn.includes(expectedNorm));
     });
+    // A fixed LABEL row ("Static content must appear: "Our Policy Number:"") is about the wording, not the field after
+    // it — DIG40 2026-10-30 was judged on the policy number the field held. Leave it to the static-text verdict.
+    if (/^(static content must appear|label ")/i.test(v.description || '') && !beforeOk) continue;
     v.intentionalEdit = true; // report renderers: still show Expected/Actual for this one
     v.actual = `Before edit: "${beforeValues.join(' ')}" → after edit: "${editedValue}"`;
+    // The field was picked by its label, but what it held has the wrong SHAPE for this value — a year/number/state code
+    // where a name or make was expected (DIG75 "Vehicle Make" = "[2002]", DIG57 "Claimant Name" = "[DE]", 2026-10-30):
+    // the label sits next to a different field. BLOCKED, as for the EDIT row — a pairing slip in this tool.
+    const clash = !beforeOk && /[a-z]{3}/i.test(v.expected || '') && !/\d/.test(v.expected || '')
+      && beforeValues.every((b) => /^[\d\s()./x-]+$|^[A-Z]{2}$/i.test(String(b).replace(/[[\]]/g, '').trim()));
+    if (clash) {
+      v.result = 'BLOCKED';
+      v.reason = `The field next to this label showed "${beforeValues.join(' ')}" before the edit — a number/code, not a "${v.expected}"-type value — so this tool paired the label with the neighbouring field. Can't be judged here; not a template defect.`;
+      continue;
+    }
     v.result = beforeOk ? 'PASS' : 'FAIL';
     v.reason = beforeOk
       ? `Showed the expected value before the interactive-edit test overwrote it with "${editedValue}" (${hits.map((h) => h.id).join(', ')}), and the edited value is in the completed PDF — correct before and after the edit.`
@@ -2605,6 +2713,12 @@ function linkTextFieldsToDictionary(template, requirements, xpathRequirements, r
     // ...and a formatting note like "(redact all numbers with X except last 4)" (DIG201 R54, 2026-10-28) is about how a
     // neighbouring field prints, not a field of its own.
     if (!row && /^\s*\(?\s*(redact|mask)\b/i.test(r.fieldName)) return { ...r, enabled: false, disabledReason: `"${r.fieldName}" is a formatting note for a neighbouring field, not a data field of its own.` };
+    // ...and a BA sentence describing behaviour ("PACE notice language will be able to be dynamically added and removed
+    // in SmartCOMM." DIG12 R24; "“Occurrence” value is written on every letter" DIG152 R34 — 2026-10-29): a statement,
+    // not a field name.
+    if (!row && r.fieldName.trim().split(/\s+/).length >= 6 && /\b(will be|is written|are written|able to|dynamically|should be|on every)\b/i.test(r.fieldName)) {
+      return { ...r, enabled: false, disabledReason: `"${r.fieldName}" is a note in the mapping doc describing how the letter behaves, not a data field.` };
+    }
     if (!row && /^\s*free\s*form/i.test(r.fieldName)) return { ...r, enabled: false, disabledReason: `"${r.fieldName}" marks a free-text spot the user fills in — no data field behind it to compare.` };
     if (!row) return { ...r, unmappedReason: `"${r.fieldName}" has no matching Data Dictionary row for ${template.digNumber}, so there's no payload value to compare it with — presence not verified.` };
     const xp = xpathRequirements.find((x) => x.dictionaryAttribute === row.attributeName);

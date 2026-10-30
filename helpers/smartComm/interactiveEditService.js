@@ -642,6 +642,14 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue
   // Checkbox fields ("checkBox1", shown as "[ ]") take an "X", not a text marker — per user direction 2026-10-17;
   // the earlier bulk runs show "[QA-EDIT-n]" typed into them never stuck (still "[ ]" afterwards).
   if (newValue !== undefined && /^check\s*box/i.test(technicalName || '')) newValue = 'X';
+  // The reverse: an EMPTY text field also shows as "[ ]", so it was given an "X" too — DIG15S claimantDOB /
+  // claimantAddress, DIG1043 insuredName (2026-10-30: "no span with the new value", FAIL). A real name that isn't a
+  // checkbox gets a normal text marker (a date for a date-named field).
+  // Only names that clearly hold data — checkboxes come as "cb1", "checkBox2", "opt3"… (DIG128MI).
+  else if (newValue === 'X' && /name|address|dob|birth|date|city|state|zip|phone|ssn|email|number|amount/i.test(technicalName || '')
+    && !/^c(heck)?b(ox)?\d*$|check|chk/i.test(technicalName)) {
+    newValue = /dob|date|birth/i.test(technicalName) ? '01/15/1990' : (fallbackValue || 'QA-EDIT');
+  }
 
   if (newValue === undefined) {
     // Identify only — cancel without committing (CONFIRMED live safe: Escape leaves the field unchanged).
@@ -958,9 +966,53 @@ async function readDocumentPropertiesIdentifier(page) {
   return m[0];
 }
 
+// ── 6. Document Map: a template's other pages (enclosures) ──────────────────────────────────────────
+// CONFIRMED live 2026-10-29 (DIG122A): the right-hand "Document Map" tab (li[data-toolid="document"]) lists
+// every enclosure of the document as an accordion header (a[data-collapse] > .th-ui-accordion-panel-title);
+// the editor shows ONE enclosure at a time - clicking a header swaps the document pane to that enclosure
+// ("Loading..." while it renders) and its own merge fields replace the previous ones in the DOM (22 / 5 / 4 /
+// 2 / 3 fields on DIG122A's five). The expanded Choices panel overlaps the tab strip and swallows a real
+// pointer click, so both clicks are DOM clicks.
+async function listDocumentMapEntries(frame) {
+  const tab = frame.locator('li[data-toolid="document"]');
+  if (!await tab.count().catch(() => 0)) return [];
+  await tab.evaluate((e) => e.click()).catch(() => {});
+  const headers = frame.locator('.th-de-docmap-accordion a[data-collapse]');
+  await headers.first().waitFor({ state: 'attached', timeout: 10000 }).catch(() => {});
+  return headers.evaluateAll((as) => as.map((a) => {
+    const t = a.querySelector('.th-ui-accordion-panel-title');
+    return (t ? t.textContent : a.textContent || '').replace(/\s+/g, ' ').trim();
+  })).catch(() => []);
+}
+
+// Opens enclosure #i and waits until it has fully loaded: header expanded, no "Loading" text, and the editor's
+// merge-field count unchanged across two reads 1.5s apart. Returns false if it never settles.
+async function openDocumentMapEntry(frame, page, i, { timeoutMs = 60000 } = {}) {
+  const header = frame.locator('.th-de-docmap-accordion a[data-collapse]').nth(i);
+  await header.evaluate((e) => e.click());
+  const deadline = Date.now() + timeoutMs;
+  let last = -1;
+  let lastState = null;
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(1500);
+    const state = await frame.evaluate(() => ({
+      // A VISIBLE "Loading…" element only — the editor keeps hidden "Loading" text in its DOM all the time.
+      loading: [...document.querySelectorAll('body *')].filter((e) => e.children.length === 0 && /^\s*Loading/i.test(e.textContent || '') && !/complete/i.test(e.textContent || '')
+        && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden').map((e) => `${e.tagName}.${e.className}: ${e.textContent.trim().slice(0, 40)}`)[0] || false,
+      count: document.querySelectorAll('span.th-data-value-editable, span.th-data-value').length,
+    })).catch(() => ({ loading: true, count: -1 }));
+    const expanded = await header.getAttribute('aria-expanded').catch(() => null);
+    if (expanded === 'true' && !state.loading && state.count === last) return true;
+    last = state.loading ? -1 : state.count;
+    lastState = { expanded, ...state };
+  }
+  console.log(`[SmartComm] Document Map entry ${i} did not settle: ${JSON.stringify(lastState)}`);
+  return false;
+}
+
 module.exports = {
   clickInteractiveAndWaitForEditor, getEditorFrame, readMergeFields, inspectAndMaybeEdit,
   saveChanges, completeDocument, dismissAnyPopups, readDocumentPropertiesIdentifier, saveDiagnostic,
   installDialogAutoAccept, selectAllYesNoChoices, readUnlockedContent, probeParagraphEditable,
-  readOverlayTextFields, typeIntoOverlayField,
+  readOverlayTextFields, typeIntoOverlayField, listDocumentMapEntries, openDocumentMapEntry,
 };

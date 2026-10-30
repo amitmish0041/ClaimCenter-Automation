@@ -225,7 +225,10 @@ function makeDynamicRequirement(n, fieldName, value, { conditional = false, cond
   const field = synonyms.lookup(fieldName) || synonyms.lookup(String(fieldName || '').split(/\s+[-–]\s+|\s*\(/)[0]);
   // "Date of Letter" whose comment anchors only part of the sample date (DIG129/190–192: just "2026") is still a
   // date — checked as date-shaped instead of BLOCKED with no shape (2026-10-17).
-  const shape = classifyDynamicShape(value) || (/^date of letter$/i.test(String(fieldName || '').trim()) ? 'date' : 'text');
+  let shape = classifyDynamicShape(value) || (/^date of letter$/i.test(String(fieldName || '').trim()) ? 'date' : 'text');
+  // An SSN / FEIN / tax id field whose mock-up sample happens to be 10 digits isn't a phone number (DIG15S "Claimant
+  // SSN" FAILed as "no phone-shaped value", 2026-10-30) — it's usually redacted, so no shape is assumed.
+  if (shape === 'phone' && /\b(ssn|social security|fein|tax\s*id|ein)\b/i.test(String(fieldName || ''))) shape = 'text';
   // A CONDITIONAL field with no dictionary mapping and a generic "text" shape is very likely a static,
   // toggleable content block (e.g. a letterhead paragraph shown only when a Choices-panel question is Yes)
   // rather than an unrecognized PER-CLAIM placeholder sample value — CONFIRMED live 2026-10-02 (DIG52's

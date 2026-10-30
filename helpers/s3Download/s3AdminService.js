@@ -370,7 +370,26 @@ async function searchSmartComm(page, key, { log = console.log, retries } = {}) {
 // smartcomm > input. Same Document Properties Identifier as the PDF resolves this too (CONFIRMED live
 // 2026-09-30), making the Create tab's own "Download Payload" button (frequently unavailable in this Test
 // environment) unnecessary — this is fetched in the SAME S3 visit as the PDF instead.
-async function searchSmartCommPayload(page, key, { log = console.log } = {}) {
+// CONFIRMED live 2026-10-30 (bulk run, 32 of 329 scenarios): the input folder holds well over 1000 payloads, and
+// both the admin API's folder listing and the UI's "Filter by key" only ever see the first 1000 keys in
+// alphabetical order, so every payload whose GUID sorts late (all the misses started with e/f) was reported
+// "0 matches" although it was there. Listing with the full key as the PREFIX returns just that object, so the
+// API is asked first (polling briefly for upload lag); the UI search stays as the fallback.
+async function searchSmartCommPayload(page, key, { log = console.log, maxWaitMs = 20000 } = {}) {
+  const holder = await ensureApiAuth(page, { log }).catch(() => ({}));
+  if (holder.authorization) {
+    const started = Date.now();
+    for (;;) {
+      const objs = await apiList(page, `${INPUT_PREFIX}/${key}`, { log }).catch(() => []);
+      if (objs.length) {
+        log(`[S3] "${key}" → ${objs.length} match(es) under ClaimCenter Outbound > smartcomm > input (admin API)`);
+        return objs.map((o) => ({ text: o.key, apiKey: o.key }));
+      }
+      if (Date.now() - started > maxWaitMs) break;
+      await page.waitForTimeout(3000);
+    }
+    log(`[S3] "${key}" → 0 matches under ClaimCenter Outbound > smartcomm > input via the admin API — trying the folder search as well...`);
+  }
   return searchNode(page, INPUT_NODE, key, { log, folderDescription: 'ClaimCenter Outbound > smartcomm > input' });
 }
 
@@ -427,6 +446,7 @@ async function downloadMatches(page, matches, outDir, { log = console.log } = {}
   await forcePdfDownloads(context);
   const results = [];
   for (const m of matches) {
+    if (m.apiKey) { results.push(await apiDownload(page, m.apiKey, outDir, { log })); continue; }
     const downloadBtn = m.row.getByRole('button', { name: 'Download' })
       .or(m.row.locator('[aria-label="Download"], [title="Download"]')).first();
     const pagesBefore = new Set(context.pages());
@@ -663,15 +683,23 @@ async function findAllForKey(page, key, { log = console.log } = {}) {
   const docs = await listForKey(page, key, { log });
   const archive = docs.filter((o) => o.where === 'archive');
   const chosen = archive.length ? archive : docs; // processing only when the archive has none
-  const input = (await apiList(page, INPUT_PREFIX, { log }).catch(() => []))
+  const input = (await listUnder(page, INPUT_PREFIX, key, { log }))
     .filter((o) => String(o.key).includes(key)).map((o) => ({ ...o, where: 'input (payload)' }));
   return [...chosen, ...input];
 }
 
+// Objects under `folder` for `key`. A bare folder listing stops at 1000 keys (alphabetical — CONFIRMED live
+// 2026-10-30, input and processing both hold more), hiding late-sorting GUIDs, so folder + key is listed as a
+// PREFIX first; a key that is only a fragment from the middle of a name (the S3 download tool accepts those)
+// finds nothing that way, so the plain folder listing is still the fallback.
+async function listUnder(page, folder, key, { log } = {}) {
+  const byPrefix = await apiList(page, `${folder}/${key}`, { log }).catch(() => []);
+  return byPrefix.length ? byPrefix : apiList(page, folder, { log }).catch(() => []);
+}
+
 // Objects whose key contains `key`, from the archive first, then the processing fallback.
 async function listForKey(page, key, { log } = {}) {
-  const [archive, processing] = await Promise.all([ARCHIVE_PREFIX, PROCESSING_PREFIX]
-    .map((p) => apiList(page, p, { log }).catch(() => [])));
+  const [archive, processing] = await Promise.all([ARCHIVE_PREFIX, PROCESSING_PREFIX].map((p) => listUnder(page, p, key, { log })));
   const pick = (objs, where) => objs.filter((o) => String(o.key).includes(key)).map((o) => ({ ...o, where }));
   return [...pick(archive, 'archive'), ...pick(processing, 'processing (fallback)')];
 }
