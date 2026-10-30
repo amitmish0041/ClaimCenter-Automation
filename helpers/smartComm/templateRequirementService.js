@@ -806,7 +806,7 @@ function buildTemplatesDirIndex(templatesDir) {
   if (!fs.existsSync(templatesDir)) return templatesDirIndexCache;
   for (const file of fs.readdirSync(templatesDir)) {
     const full = path.join(templatesDir, file);
-    if (!fs.statSync(full).isFile()) continue;
+    try { if (!fs.statSync(full).isFile()) continue; } catch { continue; }
     const ext = path.extname(file);
     const key = normalizeFilenameStem(file.slice(0, file.length - ext.length));
     const existing = templatesDirIndexCache.get(key);
@@ -834,7 +834,8 @@ function buildDigPrefixIndex(templatesDir) {
   if (!fs.existsSync(templatesDir)) return digPrefixIndexCache;
   for (const file of fs.readdirSync(templatesDir)) {
     const full = path.join(templatesDir, file);
-    if (!fs.statSync(full).isFile()) continue;
+    let st; try { st = fs.statSync(full); } catch { continue; } // a listed-but-unreadable file (DIG0 letterhead, 2026-10-30) must not stop the run
+    if (!st.isFile()) continue;
     const m = file.match(/^(DIG\d+[A-Z0-9]*)/i);
     if (!m) continue;
     const key = m[1].toUpperCase();

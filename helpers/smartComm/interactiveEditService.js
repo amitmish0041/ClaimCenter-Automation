@@ -650,6 +650,33 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue
     && !/^c(heck)?b(ox)?\d*$|check|chk/i.test(technicalName)) {
     newValue = /dob|date|birth/i.test(technicalName) ? '01/15/1990' : (fallbackValue || 'QA-EDIT');
   }
+  // Generic names ("editableField7", DIG202 2026-10-30) say nothing, so the layout decides: a checkbox starts its
+  // line/cell, while an empty TEXT field follows its label — "$[ ]", "on [ ]", "Other: [ ]", or a cell after "Account Number:".
+  else if (newValue === 'X' && !/^c(heck)?b(ox)?\d*$|check|chk/i.test(technicalName || '')) {
+    const textField = await field.locator.evaluate((el) => {
+      // Each block ends with a hidden "¶" control mark (th-control-code-off) — not text.
+      const clean = (t) => (t || '').replace(/¶/g, '').replace(/\s+/g, ' ').trim();
+      const block = el.closest('td, th, p, li') || el.parentElement;
+      if (!block) return false;
+      const r = el.ownerDocument.createRange();
+      r.setStart(block, 0); r.setEndBefore(el);
+      const before = clean(r.toString()).replace(/\[\s*\]/g, '').trim();
+      // Only a label end ("Other:", "$") or a preposition ("on", "dated") — "(including [ ] admission" and
+      // "reports, [ ] x-ray" are checkboxes mid-line (DIG202).
+      if (before) return /[:$#]$|\b(on|of|for|to|by|at|dated|from|is|was|in|until)$/i.test(before);
+      const cell = el.closest('td, th');
+      const prev = cell && cell.previousElementSibling;
+      if (prev && /:$/.test(clean(prev.textContent))) return true;
+      // A data-entry grid (DIG202 mileage table: Date / Facility / Reason / Mileage): every cell in the row is an
+      // empty field, nothing else — a checkbox row always has its label text in a cell next to it (DIG51).
+      const row = cell && cell.closest('tr');
+      if (!row || row.cells.length < 2) return false;
+      // Field values don't count — a cell already given its marker earlier in this pass still has no label text.
+      const labelText = (c) => { const k = c.cloneNode(true); k.querySelectorAll('span.th-data-value-editable').forEach((s) => s.remove()); return clean(k.textContent); };
+      return Array.from(row.cells).every((c) => !labelText(c) && c.querySelector('span.th-data-value-editable'));
+    }).catch(() => false);
+    if (textField) newValue = fallbackValue || 'QA-EDIT';
+  }
 
   if (newValue === undefined) {
     // Identify only — cancel without committing (CONFIRMED live safe: Escape leaves the field unchanged).
