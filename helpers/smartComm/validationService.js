@@ -9,6 +9,8 @@
  * file; it only ever reads catalogService/templateRequirementService/testDataService.
  */
 'use strict';
+const fs = require('fs');
+const path = require('path');
 const catalogService = require('./catalogService');
 const testDataService = require('./testDataService');
 const scenarioService = require('./scenarioService');
@@ -129,7 +131,7 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
   if (ownsS3Session) s3Session = createS3SessionManager(page.context().browser(), { log: (m) => console.log(`[SmartComm] ${dig}: ${m}`) });
   // Interactive documents are fetched from S3's transient archive — sign in now, in parallel with the
   // ClaimCenter steps, so the watch is live before Complete Document (see s3SessionManager.warmUp).
-  if (/interactive/i.test(template.interactiveOrOnDemand || '') && s3Session.warmUp) s3Session.warmUp();
+  if (s3Session.warmUp) s3Session.warmUp(); // On-Demand too: some of those land in S3 instead of the results grid
 
   const extraPages = [];
   try {
@@ -860,10 +862,47 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
         reEnableChoiceGatedRequirements(scenarioRequirements, CHOICE_SELECTED_YES_RE, choicesApplied);
       }
     } else {
-      pdfPath = await documentService.generateOnDemand(page, {
-        fileNamePrefix: `${template.digNumber}_${scenario.testData.claimNumber}_${scenario.scenarioId}`,
-      });
-      payload = await tryDownloadPayload();
+      // Some On-Demand templates (DIG4/DIG14 Risk Reports, CONFIRMED live 2026-10-30) never show a results row:
+      // Generate closes the wizard and the PDF goes straight to S3's archive. Watch the archive from just before
+      // Generate and recognize the document by its filing .json (this DIG + this claim) — see
+      // s3AdminService.watchArchiveForMetadata. Stopped as soon as the classic results row shows up instead.
+      const fileNamePrefix = `${template.digNumber}_${scenario.testData.claimNumber}_${scenario.scenarioId}`;
+      const dig = String(template.digNumber).toUpperCase().replace(/\s+/g, '');
+      const claimNo = String(base.claimNumber || scenario.testData.claimNumber).replace(/\s+/g, '');
+      let rowArrived = false;
+      const s3Log = (m) => console.log(`[SmartComm] ${scenario.scenarioId}: ${m}`);
+      const watch = s3Session.withPage((s3Page) => s3AdminService.watchArchiveForMetadata(s3Page, (meta) => {
+        // "DIG14 Risk Report||OnDemand": the DIG number as its own word, so DIG14 never takes DIG141's or DIG14S's.
+        const desc = String(meta.Description || '').toUpperCase();
+        return String(meta.FileNumber || '').replace(/\s+/g, '') === claimNo && new RegExp(`^${dig.replace(/^DIG/, 'DIG\\s*')}\\b`).test(desc.trim());
+      }, documentService.DOWNLOAD_DIR, { log: s3Log, abort: () => rowArrived })).catch((e) => { s3Log(`on-demand S3 watch failed: ${e.message}`); return null; });
+      await page.waitForTimeout(1500); // let the watch take its baseline before Generate
+      try {
+        pdfPath = await documentService.generateOnDemand(page, { fileNamePrefix });
+        rowArrived = true;
+        payload = await tryDownloadPayload();
+      } catch (err) {
+        if (!/^GENERATE_NO_DOCUMENT/.test(err.message)) { rowArrived = true; throw err; }
+        s3Log('Generate closed the wizard (no results row) — waiting for the PDF in S3\'s archive instead...');
+        const found = await watch;
+        if (!found || !found.pdf) {
+          throw new Error(`GENERATE_NO_DOCUMENT: Generate closed the wizard and no ${template.digNumber} PDF for claim ${claimNo} reached S3's archive within 3 minutes. ClaimCenter/SmartCOMM side - not an automation failure.`);
+        }
+        pdfPath = path.join(documentService.DOWNLOAD_DIR, `${fileNamePrefix}.pdf`);
+        fs.renameSync(found.pdf.localPath, pdfPath);
+        s3Log(`On-Demand PDF taken from S3 (Identifier ${found.identifier})`);
+        metadataChecks = buildMetadataChecks(found.metadata, { template, claimNumber: base.claimNumber });
+        try {
+          const hits = await s3Session.withPage((s3Page) => s3AdminService.searchSmartCommPayload(s3Page, found.identifier, { log: s3Log }));
+          if (hits.length) {
+            const [dl] = await s3Session.withPage((s3Page) => s3AdminService.downloadMatches(s3Page, hits.slice(0, 1), documentService.DOWNLOAD_DIR, { log: s3Log }));
+            const payloadPath = path.join(documentService.DOWNLOAD_DIR, `${fileNamePrefix}_payload.xml`);
+            fs.renameSync(dl.localPath, payloadPath);
+            payload = payloadService.parsePayloadFile(payloadPath);
+            rawPayloadRoot = payloadXpathService.parseRawPayloadFile(payloadPath).ccDocumentCreationRequest;
+          }
+        } catch (e) { s3Log(`payload fetch from S3 failed (${e.message}) — continuing without it.`); }
+      }
     }
 
     const text = await pdfValidationService.extractPdfText(pdfPath);
@@ -2822,6 +2861,13 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
         // "Claimant Name" on a claim with several claimants: any of them (DIG30 prints the exposure's "Jimmy Claimant").
         : /claimant name/i.test(row.attributeName) && pdfValidationService.claimantsOf({ raw: rawPayloadRoot }).length > 1
           ? { alsoAccept: pdfValidationService.claimantsOf({ raw: rawPayloadRoot }), alsoAcceptNote: 'The claim has more than one claimant; the letter prints another claimant on this claim (likely the one on the exposure the letter is about).' }
+          // An ISO date in the payload ("1978-04-01") prints as 04/01/1978 or April 01, 1978 (DIG4 Driver DOB, 2026-10-30).
+          : /^\d{4}-\d{2}-\d{2}(T|$)/.test(String(result.value))
+            ? (() => {
+              const [y, m, d] = String(result.value).slice(0, 10).split('-');
+              const month = new Date(Number(y), Number(m) - 1, 1).toLocaleString('en-US', { month: 'long' });
+              return { alsoAccept: [...(result.alsoAccept || []), `${m}/${d}/${y}`, `${Number(m)}/${Number(d)}/${y}`, `${month} ${d}, ${y}`, `${month} ${Number(d)}, ${y}`], alsoAcceptNote: 'Same date as the payload\'s ISO date, in the printed format.' };
+            })()
           : printedNumberForms(result.value).length
             ? { alsoAccept: [...(result.alsoAccept || []), ...printedNumberForms(result.value)], alsoAcceptNote: result.alsoAcceptNote || 'Same number as the payload, printed with thousands separators / a dollar sign / cents.' }
             : { alsoAccept: result.alsoAccept, alsoAcceptNote: result.alsoAcceptNote }),

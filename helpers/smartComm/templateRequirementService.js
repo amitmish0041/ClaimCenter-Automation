@@ -939,6 +939,11 @@ async function getRequirements(template, dataDir) {
       r.enabled = false;
       r.disabledReason = 'A number on its own in the mapping doc — sample claim/policy data, not fixed wording; the real claim\'s value prints here.';
     }
+    // A mock-up's placeholder address ("123 Main Street" / "Ste 311" — DIG4, 2026-10-30): the claim's real address prints there.
+    if (r.type === 'requiredText' && r.enabled !== false && /^\s*(\d{1,4}\s+main\s+st(reet)?\.?|(ste|suite)\.?\s*#?\d{1,5})\s*$/i.test(String(r.expectedValue || ''))) {
+      r.enabled = false;
+      r.disabledReason = 'A placeholder address in the mapping doc\'s mock-up — sample data, not fixed wording; the claim\'s real address prints here.';
+    }
   }
   for (const r of res.requirements || []) {
     if (r.type !== 'requiredText' || r.enabled === false || !FRAUD_NOTICE_RE.test(String(r.expectedValue || ''))) continue;

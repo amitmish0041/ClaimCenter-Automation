@@ -715,6 +715,56 @@ async function listForKey(page, key, { log } = {}) {
 // `identifierPromise` later resolves to and deleting any other new document (someone else's) it picked up.
 // Resolves to { pdf, json } (each { fileName, localPath } or null) — null when the identifier never arrives
 // (null/rejected promise) — so the caller can fall back to the regular search for whatever wasn't caught.
+// On-Demand documents (DIG4/DIG14 Risk Reports — CONFIRMED live 2026-10-30): Generate closes the Create New Document
+// wizard with no results row, ClaimCenter files a Draft on the claim, and the finished PDF + filing .json land in the
+// archive within ~5–60s, the .json reading { FileNumber: <claim>, Description: "DIG14 Risk Report||OnDemand" }. There
+// is no Document Properties Identifier to wait for, so the document is recognized by that metadata instead: every
+// .json that lands after the baseline is read, and the first whose `match(metadata)` is true is ours. Start it just
+// BEFORE Generate. Resolves to { identifier, metadata, pdf, json } (pdf/json = { fileName, localPath }) or null on
+// timeout / `abort()` true.
+async function watchArchiveForMetadata(page, match, outDir, { log = console.log, maxMs = 180000, abort = () => false } = {}) {
+  const fs = require('fs');
+  const path = require('path');
+  const dir = path.join(outDir, '.archive-watch');
+  fs.mkdirSync(dir, { recursive: true });
+  await ensureTestPlanet(page, { log });
+  const holder = await ensureApiAuth(page, { log });
+  if (!holder.authorization) { log('[S3] on-demand watch: no admin API token — can\'t watch the archive.'); return null; }
+  const listKeys = async () => (await apiList(page, ARCHIVE_PREFIX, { log })).map((o) => o.key);
+  const baseline = new Set(await listKeys().catch(() => []));
+  const read = new Set();
+  const deadline = Date.now() + maxMs;
+  let found = null;
+  while (Date.now() < deadline && !abort() && !found) {
+    const keys = await listKeys().catch(() => []);
+    for (const k of keys) {
+      const name = k.split('/').pop();
+      if (baseline.has(k) || read.has(k) || !/^[0-9a-f-]{36}\.json$/i.test(name)) continue;
+      read.add(k);
+      try {
+        const d = await apiDownload(page, k, dir, { log });
+        const metadata = JSON.parse(fs.readFileSync(d.localPath, 'utf8'));
+        if (match(metadata)) { found = { identifier: name.replace(/\.json$/i, ''), metadata, json: d }; break; }
+        fs.rmSync(d.localPath, { force: true });
+      } catch (_) { /* filed away mid-download, or not JSON — someone else's */ }
+    }
+    if (!found) await page.waitForTimeout(500);
+  }
+  if (!found) return null;
+  log(`[S3] on-demand watch: ${found.identifier} is this document (${found.metadata.Description} on ${found.metadata.FileNumber})`);
+  // Its PDF: the archive, else the filing job's processing folder (kept for hours) — a few tries for upload lag.
+  for (let i = 0; i < 10 && !found.pdf; i++) {
+    const objs = await listForKey(page, found.identifier, { log }).catch(() => []);
+    const pdfObj = objs.find((o) => /\.pdf$/i.test(o.key) && !/_Email/i.test(o.key));
+    if (pdfObj) {
+      try { found.pdf = await apiDownload(page, pdfObj.key, dir, { log }); } catch (_) { /* moved mid-download — retry */ }
+    }
+    if (!found.pdf) await page.waitForTimeout(3000);
+  }
+  if (found.pdf && fs.readFileSync(found.pdf.localPath).slice(0, 5).toString('latin1') !== '%PDF-') found.pdf = null;
+  return found;
+}
+
 async function watchArchiveForIdentifier(page, identifierPromise, outDir, { log = console.log, maxMs = 120000, afterIdMs = 45000, intervalMs = 700 } = {}) {
   const fs = require('fs');
   const path = require('path');
@@ -827,4 +877,4 @@ async function watchArchiveForIdentifier(page, identifierPromise, outDir, { log 
   return finish();
 }
 
-module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, ensureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches, downloadFirstValidPdf, downloadArchiveMetadataJson, watchArchiveForIdentifier, findAllForKey, _api: { apiList, apiDownload, ensureApiAuth } };
+module.exports = { S3_ADMIN_URL, LOGIN_EMAIL, loginAndEnsureTestPlanet, ensureTestPlanet, searchSmartComm, searchSmartCommPayload, downloadMatches, downloadFirstValidPdf, downloadArchiveMetadataJson, watchArchiveForIdentifier, watchArchiveForMetadata, findAllForKey, _api: { apiList, apiDownload, ensureApiAuth } };
