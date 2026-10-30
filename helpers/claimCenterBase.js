@@ -297,7 +297,15 @@ async function loginToClaimCenter(page, { username, password } = {}) {
       await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
       await usernameField.fill(user);
       await passwordField.fill(pass);
-      await page.getByRole('button', { name: 'Log In' }).click();
+      // DIG7-PR-PA 2026-10-30: the 3rd scenario's Log In button was found but the click timed out after 15s (the
+      // button was still disabled/covered while the page settled after the previous scenario) and the scenario
+      // ERRORed. Short click; if it can't land, submit with Enter from the password box and let the loop below judge.
+      const clicked = await page.getByRole('button', { name: 'Log In' }).click({ timeout: 8_000 }).then(() => true).catch(() => false);
+      if (!clicked) {
+        console.log('CC Login: Log In button not clickable — submitting with Enter instead');
+        if (!(await passwordField.inputValue().catch(() => ''))) { await usernameField.fill(user).catch(() => {}); await passwordField.fill(pass).catch(() => {}); }
+        await passwordField.press('Enter').catch(() => {});
+      }
       const clickedAt = Date.now();
       let outcome = 'timeout';
       while (Date.now() - clickedAt < 30_000) {
