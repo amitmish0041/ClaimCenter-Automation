@@ -641,18 +641,25 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue
 
   // Checkbox fields ("checkBox1", shown as "[ ]") take an "X", not a text marker — per user direction 2026-10-17;
   // the earlier bulk runs show "[QA-EDIT-n]" typed into them never stuck (still "[ ]" afterwards).
+  const CHECKBOX_NAME = /^(c(heck)?b(ox)?|chk|check|opt(ion)?)\d*$|check\s*box|^chk|(cb|chk|box)\d*$/i;
+  const GENERIC_NAME = /^(editable|field|text|value|input)\w*?\d*$/i;
   if (newValue !== undefined && /^check\s*box/i.test(technicalName || '')) newValue = 'X';
   // The reverse: an EMPTY text field also shows as "[ ]", so it was given an "X" too — DIG15S claimantDOB /
   // claimantAddress, DIG1043 insuredName (2026-10-30: "no span with the new value", FAIL). A real name that isn't a
   // checkbox gets a normal text marker (a date for a date-named field).
   // Only names that clearly hold data — checkboxes come as "cb1", "checkBox2", "opt3"… (DIG128MI).
-  else if (newValue === 'X' && /name|address|dob|birth|date|city|state|zip|phone|ssn|email|number|amount/i.test(technicalName || '')
-    && !/^c(heck)?b(ox)?\d*$|check|chk/i.test(technicalName)) {
-    newValue = /dob|date|birth/i.test(technicalName) ? '01/15/1990' : (fallbackValue || 'QA-EDIT');
+  // Checkbox-like names: "cb1", "checkBox2", "chk3", "opt4", "injuredCB" — not "amountOfCheck" (DIG21 2026-10-30 got
+  // "$X" for its check amount because any "check" in the name counted).
+  // Any other real data name ("deductible", DIG60: "has a [ ] deductible" got "X") is a text field too.
+  else if (newValue === 'X' && technicalName && !CHECKBOX_NAME.test(technicalName) && !GENERIC_NAME.test(technicalName)) {
+    // A money field takes digits only (same as buildEditValue's "$" rule), so the PDF still shows a currency value.
+    newValue = /dob|date|birth/i.test(technicalName) ? '01/15/1990'
+      : /amount|deductible|price|cost|total|limit/i.test(technicalName) ? String(900 + (Number(String(fallbackValue || '').match(/\d+$/)?.[0]) || 0))
+        : (fallbackValue || 'QA-EDIT');
   }
   // Generic names ("editableField7", DIG202 2026-10-30) say nothing, so the layout decides: a checkbox starts its
   // line/cell, while an empty TEXT field follows its label — "$[ ]", "on [ ]", "Other: [ ]", or a cell after "Account Number:".
-  else if (newValue === 'X' && !/^c(heck)?b(ox)?\d*$|check|chk/i.test(technicalName || '')) {
+  else if (newValue === 'X' && !CHECKBOX_NAME.test(technicalName || '')) {
     const textField = await field.locator.evaluate((el) => {
       // Each block ends with a hidden "¶" control mark (th-control-code-off) — not text.
       const clean = (t) => (t || '').replace(/¶/g, '').replace(/\s+/g, ' ').trim();
@@ -663,7 +670,7 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue
       const before = clean(r.toString()).replace(/\[\s*\]/g, '').trim();
       // Only a label end ("Other:", "$") or a preposition ("on", "dated") — "(including [ ] admission" and
       // "reports, [ ] x-ray" are checkboxes mid-line (DIG202).
-      if (before) return /[:$#]$|\b(on|of|for|to|by|at|dated|from|is|was|in|until)$/i.test(before);
+      if (before) return /[:$#]$|\b(on|of|for|to|by|at|dated|from|is|was|in|until|a|an|the|your|our)$/i.test(before);
       const cell = el.closest('td, th');
       const prev = cell && cell.previousElementSibling;
       if (prev && /:$/.test(clean(prev.textContent))) return true;
