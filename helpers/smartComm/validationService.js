@@ -1009,6 +1009,16 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
         v.reason = 'Overlay form printed as page images only (no text layer), so this value can\'t be read from the PDF — not verifiable, not a defect.';
       }
     }
+    // Michigan claims print the Michigan Insurance letterhead: "www.michiganinsurance.com" in place of the mapping doc's
+    // "www.donegalgroup.com" (DIG109-AUTO-MI/GL-MI, 2026-10-31) — the right website for that letterhead, not a defect.
+    if (/michiganinsurance\.com/i.test(text || '')) {
+      for (const v of validations) {
+        if (v.result === 'FAIL' && /^www\.donegalgroup\.com$/i.test(String(v.expected || '').trim())) {
+          v.result = 'PASS';
+          v.reason = 'Michigan Insurance letterhead prints www.michiganinsurance.com in place of www.donegalgroup.com — expected for a Michigan claim.';
+        }
+      }
+    }
     // A form whose PRINTED wording is images, not text (CONFIRMED 2026-10-17, DIG47 Wage and Salary Verification: the
     // page renders the whole form, but as 10 embedded images — the text layer holds only the filled-in values). Most
     // fixed-wording checks then "fail" without telling anything. When at least 60% of 8+ fixed-wording checks fail while
@@ -2617,6 +2627,11 @@ function annotateInteractiveEditFailures(validations, interactiveChecks) {
       if (c.label && desc.includes(c.label.toLowerCase())) return true;
       if (c.dictionaryField && desc.includes(`"${c.dictionaryField.toLowerCase()}"`)) return true;
       const beforeNorm = normForKnownValueMatch(c.before);
+      // A short value ("911", "GMC") held EXACTLY, in a field whose technical name carries the row's last word
+      // ("vehModel" for "Vehicle Model") — DIG128MI 2026-10-31: "911" reported missing after the test edited it.
+      const lastWord = (desc.match(/"([^"]+)"/) || [])[1]?.split(/\s+/).pop();
+      if (expectedNorm && beforeNorm === expectedNorm && lastWord && lastWord.length >= 3
+        && (c.technicalName || '').toLowerCase().includes(lastWord.toLowerCase())) return true;
       return expectedNorm.length >= minLen && beforeNorm.length >= minLen
         && (expectedNorm.includes(beforeNorm) || beforeNorm.includes(expectedNorm));
     });
@@ -2839,7 +2854,7 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
     // Underwriting Company field, whose label "RECEIVED OF" matches no dictionary row, reported as a FAIL).
     const sameText = (a, b) => pdfValidationService.normalizeWs(a || '').replace(/[[\]]/g, '').trim().toLowerCase() === pdfValidationService.normalizeWs(b || '').trim().toLowerCase();
     const editedByTest = (interactiveChecks || []).some((c) => c.observedChanged === true
-      && (c.dictionaryField === row.attributeName || [result.value, ...(result.alsoAccept || [])].some((x) => String(x).length >= 4 && sameText(c.before, x))));
+      && (c.dictionaryField === row.attributeName || [result.value, ...(result.alsoAccept || [])].some((x) => (String(x).length >= 4 || (c.technicalName || '').toLowerCase().includes(String(row.attributeName || '').split(/s+/).pop().toLowerCase())) && sameText(c.before, x))));
     const datePart = pdfValidationService.dateLossPart(row.attributeName, result.value);
     // Every template field this attribute belongs to is switched off for THIS scenario (e.g. Agent Number,
     // which prints only for an added additional recipient — DIG239 2026-10-16, user direction): the payload
@@ -2878,7 +2893,7 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
       wasEditedByTest: !matchedCheck && editedByTest,
       // What the edited field(s) showed BEFORE the test's edit — checked against the payload value when the edit consumed
       // the only printed occurrence (pdfValidationService.editedBeforeResult).
-      editedBefore: !matchedCheck && editedByTest ? (interactiveChecks || []).filter((c) => c.observedChanged === true && !(String(c.committedMarker || '') === 'X' && /^\[?\s*\]?$/.test(String(c.before || '').trim())) && (c.dictionaryField === row.attributeName || [result.value, ...(result.alsoAccept || [])].some((x) => String(x).length >= 4 && sameText(c.before, x)))).map((c) => c.before).filter(Boolean) : undefined,
+      editedBefore: !matchedCheck && editedByTest ? (interactiveChecks || []).filter((c) => c.observedChanged === true && !(String(c.committedMarker || '') === 'X' && /^\[?\s*\]?$/.test(String(c.before || '').trim())) && (c.dictionaryField === row.attributeName || [result.value, ...(result.alsoAccept || [])].some((x) => (String(x).length >= 4 || (c.technicalName || '').toLowerCase().includes(String(row.attributeName || '').split(/s+/).pop().toLowerCase())) && sameText(c.before, x)))).map((c) => c.before).filter(Boolean) : undefined,
       docOrder: Number.MAX_SAFE_INTEGER,
     });
   }
