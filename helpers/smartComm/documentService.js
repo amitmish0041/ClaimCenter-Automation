@@ -34,7 +34,13 @@ function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 // any half-open menu), and if it still isn't there save a screenshot and say what didn't open.
 async function openCreateFromTemplate(page) {
   const tab = page.getByRole('tab', { name: L.selectTemplate.tab, exact: true });
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  // 3 attempts, reloading the claim before the last one (DIG219-WC-PA 2026-11-02: both menu retries missed on a slow
+  // ClaimCenter; the same claim opened the wizard first time when re-run).
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (attempt === 3) {
+      await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForTimeout(3000);
+    }
     await openClaimActionsMenu(page, 'smartComm.documentService');
     const newSubmenu = page.getByRole('menuitem', { name: L.menu.newSubmenu }).first();
     await newSubmenu.hover().catch(() => {});
@@ -42,13 +48,13 @@ async function openCreateFromTemplate(page) {
     await page.getByRole('menuitem', { name: L.menu.createFromTemplate }).click({ timeout: 15000 }).catch(() => {});
     await page.waitForLoadState('domcontentloaded').catch(() => {});
     if (await tab.waitFor({ state: 'visible', timeout: 20000 }).then(() => true).catch(() => false)) return;
-    console.log(`[SmartComm] Create-from-template screen didn't open (attempt ${attempt}/2)${attempt < 2 ? ' — retrying the Actions menu' : ''}.`);
+    console.log(`[SmartComm] Create-from-template screen didn't open (attempt ${attempt}/3)${attempt < 3 ? ' — retrying the Actions menu' : ''}.`);
     await page.keyboard.press('Escape').catch(() => {});
     await page.waitForTimeout(1500);
   }
   const diag = await saveDiagnostic(page, 'createFromTemplate_notOpened').catch(() => null);
   throw new Error('CREATE_FROM_TEMPLATE_NOT_OPENED: Actions > New > Create from template did not open the template wizard ' +
-    `(no "Select Template" tab after 2 attempts) — ClaimCenter may be slow, or this user may lack the menu on this claim.${diag ? ` Diagnostic: ${diag}.png` : ''}`);
+    `(no "Select Template" tab after 3 attempts, one after reloading the claim) — ClaimCenter may be slow, or this user may lack the menu on this claim.${diag ? ` Diagnostic: ${diag}.png` : ''}`);
 }
 
 async function searchTemplateByName(page, templateName) {
