@@ -651,7 +651,8 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue
   // Checkbox-like names: "cb1", "checkBox2", "chk3", "opt4", "injuredCB" — not "amountOfCheck" (DIG21 2026-10-30 got
   // "$X" for its check amount because any "check" in the name counted).
   // Any other real data name ("deductible", DIG60: "has a [ ] deductible" got "X") is a text field too.
-  else if (newValue === 'X' && technicalName && !CHECKBOX_NAME.test(technicalName) && !GENERIC_NAME.test(technicalName)) {
+  else if (newValue === 'X' && technicalName && !CHECKBOX_NAME.test(technicalName) && !GENERIC_NAME.test(technicalName)
+    && /[a-z]{4,}/i.test(technicalName)) { // a real word — "b3", "o12" are checkbox ids (DIG151 2026-11-02)
     // A money field takes digits only (same as buildEditValue's "$" rule), so the PDF still shows a currency value.
     newValue = /dob|date|birth/i.test(technicalName) ? '01/15/1990'
       : /amount|deductible|price|cost|total|limit/i.test(technicalName) ? String(900 + (Number(String(fallbackValue || '').match(/\d+$/)?.[0]) || 0))

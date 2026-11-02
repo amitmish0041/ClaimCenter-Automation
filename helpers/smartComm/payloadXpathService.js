@@ -349,6 +349,11 @@ function evalExpr(root, exprRaw, depth) {
   // "<expr> + <expr> [+ <expr> ...]" concatenation — each side may itself have its own "where".
   if (expr.includes('+')) {
     const parts = expr.split('+').map((s) => s.trim()).filter(Boolean);
+    // The dictionary's own typo "…addressLine1 + …addressLine1" for "Address Line 1 + Address Line 2" (DIG208 From
+    // Address Line, 2026-11-02: expected "1195 River Rd 1195 River Rd") — a repeated "…Line1" means the next line.
+    for (let i = 1; i < parts.length; i++) {
+      if (parts[i] === parts[i - 1] && /line1$/i.test(parts[i])) parts[i] = parts[i].replace(/1$/, '2');
+    }
     if (parts.length > 1) {
       const values = parts.map((p) => evalExpr(root, p, depth + 1).value).filter((v) => v !== undefined && v !== '');
       return { value: values.length ? values.join(' ') : undefined };

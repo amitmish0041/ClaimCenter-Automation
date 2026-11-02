@@ -324,7 +324,9 @@ function matchAttributeForField(digNumber, { labelContext, technicalName } = {})
     }
   }
 
-  const label = normalizeForMatch(labelContext);
+  // A bare "Yes"/"No" (a checkbox's caption) is never a data label — "No" matched "Claim Number" through its
+  // "Claim No." display name (DIG151 2026-11-02: a "[ ] No" checkbox reported as an editable Claim Number).
+  const label = /^(yes|no)\W*$/i.test(String(labelContext || '').trim()) ? '' : normalizeForMatch(labelContext);
   if (label) {
     const ccHit = bestLabelMatch(candidates, 'ccFieldDisplay', label, 60);
     if (ccHit) return { row: ccHit, matchedOn: 'ccFieldDisplay' };
