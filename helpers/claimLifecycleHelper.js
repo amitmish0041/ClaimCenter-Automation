@@ -4259,7 +4259,7 @@ module.exports = {
   assertSegment, setSegmentManually,
   assertInitialReservesSet,
   openWorkplanTab, assertActivityExists, createManualActivity, completeActivity,
-  closeClaim, assertClaimStatus,
+  closeClaim, assertClaimStatus, drainAndCloseAllExposures,
   reopenClaim,
   archiveClaim,
   assignClaim,

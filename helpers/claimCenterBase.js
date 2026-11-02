@@ -608,10 +608,17 @@ async function navigateTo(page, section) {
 
 // Opens the dropdown submenu for a given top-nav tab (e.g. tabId 'ClaimTab' for
 // #TabBar-ClaimTab). Returns true if the submenu is confirmed open.
+// The expand arrow can be attached but have no box (narrow window / tab bar still laying out — 2026-11-02 CA cloud
+// FNOL: "locator.click: Element is not visible" even with force). Playwright's click needs a box even when forced;
+// a dispatched DOM click doesn't, and Guidewire's data-gw-click handlers act on it.
+async function clickOrDispatch(loc) {
+  try { await loc.click({ force: true, timeout: 3000 }); } catch (_) { await loc.dispatchEvent('click'); }
+}
+
 async function openTabMenu(page, tabId) {
   const expandBtn = page.locator(`#TabBar-${tabId} .gw-action--expand-button`).first();
   await expandBtn.waitFor({ state: 'attached', timeout: 10000 });
-  await expandBtn.click({ force: true });
+  await clickOrDispatch(expandBtn);
 
   let opened = await page.waitForFunction((id) => {
     const sub = document.querySelector(`#TabBar-${id} .gw-subMenu`);
@@ -619,7 +626,7 @@ async function openTabMenu(page, tabId) {
   }, tabId, { timeout: 5000 }).then(() => true).catch(() => false);
 
   if (!opened) {
-    await expandBtn.click({ force: true });
+    await clickOrDispatch(expandBtn);
     opened = await page.waitForFunction((id) => {
       const sub = document.querySelector(`#TabBar-${id} .gw-subMenu`);
       return sub && sub.getAttribute('aria-hidden') === 'false';
@@ -635,7 +642,7 @@ async function clickTabMenuItem(page, tabId, itemId) {
   await openTabMenu(page, tabId);
   const item = page.locator(`#TabBar-${itemId} [role="menuitem"]`).first();
   await item.waitFor({ state: 'attached', timeout: 5000 });
-  await item.click({ force: true });
+  await clickOrDispatch(item);
   await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
 }
 

@@ -13,6 +13,7 @@
  * Run cloud:    npm run e2e:cloud:ca
  */
 const { test, expect } = require('@playwright/test');
+const E2E = require('../../helpers/e2eSteps');
 const {
   loginToClaimCenter, loginAsAdmin, openExistingClaim, getNextPolicy, getTestLossDate, getLossState,
 } = require('../../helpers/claimCenterBase');
@@ -39,11 +40,15 @@ test.describe('Commercial Auto — E2E', () => {
 
   let page;
   let claimNumber;
+  // Runner step switches (CC_E2E_STEPS) + optional existing claim (CC_E2E_CLAIM) — see helpers/e2eSteps.js.
+  test.beforeEach(({}, testInfo) => E2E.gate(test, testInfo, { page, claimNumber }));
   let claimant;
 
   test.beforeAll(async ({ browser }) => {
-    page = await browser.newPage();
+    page = await browser.newPage({ viewport: { width: 1600, height: 900 } }); // 1280px collapses the cloud Claim tab into the overflow menu
     await loginToClaimCenter(page);
+    claimNumber = E2E.existingClaim() || claimNumber;
+    if (E2E.existingClaim()) await openExistingClaim(page, claimNumber); // later steps expect the claim open, as FNOL leaves it
   });
 
   test.afterAll(async () => { await page.close(); });
@@ -131,6 +136,8 @@ test.describe('Commercial Auto — E2E', () => {
     await createPayment(page, {
       paymentAmount  : 1000,
       reserveLine    : line.firstCell,
+      // Cloud: the reserve-line reader returns the row number, so without a payee the wizard took the first contact (a vendor CC refuses without a tax id).
+      ...(E2E.IS_CLOUD ? { payeeName: claimant } : {}),
       transactionType: 'Partial Payment',
     });
   });
@@ -139,6 +146,13 @@ test.describe('Commercial Auto — E2E', () => {
 
   test('E2E-CA-004: Approve payment from Approval Queue', async () => {
     await approveLatestCheck(page, claimNumber);
+  });
+
+  // ── Recovery ───────────────────────────────────────────────────────────────
+
+  test('E2E-CA-REC [DMTA0019]: Subrogation recovery reserve + receipt', async () => {
+    await openExistingClaim(page, claimNumber);
+    await E2E.recovery(page, 'CA', 500);
   });
 
   // ── Phase 5: Lifecycle — Close ─────────────────────────────────────────────
@@ -161,6 +175,7 @@ test.describe('Commercial Auto — E2E', () => {
   // refuse on the claim's creation day. drainAndCloseAllExposures() in
   // claimLifecycleHelper implements the full working path for aged claims.
   test('E2E-CA-006: Close exposures, then close claim (Covered - Settled)', async () => {
-    test.skip(true, 'Same-day exposure changes not allowed (VTDMPL61/DMTV0039/DMEC0002) — needs an aged claim');
+    // Drains reserves with Final Payments (not same-day limited), then closes exposures + claim.
+    await E2E.close(page, claimNumber);
   });
 });

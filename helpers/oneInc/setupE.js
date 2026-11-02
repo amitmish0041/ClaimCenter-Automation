@@ -18,13 +18,15 @@ function testOnly(what) {
 // to Pay ("Exposure description must not be empty", "Detailed body part must not be null" — CONFIRMED 2026-10-21 on
 // PA-PA-01-26-0748496; Quick Payment on that reserve line then shows "New Payment Error"). Exposure #index › Edit ›
 // Injury Incident › New Incident…: injured person = the exposure claimant, injury description, a body-part row; OK, Update.
-async function ensureInjuryIncident(page, index = 0) {
+// force: replace an EXISTING incident too (FNOL's cloud injury incident has no body part — "Detailed body part must not be
+// null", 2026-11-02 CA-PA-01-26-0748712); injured: the injured person's name (default: the insured from the header).
+async function ensureInjuryIncident(page, index = 0, { force = false, injured = '' } = {}) {
   testOnly('ensureInjuryIncident');
   await A.openExposure(page, index);
   await W.clickButton(page, 'Edit');
   // Read the select in edit mode (the view-mode value is the "View Incident Details..." link text).
   const cur = findField(await readScreen(page), 'Injury Incident');
-  if (cur && cur.value && !/^<none>$/i.test(cur.value)) {
+  if (!force && cur && cur.value && !/^<none>$/i.test(cur.value)) {
     await page.getByRole('button', { name: 'Cancel', exact: true }).first().click().catch(() => {});
     await W.settle(page, 1500);
     return `injury incident already set (${cur.value})`;
@@ -38,7 +40,7 @@ async function ensureInjuryIncident(page, index = 0) {
   await page.waitForTimeout(1200);
   await page.getByText('New Incident...', { exact: true }).last().click();
   await W.settle(page, 3500);
-  const claimant = await page.evaluate(() => ((document.body.innerText || '').match(/Ins:\s*([^\n]+?)\s+(Clmt|DoL|St|Adj)/) || [])[1] || '');
+  const claimant = injured || await page.evaluate(() => ((document.body.innerText || '').match(/Ins:\s*([^\n]+?)\s+(Clmt|DoL|St|Adj)/) || [])[1] || '');
   await A.selectByLabel(page, 'Injured Person', claimant ? new RegExp(claimant.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : /^(?!<none>)./)
     .catch(() => A.selectByLabel(page, 'Injured Person', /^(?!<none>)./));
   await A.fillByLabel(page, 'Describe Injuries', 'OneInc automation — neck sprain');

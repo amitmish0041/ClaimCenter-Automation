@@ -17,6 +17,7 @@
  * Run cloud:    npm run e2e:cloud:pa
  */
 const { test, expect } = require('@playwright/test');
+const E2E = require('../../helpers/e2eSteps');
 const {
   loginToClaimCenter, loginAsAdmin, openExistingClaim, getNextPolicy, getTestLossDate, getLossState,
 } = require('../../helpers/claimCenterBase');
@@ -44,11 +45,15 @@ test.describe('PA Auto — E2E', () => {
 
   let page;
   let claimNumber;
+  // Runner step switches (CC_E2E_STEPS) + optional existing claim (CC_E2E_CLAIM) — see helpers/e2eSteps.js.
+  test.beforeEach(({}, testInfo) => E2E.gate(test, testInfo, { page, claimNumber }));
   let claimant;
 
   test.beforeAll(async ({ browser }) => {
-    page = await browser.newPage();
+    page = await browser.newPage({ viewport: { width: 1600, height: 900 } }); // 1280px collapses the cloud Claim tab into the overflow menu
     await loginToClaimCenter(page);
+    claimNumber = E2E.existingClaim() || claimNumber;
+    if (E2E.existingClaim()) await openExistingClaim(page, claimNumber); // later steps expect the claim open, as FNOL leaves it
   });
 
   test.afterAll(async () => { await page.close(); });
@@ -162,6 +167,8 @@ test.describe('PA Auto — E2E', () => {
     await createPayment(page, {
       paymentAmount  : 1000,
       reserveLine    : line.firstCell,
+      // Cloud: the reserve-line reader returns the row number, so without a payee the wizard took the first contact (a vendor CC refuses without a tax id).
+      ...(E2E.IS_CLOUD ? { payeeName: claimant } : {}),
       transactionType: 'Partial Payment',
     });
   });
@@ -193,18 +200,8 @@ test.describe('PA Auto — E2E', () => {
   // ── Phase 7: Recovery ──────────────────────────────────────────────────────
 
   test('E2E-PA-009 [DMTA0019]: Subrogation recovery reserve + receipt', async () => {
-    await createRecoveryReserve(page, { recoveryType: 'Subrogation', reserveAmount: 500 });
-    // Receipt the FULL reserve, not a part of it. A partial receipt leaves an
-    // open recovery reserve, and closing the exposure later makes CC auto-create
-    // a recovery-reserve transaction to zero the remainder — which the same-day
-    // rule then refuses:
-    //   "Validation errors were found in an object of type RecoveryReserveSet
-    //    that was auto-created by rules: Rule: DMTV0039. Multiple recovery
-    //    reserve transactions not allowed on same day."
-    // (confirmed live — it was the last thing blocking E2E-PA-011). Recovery
-    // RECEIPTS carry no such restriction, so fully receipting leaves nothing for
-    // CC to zero. Both the reserve and the receipt are still exercised here.
-    await createRecoveryReceipt(page, { recoveryType: 'Subrogation', receiptAmount: 500 });
+    // Full receipt (not partial) so close has no recovery reserve to zero same-day (DMTV0039) — see helpers/e2eSteps.js.
+    await E2E.recovery(page, 'PA', 500);
   });
 
   // ── Phase 8: Lifecycle — Close → Reopen → Archive ─────────────────────────
@@ -233,7 +230,8 @@ test.describe('PA Auto — E2E', () => {
   // working close path for when these run against aged claims.
 
   test('E2E-PA-011: Close exposures, then close claim (Covered - Settled)', async () => {
-    test.skip(true, 'Same-day exposure changes not allowed (VTDMPL61/DMTV0039/DMEC0002) — needs an aged claim');
+    // Drains reserves with Final Payments (not same-day limited), then closes exposures + claim.
+    await E2E.close(page, claimNumber);
   });
 
   test('E2E-PA-012 [DMGA0350]: Reopen claim — triggers reassignment', async () => {

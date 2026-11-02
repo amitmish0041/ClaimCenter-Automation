@@ -98,7 +98,10 @@ async function cancelPaymentWizard(page) {
 // wizard's dropdowns (Payee, Reserve Line, Transaction Type, ...), which have
 // no on-prem equivalent and thus no natural "default" beyond "whatever's first".
 async function selectByLabelOrFirst(page, labelText, value) {
-  const el = page.getByLabel(labelText).first();
+  // Exact label first (as OneInc's wizardDriver does): a loose match on "Reserve Line" picked another control with no
+  // options, and every payee looked like it had no payable reserve (2026-11-02, CA-PA-01-26-0748712).
+  const exactEl = page.getByLabel(labelText, { exact: true }).first();
+  const el = (await exactEl.count().catch(() => 0)) ? exactEl : page.getByLabel(labelText).first();
 
   // Read the real options first. A plain string passed to selectOption() is
   // matched against the option's VALUE, not its label - so asking for a
@@ -1979,7 +1982,7 @@ async function createPaymentCloud(page, {
   category, boxNumber, memoPhrase,
 }) {
   await page.getByRole('button', { name: 'deferred Actions' }).click();
-  await page.getByLabel('New Payment (Formerly System').click();
+  await page.getByLabel(/^New Payment/).first().click();
 
   // CC filters the Step 2 "Reserve Line" list BY PAYEE. Letting the payee
   // default to the first option (the insured company) while the reserve sits
@@ -2013,7 +2016,7 @@ async function createPaymentCloud(page, {
       // Re-open the wizard now the claim can pass Ability to Pay.
       await page.getByRole('button', { name: 'deferred Actions' }).click().catch(() => {});
       await page.waitForTimeout(1200);
-      await page.getByLabel('New Payment (Formerly System').click().catch(() => {});
+      await page.getByLabel(/^New Payment/).first().click().catch(() => {});
       await page.waitForTimeout(3000);
     } else {
       throw new Error('createPaymentCloud: claim failed the "Ability to Pay" validation — ' +
@@ -2046,16 +2049,44 @@ async function createPaymentCloud(page, {
                     chosenPayee + '" (payee address still incomplete?)');
   }
 
-  await selectByLabelOrFirst(page, 'Reserve Line', reserveLine);
+  // Reserve Line is filtered BY PAYEE: a payee with no reserve on any of their exposures gets an empty list (2026-11-02,
+  // CA-PA-01-26-0748712: insured "Summit Chalfont" had none, the reserves sat on the claimants). Go Back and try each
+  // other payee until one has a reserve line; vendors CC refuses without a tax id fail step 1 and are skipped.
+  let lineText = await selectByLabelOrFirst(page, 'Reserve Line', reserveLine);
+  if (!lineText) {
+    await page.getByRole('button', { name: 'Back' }).click();
+    await page.waitForTimeout(2000);
+    const names = await page.locator('[name$="PrimaryPayee_Name"]').first().locator('option').evaluateAll(
+      (os) => os.map(o => (o.textContent || '').trim()).filter(t => t && !/^<?none>?$/i.test(t))).catch(() => []);
+    for (const name of names.filter(n => n !== chosenPayee)) {
+      await page.locator('[name$="PrimaryPayee_Name"]').first().selectOption({ label: name }).catch(() => {});
+      await page.waitForTimeout(1200);
+      await page.getByRole('button', { name: 'Next' }).click();
+      await page.waitForTimeout(2500);
+      if (!(await reserveLineSel.isVisible().catch(() => false))) {
+        await addCloudPayeeAddress(page).catch(() => {});
+        await page.getByRole('button', { name: 'Next' }).click().catch(() => {});
+        await page.waitForTimeout(3000);
+      }
+      if (!(await reserveLineSel.isVisible().catch(() => false))) { console.log('createPaymentCloud: payee "' + name + '" refused on step 1'); continue; }
+      lineText = await selectByLabelOrFirst(page, 'Reserve Line', reserveLine);
+      if (lineText) { console.log('createPaymentCloud: payee — ' + name + ' (has reserve line "' + lineText + '")'); break; }
+      await page.getByRole('button', { name: 'Back' }).click();
+      await page.waitForTimeout(2000);
+    }
+    if (!lineText) throw new Error('createPaymentCloud: no payee on this claim has a reserve line to pay from');
+  }
   await selectByLabelOrFirst(page, 'Transaction Type', transactionType);
-  await page.getByRole('textbox', { name: 'Total Amount of Check' }).fill(String(checkAmount));
+  // Label was "Total Amount of Check"; CC TEST shows "Total Amount of Payment" (2026-11-02).
+  const totalAmount = page.getByRole('textbox', { name: /^Total Amount of (Check|Payment)$/ }).first();
+  await totalAmount.fill(String(checkAmount));
   // Dismisses the dropdown's click-overlay so subsequent fields are clickable.
   await page.locator('#gw-click-overlay').click().catch(() => {});
   await selectByLabelOrFirst(page, 'CategoryCategory', category);
   await page.getByRole('textbox', { name: '$' }).fill(String(checkAmount));
   await selectByLabelOrFirst(page, 'Box Number', boxNumber);
   await selectByLabelOrFirst(page, 'Memo Phrase', memoPhrase);
-  await page.getByRole('textbox', { name: 'Total Amount of Check' }).fill(String(checkAmount));
+  await totalAmount.fill(String(checkAmount));
   await page.getByRole('button', { name: 'Next' }).click();
 
   // Step 3's question is a gw-radioDiv (role="radio" divs carrying aria-label),
