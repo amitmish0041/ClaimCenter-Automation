@@ -119,10 +119,13 @@ module.exports = (api) => {
   // HO claim (PROP_MORT) where a real Secondary Named Insured exists: MORT_FULL(primary, joint).
   // QA review 2026-10-26: the PA auto insured/claimant (DMG LMB TEST) has no e-mail, so CPD.001 forces Other/Mailed Check; these run on
   // the HO claim whose insured/claimant Robert Charles has an e-mail and phone.
-  const HO_NOTE = ' Run on the HO claim (PROP_PA): Robert Charles has an e-mail and phone, so CPD.001 does not override the defaults.';
-  const SET_DT = { call: ['contactManager.setContactEmail', 'David Thomas', 'Thomas', '19073', 'davidthomas@example.com|7175550142'] };
-  const REST = { call: ['contactManager.restoreVendors'] };
-  const HOJ = (primary, joint, setDT) => [...(setDT ? [SET_DT] : []), { open: 'full' }, ...PRIMARY(primary), { joint }, { next: true }, { reserve: 'open' }, { step2: {} }, { next: true }, { expectStep: 3 }];
+  const HO_NOTE = ' Run on the HO claim (PROP_PA): its insured/claimant Robert Charles has payment contact details (e-mail + mobile, set at claim creation), so CPD.001 does not override the defaults.';
+  // Since 2026-11-03 cloud CC defaults ClaimsPay from the payee's PAYMENT CONTACT DETAILS (none → Other / Mailed Check). Every
+  // new claim gets them on its contacts (helpers/oneInc/contactEmails.js — David Thomas is unlinked from the Address Book
+  // copy so they can be set), so the former ContactManager e-mail edit for David Thomas is no longer needed (it also
+  // stopped saving: team run 2026-11-03 TC-032 BLOCKED "ContactManager did not save the change").
+  const REST = { call: ['contactManager.restoreVendors'] }; // settles any ledger left by an earlier run
+  const HOJ = (primary, joint) => [{ open: 'full' }, ...PRIMARY(primary), { joint }, { next: true }, { reserve: 'open' }, { step2: {} }, { next: true }, { expectStep: 3 }];
   const DT = { who: 'David Thomas', type: 'Additional Claimant' };
   add('GCCM-759/CPD/TC-048', 'PROP_PA', HOJ(VENDOR, [INS]), [CT(C_AND_V)], VJ_NOTE + HO_NOTE);
   add('GCCM-759/CPD/TC-050', 'PROP_PA', HOJ(VENDOR, [CLM]), [CT(C_AND_V)], VJ_NOTE + HO_NOTE);
@@ -139,7 +142,7 @@ module.exports = (api) => {
   const PJ = (primary, joint) => [{ open: 'full' }, ...PRIMARY(primary), X('addJoint', joint), { next: true }, { reserve: 'open' },
     { answer: ['Payment for a total loss?', 'No'] }, { step2: {} }, { next: true }, { expectStep: 3 }];
   const PJ_NOTE = 'Secondary claimant = a second PERSON contact on the claim (not the insured / exposure claimant), typed "Additional Claimant" in the joint payee grid.';
-  const DT_NOTE = ' Secondary claimant = David Thomas (typed Additional Claimant); his Main Email/phone are set in ContactManager for the case and restored afterwards.' + HO_NOTE;
+  const DT_NOTE = ' Secondary claimant = David Thomas (typed Additional Claimant); he has payment contact details (QA mailbox) set on the claim at claim creation.' + HO_NOTE;
   add('GCCM-759/CPD/TC-041', 'PROP_PA', HOJ(CLM, [DT], true), [CT(CONTACTS), CM(CHOICE), REST], PJ_NOTE + DT_NOTE);
   add('GCCM-759/CPD/TC-055', 'PROP_PA', HOJ(CLM, [DT], true), [CT(CONTACTS), REST], PJ_NOTE + DT_NOTE);
   add('GCCM-759/CPD/TC-042', 'PROP_PA', HOJ(VENDOR, [CLM, DT], true), [CT(C_AND_V), REST], PJ_NOTE + DT_NOTE + ' ' + VJ_NOTE);
@@ -147,9 +150,8 @@ module.exports = (api) => {
   // CPD.001 negative (QA review 2026-10-26): BOTH the primary and the secondary payee must have an e-mail. Primary = the insured
   // Robert Charles (has one); secondary = David Thomas, whose Address Book record has none — his Main Email is set in ContactManager
   // for the case and put back afterwards (contactManager.js ledger).
-  add('GCCM-759/CPD/TC-032', 'PROP_PA', [{ call: ['contactManager.setContactEmail', 'David Thomas', 'Thomas', '19073', 'davidthomas@example.com|7175550142'] },
-    ...FULL_PAYEES('insured'), { joint: [{ who: 'David Thomas' }] }, { next: true }, { reserve: 'open' }, { step2: {} }, { next: true }, { expectStep: 3 }],
-    [CT(NOT_MAILED), { call: ['contactManager.restoreVendors'] }], 'Primary Robert Charles (insured, has e-mail) + joint payee David Thomas (Secondary Named Insured, e-mail set in ContactManager for this case and restored after).');
+  add('GCCM-759/CPD/TC-032', 'PROP_PA', [...FULL_PAYEES('insured'), { joint: [{ who: 'David Thomas' }] }, { next: true }, { reserve: 'open' }, { step2: {} }, { next: true }, { expectStep: 3 }],
+    [CT(NOT_MAILED)], 'Primary Robert Charles (insured) + joint payee David Thomas (Secondary Named Insured): both have payment contact details with an e-mail (QA mailbox), set on the claim at claim creation.');
   // CPD.014 — vendor Mailed Check → Certified delivery
   add('GCCM-759/CPD/TC-058', 'AUTO_PA', [...FULL_INSTRUCTIONS('vendor'), { select: ['ClaimsPay Method', /mailed check/i] }],
     [V('Payment Delivery', { value: /certified/i, includes: ['Certified', 'Expedite'], excludes: ['Standard'] })], VENDOR_NOTE);

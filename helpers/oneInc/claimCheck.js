@@ -74,6 +74,14 @@ async function checkClaim(page, claim, { prepare = false, lienholders = false, p
       page.__oneIncParties = null;
       out.parties = await W.getParties(page);
     }
+    // Every contact's e-mail (own + Payment Contact Details) → the QA mailbox, so OneInc never mails a real customer
+    // (user direction 2026-11-03, all tests). Profiles with contactEmails: false keep payees WITHOUT contact details.
+    if (prepare && (!profile || (require('./claimPicker').PROFILES[profile] || {}).contactEmails !== false)) {
+      out.repaired.push(await require('./contactEmails').setAllContactEmails(page));
+      await W.openClaim(page, claim, log);
+      page.__oneIncParties = null;
+      out.parties = await W.getParties(page);
+    }
     // prepare: first run CC's own "Ability to pay" check and fix what it names (user direction 2026-10-21).
     const fixAbility = async (why) => {
       if (/Serial number must be present|Boat type must be present|Vehicle Identification Number/i.test(why)) {

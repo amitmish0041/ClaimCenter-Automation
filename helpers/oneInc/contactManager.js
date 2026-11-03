@@ -1,6 +1,6 @@
 /**
  * helpers/oneInc/contactManager.js — temporary edits of Address Book vendors in ContactManager (TEST), for the payee
- * validity rules (VBR.031 "Tax ID Valid Until"). Every change is written to a restore ledger BEFORE it is made and put back
+ * validity rules (VBR.031 "Tax ID Valid Until", VBR.060 Levy). Every change is written to a restore ledger BEFORE it is made and put back
  * by restoreVendors (recipes call it as their last step; setTaxValidUntil also settles any leftover ledger entries first, and
  * `node helpers/oneInc/contactManager.js --restore` does it by hand), so a crashed run never leaves a vendor changed.
  *
@@ -74,7 +74,7 @@ async function saveField(cm, value, field = FIELD) {
   await cm.locator(field).fill(value);
   await cm.keyboard.press('Tab');
   await cm.getByRole('button', { name: 'Update', exact: true }).first().click();
-  await cm.getByRole('button', { name: 'Edit', exact: true }).first().waitFor({ timeout: 20000 }).catch(async () => { if (process.env.CM_DEBUG_SHOT) await cm.screenshot({ path: process.env.CM_DEBUG_SHOT }).catch(() => {}); throw new W.Blocked('ContactManager did not save the change: ' + (await cm.locator('.gw-message, [class*=error], [role=alert]').allInnerTexts().catch(() => [])).join(' / ').replace(/s+/g, ' ').slice(0, 300)); });
+  await cm.getByRole('button', { name: 'Edit', exact: true }).first().waitFor({ timeout: 20000 }).catch(async () => { if (process.env.CM_DEBUG_SHOT) await cm.screenshot({ path: process.env.CM_DEBUG_SHOT }).catch(() => {}); throw new W.Blocked('ContactManager did not save the change: ' + (await cm.locator('.gw-message, [class*=error], [role=alert]').allInnerTexts().catch(() => [])).join(' / ').replace(/\s+/g, ' ').slice(0, 300)); });
 }
 
 // Runs fn(cmPage) in its own browser context (separate cookies; the ClaimCenter page is left alone).
@@ -220,12 +220,53 @@ async function setCompanyAddress(page, name, taxId, which = 'B') {
   return `${name}: primary address ${r.before} → ${value}${r.changed ? '' : ' (already set)'}`;
 }
 
+// ── Vendor Levy (VBR.060: a vendor payee whose Levy is "LEVY ATTACHED" cannot be paid) ─────────────────────────────
+// Company vendor edit screen: "Levy" dropdown (…ABCompanyVendorFormInputSet-ExtLevy), options "Not Applicable" /
+// "LEVY ATTACHED" (CONFIRMED 2026-11-03 on TAYLOR REPORTING SERVICE).
+const LEVY = 'select[name$="ABCompanyVendorFormInputSet-ExtLevy"]';
+async function applyLevy(page, taxId, value, label) {
+  return withCM(page, async (cm) => {
+    await openVendorEdit(cm, taxId);
+    const sel = cm.locator(LEVY).first();
+    const before = await sel.evaluate((x) => (x.options[x.selectedIndex] || {}).text || '');
+    if (before.toLowerCase() === String(value).toLowerCase()) { await cm.getByRole('button', { name: 'Cancel', exact: true }).first().click().catch(() => {}); return { before, changed: false }; }
+    if (label) {
+      const ledger = readLedger(); if (ledger.some((e) => e.kind === 'levy' && e.taxId === taxId)) { /* keep the first original */ } else
+      ledger.push({ kind: 'levy', name: label, taxId, field: 'Levy', original: before, changedAt: new Date().toISOString() });
+      writeLedger(ledger); // recorded before the edit is saved
+    }
+    const opt = await sel.locator('option').evaluateAll((os, v) => (os.find((o) => o.textContent.trim().toLowerCase() === v.toLowerCase()) || {}).value, String(value));
+    if (opt === undefined) throw new W.Blocked(`ContactManager Levy has no option "${value}"`);
+    await sel.selectOption(opt);
+    await cm.waitForTimeout(1500);
+    // "LEVY ATTACHED" makes "Levy Effective Date" required (CONFIRMED 2026-11-03); back to "Not Applicable" it is cleared.
+    const eff = cm.locator('.gw-InputWidget').filter({ hasText: /^\s*Levy Effective Date/ }).locator('input:not([type=hidden])').first();
+    if (await eff.isVisible().catch(() => false)) {
+      await eff.fill(/attached/i.test(value) ? fmt(new Date()) : '');
+      await eff.press('Tab').catch(() => {});
+      await cm.waitForTimeout(800);
+    }
+    await cm.getByRole('button', { name: 'Update', exact: true }).first().click();
+    await cm.getByRole('button', { name: 'Edit', exact: true }).first().waitFor({ timeout: 20000 }).catch(async () => {
+      throw new W.Blocked('ContactManager did not save the Levy: ' + (await cm.locator('.gw-message, [class*=error], [role=alert]').allInnerTexts().catch(() => [])).join(' / ').replace(/\s+/g, ' ').slice(0, 300));
+    });
+    return { before, changed: true };
+  });
+}
+// Test step: sets a company vendor's Levy ('LEVY ATTACHED' | 'Not Applicable'). Reverted by restoreVendors.
+async function setLevy(page, name, taxId, value = 'LEVY ATTACHED') {
+  if (readLedger().length) await restoreVendors(page); // settle leftovers from an interrupted run first
+  const r = await applyLevy(page, taxId, value, name);
+  return `${name}: Levy ${r.before || '<blank>'} → ${value}${r.changed ? '' : ' (already set)'}`;
+}
+
 async function restoreVendors(page) {
   const pending = readLedger();
   for (const e of pending) {
     if (e.kind === 'email') await applyEmail(page, e.who, e.original, null);
     else if (e.kind === 'company') await applyCompany(page, e.taxId, e.original, null);
     else if (e.kind === 'address') await applyAddress(page, e.taxId, e.original, null);
+    else if (e.kind === 'levy') await applyLevy(page, e.taxId, e.original, null);
     else await applyDate(page, e.taxId, e.original, null);
     writeLedger(readLedger().filter((x) => x !== undefined && JSON.stringify(x) !== JSON.stringify(e)));
   }
@@ -240,7 +281,7 @@ async function setTaxValidUntil(page, label, taxId, when) {
   return `${label}: Tax ID Valid Until ${r.before || '<blank>'} → ${value || '<blank>'}${r.changed ? '' : ' (already set)'}`;
 }
 
-module.exports = { setContactEmail, setCompanyContact, setTaxValidUntil, setCompanyAddress, restoreVendors, readLedger, dateFor, withCM, CM_ADDRESSES };
+module.exports = { setContactEmail, setCompanyContact, setTaxValidUntil, setCompanyAddress, setLevy, restoreVendors, readLedger, dateFor, withCM, CM_ADDRESSES };
 
 if (require.main === module) {
   require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env'), override: false });

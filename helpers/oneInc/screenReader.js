@@ -32,13 +32,17 @@ async function readScreen(page) {
         label: r.getAttribute('aria-label') || txt(r), checked: r.getAttribute('aria-checked') === 'true',
       }));
       const cls = (vw && vw.className) || '';
+      // Masked entry: a password box (until 2026-10-28) or, since 2026-11-03, a text box masked by CSS
+      // (-webkit-text-security: disc — shows "••••" once a value is typed, type stays "text").
+      const cs = input ? getComputedStyle(input) : null;
+      const masked = !!input && (input.type === 'password' || /disc|circle|square/.test((cs && (cs.webkitTextSecurity || cs.getPropertyValue('-webkit-text-security'))) || ''));
       return {
         id: w.id || '',
         label: txt(l),
-        value: sel ? txt(sel.options[sel.selectedIndex]) : (input ? (input.type === 'password' ? (input.value ? '••••' : '') : input.value) : txt(v)),
+        value: sel ? txt(sel.options[sel.selectedIndex]) : (input ? (masked ? (input.value ? '••••' : '') : input.value) : txt(v)),
         required: /gw-required/.test(cls) || !!w.querySelector('[aria-required="true"], .gw-required-icon'),
         readonly: /gw-readonly/.test(cls) || (!sel && !input && !radios.length),
-        kind: sel ? 'select' : radios.length ? 'radio' : input ? (input.type === 'password' ? 'masked' : 'input') : 'text',
+        kind: sel ? 'select' : radios.length ? 'radio' : input ? (masked ? 'masked' : 'input') : 'text',
         options: sel ? [...sel.options].map((o) => txt(o)) : undefined,
         radios: radios.length ? radios : undefined,
         disabled: !!((sel && sel.disabled) || (input && input.disabled)),

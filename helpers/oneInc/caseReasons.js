@@ -18,6 +18,14 @@ const M = (why) => ({ automation: 'MANUAL', reason: why });
 const D = (why) => ({ automation: 'NEEDS_DATA', reason: why });
 
 const REASONS = {
+
+  // ── Former "needs data" cases that stay manual (review 2026-11-03) ──
+  ...Object.fromEntries(['GCCM-763/VBR/TC-045', 'GCCM-763/VBR/TC-046', 'GCCM-1003/VBR/TC-128', 'GCCM-1003/VBR/TC-129'].map((id) => [id, D('Needs a TEST policy carrying Extraordinary / Extended Medical Benefits (EMB) coverage, so an exposure can have that Primary Coverage — none is known on TEST (the negatives without EMB are automated)')])),
+  ...Object.fromEntries(['GCCM-763/VBR/TC-054', 'GCCM-763/VBR/TC-061', 'GCCM-1003/VBR/TC-137', 'GCCM-1003/VBR/TC-144'].map((id) => [id, D('Needs an earlier First and Final / Final Payment in status "Paid" on the exposure — on TEST payments never get past Awaiting submission / Requesting (OneInc does not report back). BA decision needed on whether "Awaiting submission" counts as active (2026-10-21: a second First and Final was accepted while the first was Awaiting submission)')])),
+  ...Object.fromEntries(['GCCM-763/VBR/TC-055', 'GCCM-1003/VBR/TC-138'].map((id) => [id, D('Needs an earlier First and Final in status "Voided" — Void is enabled only on "Requested" checks, and a new check becomes Requested only after OneInc acknowledges it, which OneInc does not do on TEST')])),
+  ...Object.fromEntries(['GCCM-763/VBR/TC-062', 'GCCM-1003/VBR/TC-145'].map((id) => [id, D('Needs an earlier Final Payment in status "Rejected" — rejecting needs the approver\'s own login (the pending payment\'s activity assignee), whose password the automation does not hold')])),
+  ...Object.fromEntries(['GCCM-1003/VBR/TC-193', 'GCCM-803/TC/TC-049'].map((id) => [id, D('Needs a Personal Auto policy in force on a loss date before 1/1/2013 — no such policy on TEST, so the Loss Date cannot be moved to 12/31/2012')])),
+  ...Object.fromEntries(['GCCM-1003/CPD/TC-210', 'GCCM-1003/CPD/TC-211', 'GCCM-759/CPD/TC-033', 'GCCM-759/CPD/TC-034'].map((id) => [id, D('Needs to know who the "Payment Approver" is on a payment and an active TEST user in that role with NO email and NO phone (candidate: Jacob Erdman) — ask the BA how the approver is determined')])),
   // ── GCCM-787 Void/Stop ──
   'GCCM-787/TC/TC-009': D(`Needs a Cleared check to repost — ${NO_ONEINC}, so no check on TEST is ever Cleared`),
   'GCCM-787/TC/TC-012': D('Same as TC-011 on an Expense line: an issued Partial expense check plus a Final expense payment Awaiting Submission — not built yet'),
@@ -30,33 +38,19 @@ const REASONS = {
   ...Object.fromEntries(['022', '023', '024', '025', '026', '027', '028', '029', '030', '031', '032', '033'].map((n) => [`GCCM-787/TC/TC-${n}`, M(WEBHOOK)])),
 
   // ── GCCM-1013 Full Check wizard / Check-Payment Details ──
-  'GCCM-1013/UIF/TC-002': D('Needs a document linked on Step 3 so the Linked Documents grid has a Send Status dropdown; the test claims have no documents and the suite does not upload one yet (with no document the grid is empty)'),
   'GCCM-1013/UIF/TC-011': M(`Needs a tracking number from OneInc (Expedite / Certified delivery) — ${NO_ONEINC}`),
   'GCCM-1013/UIF/TC-013': M(`Needs a direct-deposit (or recurring debit) check with a ClaimsPay Method Id returned by OneInc — ${NO_ONEINC}`),
   'GCCM-1013/UIF/TC-015': M(`Needs OneInc payment feedback with the payee's preferred payment method — ${NO_ONEINC}`),
   'GCCM-1013/UIF/TC-016': M(`Needs a direct-deposit (or recurring debit) check with an account number returned by OneInc — ${NO_ONEINC}`),
   'GCCM-1013/UIF/TC-018': M(`Needs ClaimsPay comments returned by OneInc — ${NO_ONEINC}`),
   'GCCM-1013/UIF/TC-023': M(`Needs a check print date from OneInc (mailed check printed) — ${NO_ONEINC}`),
-  'GCCM-1013/VBR/TC-037': D('Needs 2+ earlier Supplemental payments submitted on one exposure whose coverage is medical / wage / funeral (Auto Med Pay, PIP …) — not built yet'),
-  'GCCM-1013/VBR/TC-038': D('Needs 2+ earlier Supplemental payments on a WC "Medical Details" exposure — not built yet'),
-  'GCCM-1013/VBR/TC-039': D('Needs 2+ earlier Supplemental payments on one non-medical exposure (each needs a closed reserve) — not built yet'),
   'GCCM-1013/VBR/TC-040': D('Needs a policy carrying one of the listed deductible endorsements (WC Marietta / Lemars, GC forms) with Deductible Status not Paid, and an approved supplemental payment'),
   'GCCM-1013/VBR/TC-041': D('Needs a policy carrying one of the listed deductible endorsements and an approved check WITHOUT a supplemental payment'),
-  'GCCM-1013/VBR/TC-044': D('Needs a Supplemental payment on a WC "Medical Details" exposure (closed reserve) — not built yet'),
-  'GCCM-1013/VBR/TC-045': D('Needs a Supplemental payment on a medical / wage / funeral coverage exposure (Auto Med Pay, PIP …) with a closed reserve — not built yet'),
-  'GCCM-1013/VBR/TC-047': D('Needs a person payee with an empty first name on the claim (Parties Involved will not save such a contact from the UI) — not built yet'),
-  'GCCM-1013/VBR/TC-060': D('Needs a non-WC claim with a third-party-liability exposure whose claimant is a Medicare beneficiary (Medicare tab) and no ICD codes — not built yet'),
-  'GCCM-1013/VBR/TC-061': D('Needs a non-WC third-party-liability exposure with a Medicare-beneficiary claimant and an ICD code on the Medicare tab — not built yet'),
-  'GCCM-1013/VBR/TC-068': D('Needs a Lump Sum Medical Extinguishment Date on the exposure — not set on the test claims'),
   'GCCM-1013/VBR/TC-076': M('Needs an Issued mailed check older than 180 days (BA note on the case: dates cannot be manipulated in Cloud)'),
-  'GCCM-1013/VBR/TC-077': D('Needs an Address Book vendor with Levy = "Levy Attached" in ContactManager — the ContactManager helper sets Tax ID Valid Until only, not Levy, yet'),
   'GCCM-1013/VBR/TC-082': D('Needs a claim with no assigned user — the test claims are assigned and unassigning one is not built'),
-  'GCCM-1013/VBR/TC-090': D('Needs a policy with aggregate limits plus a third-party-liability exposure with a claim cost payment (the automation aggregate-limit claim has a first-party vehicle exposure)'),
-  'GCCM-1013/VBR/TC-091': D('Needs a Lump Sum Medical Extinguishment Date on the exposure — not set on the test claims'),
-  'GCCM-1013/VBR/TC-093': D('Needs the claimant flagged "Partial or Full Name Unknown" in Parties Involved — not built yet'),
-  'GCCM-1013/VBR/TC-094': D('Needs the claimant flagged "Partial or Full Address Unknown" in Parties Involved — not built yet'),
+  'GCCM-1013/VBR/TC-093': M('The claimant\'s "Partial or Full Name Unknown" flag is on no cloud screen — Parties Involved › claimant › Edit and New Contact › Person have no such field (CONFIRMED 2026-11-03), so the precondition cannot be set'),
+  'GCCM-1013/VBR/TC-094': M('The claimant\'s "Partial or Full Address Unknown" flag is on no cloud screen — Parties Involved › claimant › Edit and New Contact › Person have no such field (CONFIRMED 2026-11-03), so the precondition cannot be set'),
   'GCCM-1013/VBR/TC-099': M('Needs the EnableWCEmploymentStatusValidation switch (system configuration) and a WC claim with no Employment Status'),
-  'GCCM-1013/VBR/TC-100': D('Needs a claim that does not pass the "Ability to Pay" validation level — the test claims are kept passing it'),
   'GCCM-1013/VBR/TC-101': M('Needs bulk payments pending on the exposure (Bulk Invoice) — see GCCM-791'),
   'GCCM-1013/INT/TC-103': D('Needs a Utah workers\' comp claim with an indemnity payment — none in the test claim pool'),
   'GCCM-1013/INT/TC-104': D('Needs a Delaware workers\' comp claim with an indemnity payment — none in the test claim pool'),

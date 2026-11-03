@@ -242,7 +242,7 @@ async function setContactRoleAndUpdate(page, name, role) {
 // address and `role` on this claim (VBR.036 payee "PHILIP ADAMS" on E_PA, CONFIRMED form 2026-10-27). No-op when a
 // contact of that name is already on the claim.
 async function addClaimPersonContact(page, { first, last, role = 'Covered Party', address = {} }) {
-  const name = `${first} ${last}`;
+  const name = [first, last].filter(Boolean).join(' '); // first may be empty (VBR.042: payee with no first name)
   await navigate(page, 'parties');
   await page.locator('tr[id*="LV-0-"]:visible').first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
   const listed = await page.evaluate(() => [...document.querySelectorAll('[id*="PeopleInvolvedDetailedLV-"][id$="-Name"]')].map((e) => (e.innerText || '').trim().toUpperCase()));
@@ -252,7 +252,7 @@ async function addClaimPersonContact(page, { first, last, role = 'Covered Party'
   await page.getByRole('menuitem', { name: /^Person$/ }).first().click();
   await settle(page, 4000);
   const a = { line1: '100 Market St', city: 'Harrisburg', state: 'Pennsylvania', zip: '17101', type: 'Home', ...address };
-  await fill(page, 'First name', first);
+  if (first) await fill(page, 'First name', first);
   await fill(page, 'Last name', last);
   await select(page, 'Country', 'United States').catch(() => {});
   await fill(page, 'Address 1', a.line1);

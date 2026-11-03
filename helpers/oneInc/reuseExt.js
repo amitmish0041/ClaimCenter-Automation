@@ -140,7 +140,23 @@ async function addReserve(page, claim, { costType = 'Claim Cost', costCategory, 
   await W.cancelWizard(page).catch(() => {});
   await W.openClaim(page, claim);
   page._currentClaimNumber = claim;
-  const err = await require('../financialsHelper').createReserve(page, { reserveAmount: amount, costType, costCategory, exposure, strict: true }).catch((e) => e.message);
+  let err = await require('../financialsHelper').createReserve(page, { reserveAmount: amount, costType, costCategory, exposure, strict: true }).catch((e) => e.message);
+  // The adjuster cannot reserve a NEW medical exposure on cloud TEST ("Save pressed but the reserve screen is still open
+  // with no validation text", Medical Expense exposures 2026-11-03; no Reserve item at all, 2026-10-28) — data setup is
+  // then done once as the admin in its own window (as claimCheck does); the cases still run as CC_USER.
+  if (err && process.env.CC_ADMIN_USER && page.__oneIncUser !== 'admin') {
+    const ctx = await page.context().browser().newContext({ viewport: { width: 1600, height: 1000 } });
+    try {
+      const ap = await ctx.newPage();
+      ap.setDefaultTimeout(20000);
+      await require('../claimCenterBase').loginAsAdmin(ap);
+      ap.__oneIncUser = 'admin';
+      await W.openClaim(ap, claim);
+      ap._currentClaimNumber = claim;
+      const again = await require('../financialsHelper').createReserve(ap, { reserveAmount: amount, costType, costCategory, exposure, strict: true }).catch((e) => e.message);
+      err = again ? `${err} (as admin too: ${again})` : '';
+    } finally { await ctx.close().catch(() => {}); }
+  }
   await W.openClaim(page, claim).catch(() => {});
   return err || '';
 }

@@ -87,7 +87,8 @@ add('GCCM-759/UIF/TC-022', 'AUTO_PA', [...NEW_LINE('Adjuster Expense'), { select
   'Checked for an expense payment, where NAIC Expense Reporting applies (business review: "applicable to Expense type payments not claim cost").');
 add('GCCM-759/UIF/TC-023', 'AUTO_PA', NEW_LINE('Claim Cost'), [H('NAIC Expense Reporting')]);
 add('GCCM-759/UIF/TC-024', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Total Amount of Payment', { required: true, editable: true }),
-  { fieldKind: { label: 'Total Amount of Payment', kind: 'masked' } }, H('Check Amount'),
+  // A value is typed first: cloud CC masks the box with CSS only once it holds one (2026-11-03 team run: empty box read as plain input).
+  { fill: ['Total Amount of Payment', '1.37'] }, { fieldKind: { label: 'Total Amount of Payment', kind: 'masked' } }, H('Check Amount'),
   { select: ['Transaction Type', 'Partial Payment'] }, { next: true }, { message: { re: /does not match the total amount of the check/i, present: true } }],
   'Updated 759 sheet (QA review 2026-10-28): proceeding without the amount must show "This amount does not match the total amount of the check."');
 add('GCCM-759/UIF/TC-025', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Cause of Loss', { readonly: true, value: /\S/ })]);
@@ -188,7 +189,7 @@ add('GCCM-1003/UIF/TC-012', 'AUTO_PA', QUICK(), [{ button: { name: 'Edit', prese
 add('GCCM-1003/UIF/TC-013', 'AUTO_PA', QUICK(), [V('Reserve Line', { required: true, value: /\S/ })]);
 add('GCCM-1003/UIF/TC-015', 'AUTO_PA', QUICK(), [H('Is the legal expense for a legal opinion on coverage or to litigate a coverage issue?')]);
 add('GCCM-1003/UIF/TC-017', 'AUTO_PA', QUICK(), [H('NAIC Expense Reporting')]);
-add('GCCM-1003/UIF/TC-018', 'AUTO_PA', QUICK(), [V('Total Amount of Payment', { required: true }), { fieldKind: { label: 'Total Amount of Payment', kind: 'masked' } }, H('Blind Check Amount')]);
+add('GCCM-1003/UIF/TC-018', 'AUTO_PA', QUICK(), [V('Total Amount of Payment', { required: true }), { fill: ['Total Amount of Payment', '1.37'] }, { fieldKind: { label: 'Total Amount of Payment', kind: 'masked' } }, H('Blind Check Amount')]);
 add('GCCM-1003/UIF/TC-019', 'AUTO_PA', QUICK(), [V('Service Period Start', { editable: true })]);
 add('GCCM-1003/UIF/TC-020', 'AUTO_PA', QUICK(), [V('Service Period End', { editable: true })]);
 add('GCCM-1003/UIF/TC-021', 'AUTO_PA', QUICK(), [V('Cause of Loss', { readonly: true, value: /\S/ })]);
