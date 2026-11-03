@@ -34,6 +34,52 @@ function stepOf(title) {
   return null; // activities, documents etc. always run
 }
 
+// ── Team logins (user list 2026-11-02; IDs = first 4 of first name + first 4 of last name, NOT yet confirmed) ──────
+// Off unless CC_E2E_TEAM_LOGINS=1 and CC_TEAM_PASS is set (the shared TEST password — environment only, never a file).
+// When on: the payment step runs as the LOB team's claim rep, the recovery step as the Subrogation/Recovery rep, and
+// the approval step as whoever the approval activity is assigned to. Off: standard user + admin (su), as before.
+const TEAMS = {
+  'Claims':               { rep: ['kaylmart'] },
+  'Auto Medical':         { manager: 'maryfloh', supervisor: 'julikron', rep: ['andrbish', 'devilefe'] },
+  'Property':             { manager: 'krisdiet', supervisor: 'dougreid', rep: ['mikekrau', 'katidimi'] },
+  'BI/GLPD':              { manager: 'samaclar', supervisor: 'jamicole', rep: ['janehann', 'megaschi'] },
+  'Subrogation/Recovery': { manager: 'benjsmit', supervisor: 'angichev', rep: ['alliwagn', 'joefart'] },
+  'Reinsurance':          { rep: ['chrinoon'] },
+  'Workers Comp':         { manager: 'vernande', supervisor: 'lorrkier', rep: ['tomdavi', 'chenrema'] },
+  'Motor Vehicle':        { manager: 'seanhann', supervisor: 'mikechad', rep: ['marymeal', 'triclaug'] },
+  'Auto':                 { manager: 'daryfili', supervisor: 'mallredc', rep: ['stepvarg', 'natastri'] },
+};
+const LOB_TEAM = { CA: 'Auto', PA: 'Auto', BOP: 'Property', CP: 'Property', HO: 'Property', WC: 'Workers Comp' };
+const lobOfClaim = (claim) => ({ CA: 'CA', PA: 'PA', HO: 'HO', WC: 'WC', BOP: 'BOP', CPP: 'CP' })[String(claim || '').split('-')[0]] || null;
+const teamLoginsOn = () => process.env.CC_E2E_TEAM_LOGINS === '1' && !!process.env.CC_TEAM_PASS;
+const loginIdFor = (fullName) => { const [f, ...r] = String(fullName).toLowerCase().trim().split(/\s+/); return (f || '').replace(/[^a-z]/g, '').slice(0, 4) + r.join('').replace(/[^a-z]/g, '').slice(0, 4); };
+function teamUserFor(step, claimNumber) {
+  if (step === 'recovery') return TEAMS['Subrogation/Recovery'].rep[0];
+  if (step === 'payment') { const t = TEAMS[LOB_TEAM[lobOfClaim(claimNumber)]]; return t ? t.rep[0] : null; }
+  return null;
+}
+// The approval activity's "Assigned To" (not "Assigned By") is the approver (CONFIRMED 2026-10-22, OneInc).
+async function approverFor(page) {
+  const nav = page.locator('[role="menuitem"], .gw-action--inner').filter({ hasText: /^Workplan$/ }).first();
+  await nav.click({ timeout: 5000 }).catch(() => nav.dispatchEvent('click'));
+  await page.locator('tr[role="row"]').nth(1).waitFor({ timeout: 15000 }).catch(() => {});
+  return page.evaluate(() => {
+    const rows = [...document.querySelectorAll('tr[role="row"]')].filter(r => r.offsetParent);
+    const head = rows.find(r => /\bAssigned To\b/.test(r.innerText));
+    if (!head) return null;
+    const cells = [...head.children].map(c => (c.innerText || '').trim());
+    const subj = cells.findIndex(c => /^Subject$/.test(c)), to = cells.findIndex(c => /^Assigned To$/.test(c));
+    const row = rows.find(r => r !== head && /\bOpen\b/.test(r.innerText) && /approv/i.test((r.children[subj] || {}).innerText || ''));
+    return row ? ((row.children[to] || {}).innerText || '').replace(/\s+/g, ' ').trim() : null;
+  });
+}
+async function loginTeamUser(page, username, claimNumber, why) {
+  const B = require('./claimCenterBase');
+  await B.loginToClaimCenter(page, { username, password: process.env.CC_TEAM_PASS });
+  await B.openExistingClaim(page, claimNumber);
+  console.log(`Team login: ${why} as ${username}`);
+}
+
 // ctx = { page, claimNumber } (read when the test starts). Cloud user switch, as the OneInc data step does: the standard
 // user's reserves land "Submitted" and no payee then has a payable Reserve Line (confirmed 2026-11-02 on
 // CA-PA-01-26-0748712), so reserves are made as the admin; the payment goes back to the standard user so it still
@@ -44,11 +90,27 @@ async function gate(test, testInfo, ctx = {}) {
   const s = stepOf(testInfo.title);
   if (s === 'fnol') test.skip(!!existingClaim(), `existing claim ${existingClaim()} — FNOL not run`);
   else if (s) test.skip(!on(s), `step "${s}" not selected (CC_E2E_STEPS=${steps().join(',')})`);
+  // Close on cloud is parked (user, 2026-11-02): closeCloud gets through drain + DMEC0002 but exposure activities can't
+  // be completed by the automation yet. Shown as skipped, not failed.
+  if (s === 'close' && IS_CLOUD) test.skip(true, 'close is not supported on cloud yet (exposure activities block Close Exposure)');
   if (!IS_CLOUD || !ctx.page || !ctx.claimNumber) return;
   // Before the first money step, bring the claim to Ability to pay (else no payee has a payable Reserve Line).
   if (!repaired && ['reserve', 'payment', 'recovery'].includes(s) && on(s)) {
     repaired = true;
     await repairCloud(ctx.page, ctx.claimNumber);
+  }
+  if (teamLoginsOn() && on(s)) {
+    let user = teamUserFor(s, ctx.claimNumber);
+    if (s === 'approval') {
+      const name = await approverFor(ctx.page).catch(() => null);
+      user = name ? loginIdFor(name) : null;
+      if (!name) console.log('Team login: no open approval activity — approval runs as the current user');
+    }
+    if (user && user !== cloudUser) {
+      await loginTeamUser(ctx.page, user, ctx.claimNumber, `${s} step`);
+      cloudUser = user;
+      return;
+    }
   }
   // close: its Final Payments as the admin (the standard user's would wait for an approver — on-prem the admin bypasses).
   const want = s === 'reserve' || s === 'close' ? 'admin' : s === 'payment' ? 'standard' : null;
@@ -347,10 +409,127 @@ async function close(page, claimNumber) {
       await K.addDocument(page).then(() => console.log('close: supporting document added')).catch(e => console.log('close: add document failed — ' + e.message));
     }
     await require('./claimCenterBase').openExistingClaim(page, claimNumber);
+    return closeCloud(page, claimNumber);
   }
   await L.drainAndCloseAllExposures(page, claimNumber);
   await L.closeClaim(page, { closeReason: 'Covered - Settled' });
   await L.assertClaimStatus(page, 'Closed');
+}
+
+// Cloud close (2026-11-02, CA-PA-01-26-0748721). The on-prem pieces of drainAndCloseAllExposures read ExtJS grids and
+// silently find "no Open exposures" on cloud, so:
+//  1. drain: Final Payment per reserve line until none is payable. The cloud reserve reader can report a PAID amount
+//     as remaining, so "no payee has a reserve line" (nothing payable) counts as drained, not as a failure.
+//  2. each exposure: Close Exposure › Note + Outcome (settled/complete-like, else first) › Close Exposure.
+//  3. Actions › Close Claim › Note + Outcome "Payments Complete" › Close Claim; the header must read St: Closed.
+async function closeCloud(page, claimNumber) {
+  const B = require('./claimCenterBase');
+  const F = require('./financialsHelper');
+  const A = require('./oneInc/setupA');
+  for (let round = 0; round < 6; round++) {
+    let line = null;
+    try { line = await F.findFirstPositiveReserveLine(page); } catch (_) {}
+    if (!line || !(line.amount > 0)) break;
+    try {
+      await F.createPayment(page, { paymentAmount: line.amount, reserveLine: line.firstCell, transactionType: 'Final Payment', payeeHint: line.rowText });
+      console.log(`close: Final Payment $${line.amount} on ${line.firstCell}`);
+    } catch (e) {
+      if (!/no payee on this claim has a reserve line/i.test(e.message)) throw e;
+      // OneInc's cancelWizard answers the native confirm; a plain Cancel click left the wizard open and the exposure
+      // reads after it found 0 exposures (2026-11-02).
+      await require('./oneInc/wizardDriver').cancelWizard(page).catch(() => {});
+      console.log('close: no reserve line left to pay — drained');
+      break;
+    }
+    await B.openExistingClaim(page, claimNumber);
+  }
+  await B.openExistingClaim(page, claimNumber);
+  await completeActivitiesCloud(page);
+  await B.openExistingClaim(page, claimNumber);
+  const closeScreen = async (button, outcomeRe) => {
+    await page.locator('textarea[name$="Note"], textarea').first().fill('Automated E2E close').catch(() => {});
+    const sel = page.locator('select[name$="Outcome"]').first();
+    const opt = await sel.locator('option').evaluateAll((os, re) => {
+      const real = os.filter(o => o.value && !/^<?none>?$/i.test(o.text.trim()));
+      return (real.find(o => new RegExp(re, 'i').test(o.text)) || real[0] || {}).value;
+    }, outcomeRe);
+    if (opt) await sel.selectOption(opt);
+    await page.waitForTimeout(1000);
+    await page.getByRole('button', { name: button, exact: true }).first().click();
+    await page.waitForTimeout(3500);
+    // DMEC0002 (warning): "open reserve of $X … If you want to set this reserve to $0 please click Close Exposure
+    // again" — accept it (the reserve is zeroed as part of the close).
+    if (await page.getByText(/DMEC0002/).first().isVisible().catch(() => false)) {
+      console.log(`close: DMEC0002 — clicking ${button} again to zero the open reserve`);
+      await page.getByRole('button', { name: button, exact: true }).first().click();
+      await page.waitForTimeout(3500);
+    }
+    // Refusals show as "Errors on current page" OR as "Errors located on another page" groups in the south panel.
+    const err = await page.evaluate((b) => {
+      if (!new RegExp(b).test(document.body.innerText.slice(0, 2500))) return '';
+      const p = document.getElementById('gw-south-panel');
+      const t = (p && p.offsetParent ? p.innerText : '') + ' ' + (document.body.innerText.split('Errors on current page:')[1] || '').slice(0, 400);
+      return /Errors/.test(t) ? t.replace(/\s+/g, ' ').slice(0, 700) : '';
+    }, button);
+    if (err) throw new Error(`${button} refused: ${err}`);
+  };
+  const n = await A.exposureCount(page).catch(() => 0);
+  for (let i = 0; i < n; i++) {
+    await A.openExposure(page, i);
+    const btn = page.getByRole('button', { name: 'Close Exposure', exact: true }).first();
+    if (!(await btn.isVisible().catch(() => false))) { console.log(`close: exposure ${i + 1} has no Close Exposure (already closed?)`); continue; }
+    await btn.click();
+    await page.waitForTimeout(2500);
+    await closeScreen('Close Exposure', 'Payments Complete|Settle|Complete|Paid');
+    console.log(`close: exposure ${i + 1} closed`);
+    await B.openExistingClaim(page, claimNumber);
+  }
+  await page.getByRole('button', { name: 'deferred Actions' }).click();
+  await page.waitForTimeout(800);
+  await page.getByLabel(/^Close Claim/).first().click();
+  await page.waitForTimeout(2500);
+  await closeScreen('Close Claim', 'Payments Complete|Completed');
+  const status = await page.evaluate(() => (document.body.innerText.match(/St:\s*(\w+)/) || [])[1] || '');
+  if (!/Closed/i.test(status)) throw new Error(`claim status after Close Claim is "${status}", not Closed`);
+  console.log('close: claim Closed');
+}
+
+// Cloud Workplan sweep: select every open activity (header checkbox) › Complete; repeat while the count drops.
+// The on-prem completeAllWorkplanActivities reads ExtJS rows and does nothing on cloud, and open exposure activities
+// block Close Exposure ("There are open activities related to this exposure", 2026-11-02).
+async function completeActivitiesCloud(page) {
+  // The bulk Complete stays disabled once the selection holds anything not completable (2026-11-02), so each open
+  // activity is opened (its subject link → detail in #gw-south-panel) and completed from its own Complete button.
+  const openWorkplan = async () => {
+    const nav = page.locator('[role="menuitem"], .gw-action--inner').filter({ hasText: /^Workplan$/ }).first();
+    await nav.click({ timeout: 5000 }).catch(() => nav.dispatchEvent('click'));
+    await page.locator('tr[role="row"]').nth(1).waitFor({ timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+    return page.evaluate(() => {
+      const rows = [...document.querySelectorAll('tr[role="row"]')].filter(r => r.offsetParent);
+      const head = rows.find(r => /\bSubject\b/.test(r.innerText));
+      if (!head) return [];
+      const idx = [...head.children].findIndex(c => /^\s*Subject\s*$/.test(c.innerText || ''));
+      return rows.filter(r => r !== head && /\bOpen\b/.test(r.innerText))
+        .map(r => ((r.children[idx] || {}).innerText || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+    });
+  };
+  const skipped = new Set();
+  let done = 0;
+  for (let guard = 0; guard < 40; guard++) {
+    const subjects = (await openWorkplan()).filter(s => !skipped.has(s));
+    if (!subjects.length) break;
+    const subject = subjects[0];
+    await page.locator('tr[role="row"]').filter({ hasText: /\bOpen\b/ }).getByText(subject, { exact: true }).first().click().catch(() => {});
+    await page.waitForTimeout(2500);
+    const btn = page.locator('#gw-south-panel').getByRole('button', { name: 'Complete', exact: true }).first();
+    if (!(await btn.isVisible().catch(() => false)) || (await btn.getAttribute('aria-disabled')) === 'true') { skipped.add(subject); continue; }
+    await btn.click().catch(() => {});
+    await page.waitForTimeout(3000);
+    const still = (await openWorkplan()).includes(subject);
+    if (still) skipped.add(subject); else done++;
+  }
+  console.log(`close: workplan — ${done} activit(ies) completed` + (skipped.size ? `; could not complete: ${[...skipped].join(', ')}` : ''));
 }
 
 // No policy typed in the Runner (CC_E2E_POLICY_FROM_POOL=1): pick a random claim of this LOB (PA state, matching the
@@ -386,4 +565,4 @@ if (process.env.CC_E2E_POLICY_FROM_POOL === '1' && process.env.CC_E2E_LOB && pro
   } catch (e) { console.log('Claim inventory not readable (' + e.message.split('\n')[0] + ') — using the .env policy list'); }
 }
 
-module.exports = { IS_CLOUD, ALL, steps, on, existingClaim, stepOf, gate, recovery, close, pickFromInventory, receiptCloud };
+module.exports = { IS_CLOUD, ALL, steps, on, existingClaim, stepOf, gate, recovery, close, pickFromInventory, receiptCloud, TEAMS, LOB_TEAM, loginIdFor, teamUserFor };

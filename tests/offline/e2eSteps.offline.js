@@ -39,3 +39,13 @@ test('gate skips FNOL only for an existing claim, and unselected steps', () => {
   });
   assert.deepEqual(calls.map(c => c[0]), [true, false, true]);
 });
+
+test('team login ids and per-step users', () => {
+  assert.equal(E.loginIdFor('Keith Eisenhart'), 'keiteise');
+  assert.equal(E.loginIdFor('Stephanie Vargas'), 'stepvarg');
+  assert.equal(E.teamUserFor('payment', 'CA-PA-01-26-0748721'), 'stepvarg');
+  assert.equal(E.teamUserFor('payment', 'CPP-PA-85-26-0748048'), 'mikekrau');
+  assert.equal(E.teamUserFor('payment', 'WC-PA-01-26-0747944'), 'tomdavi');
+  assert.equal(E.teamUserFor('recovery', 'HO-PA-01-26-0747764'), 'alliwagn');
+  assert.equal(E.teamUserFor('reserve', 'CA-PA-01-26-0748721'), null);
+});

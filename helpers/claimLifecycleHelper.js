@@ -1550,6 +1550,7 @@ async function closeExposureWithOutcome(page, exposureRowText) {
 async function approveLatestCheck(page, claimNumber) {
   wpLog('approveLatestCheck: starting for ' + claimNumber);
   let approved = false;
+  let nothingToApprove = false;
   let usedApproach2 = false; // tracks whether Approach 2 navigated to the claim already
 
   // --- Approach 1: My Work → Approvals queue ---
@@ -2174,6 +2175,9 @@ async function approveLatestCheck(page, claimNumber) {
 
       if (!approved) {
         console.log('approveLatestCheck: all strategies exhausted — no approvable Requesting/recovery check found');
+        // Was a silent pass (2026-11-02, cloud CA: the $1,000 payment raised no approval activity at all). Report it as
+        // skipped so the run doesn't claim an approval it never made.
+        nothingToApprove = true;
       }
     } catch (err) {
       console.log('approveLatestCheck: Approach 2 error:', err.message);
@@ -2192,6 +2196,13 @@ async function approveLatestCheck(page, claimNumber) {
   }
 
   wpLog('approveLatestCheck: result=' + approved + ' for ' + claimNumber);
+  // Inside the APPROVAL test only (not the close drain, which also calls this), report "nothing to approve" as a skip
+  // instead of a silent pass (2026-11-02: cloud CA's $1,000 payment raised no approval activity).
+  if (!approved && nothingToApprove) {
+    let ti = null;
+    try { ti = require('@playwright/test').test.info(); } catch (_) { /* not inside a test */ }
+    if (ti && /approve/i.test(ti.title) && !/close/i.test(ti.title)) ti.skip(true, 'nothing to approve — the payment did not route to approval');
+  }
   return approved;
 }
 
