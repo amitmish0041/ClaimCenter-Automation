@@ -137,6 +137,8 @@ test.describe('Homeowners — E2E', () => {
   // ── Phase 3: Initial Reserves (rule IRR01000 — gate fires on FNOL finish) ──
 
   test('E2E-HO-003 [IRR01000]: Initial reserve auto-set to $0 on Coverage A Dwelling', async () => {
+    // assertInitialReservesSet reads on-prem (ExtJS) Financials selectors only.
+    test.skip(E2E.IS_CLOUD, 'initial-reserve check is on-prem only (cloud Financials screens differ)');
     await assertInitialReservesSet(page, { exposureLabel: 'Coverage A Dwelling', expectedAmount: 0 });
   });
 

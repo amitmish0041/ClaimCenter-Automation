@@ -2091,6 +2091,16 @@ async function createPaymentCloud(page, {
     if (!lineText) throw new Error('createPaymentCloud: no payee on this claim has a reserve line to pay from');
   }
   await selectByLabelOrFirst(page, 'Transaction Type', transactionType);
+  // WC medical lines REQUIRE Service Period Start/End (2026-11-03, WC-PA-85-26-0748727); a generic filler typed "2"
+  // into them ("must be a valid date in the format 11/02/2026"). Today, MM/DD/YYYY, when the fields are shown.
+  {
+    const d = new Date();
+    const today = String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0') + '/' + d.getFullYear();
+    for (const lbl of ['Service Period Start', 'Service Period End']) {
+      const box = page.getByRole('textbox', { name: lbl, exact: true }).first();
+      if (await box.isVisible().catch(() => false)) { await box.fill(today); await box.press('Tab').catch(() => {}); }
+    }
+  }
   // Label was "Total Amount of Check"; CC TEST shows "Total Amount of Payment" (2026-11-02).
   const totalAmount = page.getByRole('textbox', { name: /^Total Amount of (Check|Payment)$/ }).first();
   await totalAmount.fill(String(checkAmount));
@@ -2101,6 +2111,16 @@ async function createPaymentCloud(page, {
   await selectByLabelOrFirst(page, 'Box Number', boxNumber);
   await selectByLabelOrFirst(page, 'Memo Phrase', memoPhrase);
   await totalAmount.fill(String(checkAmount));
+  // Service Period dates last, by field container: the role-name lookup above missed them and they still held "2"
+  // (WC medical line, 2026-11-03).
+  {
+    const d = new Date();
+    const today = String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0') + '/' + d.getFullYear();
+    for (const lbl of [/^\s*Service Period Start/, /^\s*Service Period End/]) {
+      const box = page.locator('.gw-InputWidget').filter({ hasText: lbl }).locator('input[type="text"]').first();
+      if (await box.isVisible().catch(() => false)) { await box.fill(today); await box.press('Tab').catch(() => {}); await page.waitForTimeout(500); }
+    }
+  }
   await page.getByRole('button', { name: 'Next' }).click();
 
   // Step 3's question is a gw-radioDiv (role="radio" divs carrying aria-label),

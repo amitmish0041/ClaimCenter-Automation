@@ -1007,12 +1007,14 @@ async function fillCloudNewExposure(page, coverageLabel) {
           for (const sel of document.querySelectorAll('select')) {
             if (!sel.offsetParent || sel.disabled) continue;
             const cur = (sel.options[sel.selectedIndex] || {}).text || '';
-            if (cur && !/^<?none>?$/i.test(cur.trim())) continue;
-            const real = [...sel.options].filter(o => o.text && !/^<?none>?$/i.test(o.text.trim()));
             // Vehicle "Style": the first option is "Boat", which then needs a Boat type and fails Ability to pay
-            // (CONFIRMED 2026-10-21) — use "Other".
+            // (CONFIRMED 2026-10-21) — use "Other". A vehicle REUSED from "Select vehicle" arrives with Style already
+            // "Boat" (2026-11-03, PA-PA-01-26-0748726: Serial number / Boat type must be present), so change that too.
             const w = sel.closest('.gw-InputWidget');
             const lbl = ((w && w.querySelector('.gw-label')) || {}).textContent || '';
+            const boatStyle = /^\s*Style\s*$/i.test(lbl) && /^Boat$/i.test(cur.trim());
+            if (cur && !/^<?none>?$/i.test(cur.trim()) && !boatStyle) continue;
+            const real = [...sel.options].filter(o => o.text && !/^<?none>?$/i.test(o.text.trim()));
             const opt = (/^\s*Style\s*$/i.test(lbl) && real.find(o => /^Other$/i.test(o.text.trim()))) || real[0];
             if (!opt) continue;
             sel.value = opt.value;
@@ -1427,6 +1429,10 @@ async function addCloudIncidents(page, kinds = ['Add Vehicle', 'Add Injury', 'Ad
       for (const label of ['OK', 'Update', 'Add', 'Done']) {
         const btn = page.getByRole('button', { name: label, exact: true }).first();
         if (!await btn.isVisible().catch(() => false)) continue;
+        // Never the Witnesses grid's "Add": with no incident popup open it was the only Add on Loss Details, and each
+        // round added a witness row — the last one with no Name, which then blocked Next ("Name : Missing required
+        // field", HO 2026-11-03: 9 witness rows).
+        if (label === 'Add' && await btn.evaluate(b => { for (let e = b; e; e = e.parentElement) if (/Witness/i.test(e.id || '')) return true; return false; }).catch(() => false)) continue;
         await btn.click().catch(() => {});
         await page.waitForTimeout(1800);
         pressed = true;
@@ -6804,7 +6810,12 @@ async function completeFNOL(page, {
       lossState: lossDetails.lossState || 'PA',
       lossCauseCode: lossDetails.lossCauseCode || '',
       whatHappened: lossDetails.lossDescription || 'Automation FNOL test',
-      incidents,
+      // Same rule as on-prem (skipInjuryIncident for non-WC): HO's Step 3 "Add Injury" never saved — "Name : Missing
+      // required field" with no fillable Name control (2026-11-03) — so unless the caller chose, add an injury only
+      // for WC or when an exposure is an injury coverage.
+      // Limited to Homeowners coverages so BOP/CA/PA/WC (which pass with it) keep their behaviour.
+      incidents: incidents || ((exposures || []).some(e => /Dwelling|Coverage [A-E]\b/i.test(String(e.coverageLabel || '')))
+        ? ['Add Property Damage'] : undefined), // as OneInc's PROP_PA provisioner
     });
   }
 
@@ -6954,6 +6965,16 @@ async function completeFNOL(page, {
     // The recording also shows plain getByRole('menuitem'/'button', {name})
     // works - Playwright derives the accessible name from the child .gw-label -
     // so none of the aria-label/column-scoping machinery is needed.
+    // A claim routed to a group the automation user can't see shows "Cannot View Claim" and the exposures could not
+    // be added (HO 2026-11-03: "0 of 2 exposure(s) created") — switch to the admin first.
+    // Open it first — right after Finish the page is "New Claim Saved", where the permission problem isn't shown yet.
+    if (claimNumber) await require('./claimCenterBase').openExistingClaim(page, claimNumber).catch(() => {});
+    if (claimNumber && await require('./e2eSteps').cannotView(page)) {
+      console.log('FNOL: no permission to view ' + claimNumber + ' — adding exposures as admin');
+      const { loginAsAdmin, openExistingClaim } = require('./claimCenterBase');
+      await loginAsAdmin(page);
+      await openExistingClaim(page, claimNumber);
+    }
     await addCloudExposures(page, exposures);
 
   } else if (false) {
@@ -6997,6 +7018,16 @@ async function completeFNOL(page, {
   // menu entirely and the claim-level items simply are not present.
   page._currentClaimNumber = claimNumber;
 
+  // Cloud: a claim routed to a group the automation user can't see shows "Cannot View Claim" (HO, 2026-11-03), and
+  // the spec's assignClaim then finds no Actions menu. Same remedy as the on-prem path above: continue as the admin,
+  // whose assignment of the claim to the automation user gives that user access for the later steps.
+  if (!IS_ON_PREM && claimNumber && await require('./e2eSteps').cannotView(page)) {
+    console.log('FNOL: no permission to view ' + claimNumber + ' as the automation user — continuing as admin');
+    const { loginAsAdmin, openExistingClaim } = require('./claimCenterBase');
+    await loginAsAdmin(page);
+    await openExistingClaim(page, claimNumber);
+  }
+
   return claimNumber;
 }
 
@@ -7018,6 +7049,8 @@ module.exports = {
   sweepComboboxesOnPrem,
   clickUnansweredBooleanFieldsOnPrem,
   answerCloudRadioGroups,
+  // Reused by helpers/e2eSteps.js repairCloud: an exposure Update also validates its Appraisal tab (2026-11-03).
+  fillRequiredAcrossTabsCloud,
   answerUnansweredYesNoPairs,
   completeCloudLossDetails,
   fixCloudInvalidControls,

@@ -84,8 +84,21 @@ async function loginTeamUser(page, username, claimNumber, why) {
 // user's reserves land "Submitted" and no payee then has a payable Reserve Line (confirmed 2026-11-02 on
 // CA-PA-01-26-0748712), so reserves are made as the admin; the payment goes back to the standard user so it still
 // routes to approval.
+// "Cannot View Claim" (claim routed to a group the user can't see). Polls the visible page text for a few seconds —
+// getByText(...).first() resolved to a hidden copy and never reported it (2026-11-03).
+async function cannotView(page) {
+  for (let i = 0; i < 6; i++) {
+    const hit = await page.evaluate(() => /Cannot View Claim|do not have permission to view this claim/i.test(document.body.innerText.slice(0, 2000))).catch(() => false);
+    if (hit) return true;
+    await page.waitForTimeout(1000);
+  }
+  return false;
+}
+
 let cloudUser = 'standard';
 let repaired = false;
+let accessChecked = false;
+let adminOnly = false;
 async function gate(test, testInfo, ctx = {}) {
   const s = stepOf(testInfo.title);
   if (s === 'fnol') test.skip(!!existingClaim(), `existing claim ${existingClaim()} — FNOL not run`);
@@ -94,6 +107,33 @@ async function gate(test, testInfo, ctx = {}) {
   // be completed by the automation yet. Shown as skipped, not failed.
   if (s === 'close' && IS_CLOUD) test.skip(true, 'close is not supported on cloud yet (exposure activities block Close Exposure)');
   if (!IS_CLOUD || !ctx.page || !ctx.claimNumber) return;
+  // Existing claim the automation user can't open ("Cannot View Claim" — routed to another group): assign it to the
+  // automation user as the admin, then carry on as before (2026-11-03, HO-PA-01-26-0748728).
+  if (!accessChecked) {
+    accessChecked = true;
+    // Open it first: openExistingClaim logs "Opened" even when CC shows "Cannot View Claim".
+    await require('./claimCenterBase').openExistingClaim(ctx.page, ctx.claimNumber).catch(() => {});
+    if (await cannotView(ctx.page)) {
+      const B = require('./claimCenterBase');
+      const L = require('./claimLifecycleHelper');
+      console.log(`Cloud: no permission to view ${ctx.claimNumber} — assigning it to Benjamin Smith as the admin`);
+      await B.loginAsAdmin(ctx.page);
+      await B.openExistingClaim(ctx.page, ctx.claimNumber);
+      await L.assignClaim(ctx.page, 'Benjamin Smith').catch(e => console.log('assign failed — ' + e.message.split('\n')[0]));
+      await B.loginToClaimCenter(ctx.page);
+      await B.openExistingClaim(ctx.page, ctx.claimNumber);
+      cloudUser = 'standard';
+      // Assigning didn't always grant view (HO, 2026-11-03: still "Cannot View Claim" after assignment to Benjamin
+      // Smith). Then run every step as the admin.
+      if (await cannotView(ctx.page)) {
+        console.log(`Cloud: still no permission on ${ctx.claimNumber} — all steps run as the admin`);
+        await B.loginAsAdmin(ctx.page);
+        await B.openExistingClaim(ctx.page, ctx.claimNumber);
+        cloudUser = 'admin';
+        adminOnly = true;
+      }
+    }
+  }
   // Before the first money step, bring the claim to Ability to pay (else no payee has a payable Reserve Line).
   if (!repaired && ['reserve', 'payment', 'recovery'].includes(s) && on(s)) {
     repaired = true;
@@ -114,7 +154,7 @@ async function gate(test, testInfo, ctx = {}) {
   }
   // close: its Final Payments as the admin (the standard user's would wait for an approver — on-prem the admin bypasses).
   const want = s === 'reserve' || s === 'close' ? 'admin' : s === 'payment' ? 'standard' : null;
-  if (!want || want === cloudUser) return;
+  if (!want || want === cloudUser || adminOnly) return;
   const B = require('./claimCenterBase');
   await (want === 'admin' ? B.loginAsAdmin(ctx.page) : B.loginToClaimCenter(ctx.page));
   await B.openExistingClaim(ctx.page, ctx.claimNumber);
@@ -338,11 +378,57 @@ async function validateCloud(page) {
     for (const l of lines) {
       const m = l.match(/^Errors located on another page:\s*(.+)$/);
       if (m) { where = m[1]; continue; }
-      if (/^(Validation Results|Clear|Click here to navigate)/.test(l)) continue;
+      if (/^(Validation Results|Clear|Click here to navigate|Information:?$|No validation errors)/.test(l)) continue;
       out.push({ where, text: l });
     }
     return out;
   });
+}
+
+async function ensureClaimDocument(page, claimNumber) {
+  const K = require('./oneInc/recipes/workerK');
+  const rows = await K.documentRows(page).catch(() => []);
+  if (!rows.some(t => t.toLowerCase().includes(K.DOC_NAME.toLowerCase()))) {
+    await K.addDocument(page).then(() => console.log('claim document added (for checks over $1,000)'))
+      .catch(e => console.log('claim document not added — ' + e.message.split('\n')[0]));
+  }
+  await require('./claimCenterBase').openExistingClaim(page, claimNumber);
+}
+
+// Personal auto: New Payment answers "New Payment Error — Please complete the Surcharging screen" (2026-11-03,
+// PA-PA-01-26-0748726) until every Surcharging question is answered. Cloud version of financialsHelper's on-prem
+// ensureSurchargingComplete: Surcharging › Edit › unanswered Yes/No → No › Update. No Surcharging page = nothing to do.
+async function ensureSurchargingCloud(page, claimNumber) {
+  // A menu GROUP (id …Claim_ClaimSurchargingGroup) with a "…ClaimSurchargingDetails" child (2026-11-03).
+  const nav = page.locator('[id="Claim-MenuLinks-Claim_ClaimSurchargingGroup"] [role="menuitem"]').first();
+  if (!(await nav.count())) return;
+  await nav.click({ timeout: 5000 }).catch(() => nav.dispatchEvent('click'));
+  await page.waitForTimeout(2500);
+  const details = page.locator('[id$="ClaimSurchargingGroup_ClaimSurchargingDetails"] [role="menuitem"]').first();
+  if (await details.isVisible().catch(() => false)) { await details.click().catch(() => {}); await page.waitForTimeout(2500); }
+  const edit = page.getByRole('button', { name: 'Edit', exact: true }).first();
+  if (!(await edit.isVisible().catch(() => false))) { await require('./claimCenterBase').openExistingClaim(page, claimNumber); return; }
+  await edit.click();
+  await page.waitForTimeout(2500);
+  const answered = await page.evaluate(() => {
+    let n = 0;
+    for (const g of document.querySelectorAll('[role="radiogroup"]')) {
+      if (!g.offsetParent || g.querySelector('[role="radio"][aria-checked="true"]')) continue;
+      const no = [...g.querySelectorAll('[role="radio"]')].find(r => /^No$/i.test((r.getAttribute('aria-label') || '').trim()));
+      if (no) { no.click(); n++; }
+    }
+    return n;
+  });
+  // Real clicks for any group the DOM click didn't register on.
+  for (const r of await page.locator('[role="radiogroup"]:visible').all()) {
+    if (await r.locator('[role="radio"][aria-checked="true"]').count()) continue;
+    await r.getByRole('radio', { name: 'No' }).first().click().catch(() => {});
+  }
+  await require('./fnolHelper').fillRequiredAcrossTabsCloud(page).catch(() => {});
+  await page.getByRole('button', { name: 'Update', exact: true }).first().click();
+  await page.waitForTimeout(3000);
+  console.log(`Surcharging: ${answered} question(s) answered No, updated`);
+  await require('./claimCenterBase').openExistingClaim(page, claimNumber);
 }
 
 async function repairCloud(page, claimNumber) {
@@ -351,6 +437,10 @@ async function repairCloud(page, claimNumber) {
   const E = require('./oneInc/setupE');
   await B.openExistingClaim(page, claimNumber); // after FNOL the page isn't on the claim (no Actions button)
   let errs = await validateCloud(page);
+  // Payments over $1,000 need a linked claim document (VBR.010) — put OneInc's supporting document on every claim before
+  // the money steps (CP's $8,000 partial was refused at Finish without one, 2026-11-03).
+  await ensureClaimDocument(page, claimNumber);
+  await ensureSurchargingCloud(page, claimNumber);
   if (!errs.length) { console.log('Ability to pay: claim is clean'); return; }
   console.log('Ability to pay errors:\n  ' + errs.map(e => `${e.where || 'this page'}: ${e.text}`).join('\n  '));
   const expIndex = (where) => { const m = where.match(/^\((\d+)\)/); return m ? Number(m[1]) - 1 : -1; };
@@ -371,14 +461,65 @@ async function repairCloud(page, claimNumber) {
       await A.openExposure(page, i);
       await page.getByRole('button', { name: 'Edit', exact: true }).first().click();
       await page.waitForTimeout(2500);
-      const sel = page.getByLabel('Vehicle', { exact: true }).first();
-      const opt = await sel.locator('option').evaluateAll(os => (os.find(o => /VIN/i.test(o.text) && !/Automated E2E/i.test(o.text)) || {}).text);
-      if (!opt) throw new Error('no policy vehicle (with a VIN) in the Vehicle list');
-      await sel.selectOption({ label: opt });
-      await page.waitForTimeout(1500);
-      await page.getByRole('button', { name: 'Update', exact: true }).first().click();
+      // The vehicle INCIDENT is the problem: Style "Boat" (reused "Automated E2E" vehicle) and no Serial Number
+      // (2026-11-03, PA-PA-01-26-0748726). Swapping the exposure's vehicle didn't clear it. Vehicle_Incident menu ›
+      // "Edit Incident Details..." › Style = Other, Serial Number = a VIN › OK › Update.
+      await page.locator('[id$="Vehicle_Incident-Vehicle_IncidentMenuIcon"]').first().click({ force: true });
+      await page.waitForTimeout(1200);
+      await page.getByText('Edit Incident Details...', { exact: true }).last().click();
+      await page.waitForTimeout(3500);
+      // Real Playwright calls: a dispatched change event on the Style select was logged but did not stick (2026-11-03).
+      const set = [];
+      const style = page.getByLabel('Style', { exact: true }).first();
+      if (await style.isVisible().catch(() => false)) {
+        const cur = await style.evaluate(s => (s.selectedOptions[0] || {}).text || '').catch(() => '');
+        if (!/^Other$/i.test(cur.trim())) { await style.selectOption({ label: 'Other' }); set.push(`Style ${cur} → Other`); await page.waitForTimeout(2500); }
+      }
+      for (const lbl of ['Serial Number', 'VIN']) {
+        const box = page.getByLabel(lbl, { exact: true }).first();
+        if (await box.isVisible().catch(() => false) && !(await box.inputValue().catch(() => 'x'))) { await box.fill('1HGCM82633A004352'); set.push(lbl); }
+      }
+      await page.getByRole('button', { name: 'OK', exact: true }).first().click();
       await page.waitForTimeout(3000);
-      return `vehicle → ${opt}`;
+      // Update validates the exposure's other tabs too — Appraisal: "Primary Point of Impact", "Is Vehicle Drivable?",
+      // "Airbags Deployed?" (2026-11-03, PA-PA-01-26-0748726) — so fill required fields on every tab first.
+      const fnol = require('./fnolHelper');
+      await fnol.fillRequiredAcrossTabsCloud(page).catch(() => {});
+      await fnol.answerCloudRadioGroups(page).catch(() => {});
+      await page.getByRole('button', { name: 'Update', exact: true }).first().click();
+      await page.waitForTimeout(3500);
+      const missing = () => page.evaluate(() => /Errors (located|on current page)/.test(document.body.innerText) && /\bUpdate\b/.test(document.body.innerText.slice(0, 3000))
+        ? [...new Set((document.body.innerText.match(/Missing required field "([^"]+)"/g) || []).map(m => m.replace(/^.*"([^"]+)"$/, '$1')))] : []);
+      // Anything still missing (e.g. "Location", 2026-11-03): fill it by label on whichever tab shows it, then retry.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const left = await missing();
+        if (!left.length) break;
+        for (const tab of ['Details', 'Rental', 'Appraisal']) {
+          await page.getByRole('tab', { name: tab, exact: true }).first().click().catch(() => page.getByText(tab, { exact: true }).first().click().catch(() => {}));
+          await page.waitForTimeout(1500);
+          await page.evaluate((labels) => {
+            for (const w of document.querySelectorAll('.gw-InputWidget')) {
+              if (!w.offsetParent) continue;
+              const lbl = ((w.querySelector('.gw-label') || {}).textContent || '').trim();
+              if (!labels.includes(lbl)) continue;
+              const sel = w.querySelector('select');
+              if (sel) {
+                const o = [...sel.options].find(x => x.value && !/^<?none>?$/i.test(x.text.trim()));
+                if (o) { sel.value = o.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+                continue;
+              }
+              const inp = w.querySelector('input[type="text"], textarea');
+              if (inp && !inp.value) { inp.value = 'Automated E2E'; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+            }
+          }, left);
+          await page.waitForTimeout(1500);
+        }
+        await page.getByRole('button', { name: 'Update', exact: true }).first().click();
+        await page.waitForTimeout(3500);
+      }
+      const refused = (await missing()).join(', ');
+      if (refused) throw new Error('exposure Update refused: missing ' + refused);
+      return `vehicle incident: ${set.join(', ') || 'nothing to change'}`;
     });
   }
   for (const e of errs.filter(x => /body part/i.test(x.text))) {
@@ -388,7 +529,12 @@ async function repairCloud(page, claimNumber) {
   }
   if (errs.some(x => /primary address/i.test(x.text))) {
     // The message doesn't name the contact: fix every exposure claimant (the insured is PolicyCenter-owned and refused).
-    const names = [...new Set(errs.map(x => nameOf(x.where)).filter(Boolean))];
+    // "Contacts" groups name nobody (WC, 2026-11-03), so also take every exposure claimant.
+    const F = require('./financialsHelper');
+    await F.openExposuresTabCloud(page).catch(() => {});
+    const claimants = await F.getAllExposureClaimantsCloud(page).catch(() => []);
+    await B.openExistingClaim(page, claimNumber);
+    const names = [...new Set(errs.map(x => nameOf(x.where)).concat(claimants).map(n => String(n || '').trim()).filter(Boolean))];
     for (const n of names) await tryFix(`address of ${n}`, () => E.changeContactAddress(page, n, 'B'));
   }
   errs = await validateCloud(page);
@@ -565,4 +711,4 @@ if (process.env.CC_E2E_POLICY_FROM_POOL === '1' && process.env.CC_E2E_LOB && pro
   } catch (e) { console.log('Claim inventory not readable (' + e.message.split('\n')[0] + ') — using the .env policy list'); }
 }
 
-module.exports = { IS_CLOUD, ALL, steps, on, existingClaim, stepOf, gate, recovery, close, pickFromInventory, receiptCloud, TEAMS, LOB_TEAM, loginIdFor, teamUserFor };
+module.exports = { IS_CLOUD, ALL, steps, on, existingClaim, stepOf, gate, recovery, close, pickFromInventory, receiptCloud, TEAMS, LOB_TEAM, loginIdFor, teamUserFor, cannotView };
