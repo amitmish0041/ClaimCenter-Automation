@@ -765,7 +765,11 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
       if (additionalRecipient) {
         await documentService.setRowMailOptions(page, additionalRecipient.name, { log: scenarioLog });
         await documentService.setEmail(page, recipientEmail, additionalRecipient.name);
-        reEnableFieldsMatching(scenarioRequirements, isAdditionalRecipientGated);
+        // Agent Number prints only when the copy goes to the agent — DIG148 AUTO-PA 2026-11-03 copied "MARK ANTOLICK"
+        // (no Producer on the claim) and Agent Number was a false FAIL. Unknown roles keep the old behaviour.
+        const party = (partiesRoles || []).find((p) => p.name.toLowerCase() === String(additionalRecipient.name || '').toLowerCase());
+        const isAgent = !party || party.roles.some((r) => /producer|agent/i.test(r));
+        reEnableFieldsMatching(scenarioRequirements, (r) => isAdditionalRecipientGated(r) && (isAgent || !isAgentNumberRequirement(r)));
         upgradeRecipientDependentRequirements(scenarioRequirements, ADDITIONAL_RECIPIENT_CONDITION_RE, additionalRecipient);
       }
     }
@@ -1466,8 +1470,12 @@ function assignByKnownValue(interactiveChecks, digNumber, knownValues) {
       // ("105 S CLINTON ST") was claimed for "To City, State, Zip" by loose containment against the recipient's
       // address text, then reported as a mismatch against the payload's real city/state/zip.
       if (/city.*state.*zip/i.test(kv.attributeName) && !/\b\d{5}(?:-\d{4})?\b/.test(String(c.before || ''))) return false;
+      // An address-part field ("InsuredState") only takes an address row (DIG203 2026-11-03: "[MI]" took Insured Name).
+      const part = /(state|city|zip|address)$/i.exec(String(c.technicalName || ''));
+      if (part && !new RegExp(part[1], 'i').test(kv.attributeName)) return false;
       const vNorm = normForKnownValueMatch(kv.value);
-      return vNorm.length >= 3 && (beforeNorm === vNorm || beforeNorm.includes(vNorm) || vNorm.includes(beforeNorm));
+      // A short value only matches whole — "mi" is inside "condominium" (same run).
+      return vNorm.length >= 3 && (beforeNorm === vNorm || beforeNorm.includes(vNorm) || (beforeNorm.length >= 4 && vNorm.includes(beforeNorm)));
     });
     if (!best || claimed.has(best.attributeName)) continue;
     const hit = best;
