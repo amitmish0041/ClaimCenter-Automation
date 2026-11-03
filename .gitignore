@@ -8,4 +8,5 @@ results/
 .smartcomm-azure-session.json
 .smartcomm-okta-session.json
 .DS_Store
-Thumbds.dbtest-results-*/
+Thumbs.db
+test-results-*/
