@@ -1519,12 +1519,21 @@ async function editReserveCloud(page, { reserveAmount }) {
   await page.waitForTimeout(3000);
 
 
-  const validation = await page.evaluate(() => {
+  const readValidation = () => page.evaluate(() => {
     const p = document.getElementById('gw-south-panel');
     if (!p || !p.offsetParent) return '';
     return (p.innerText || '').replace(/\s+/g, ' ')
       .replace(/^\s*Validation Results\s*/i, '').replace(/^\s*Clear\s*/i, '').trim().slice(0, 300);
   }).catch(() => '');
+  let validation = await readValidation();
+  // WARNINGS only (e.g. "At least one aggregate limit on this claim has been exceeded", BOP 2026-11-03): CC accepts the
+  // save when Save is pressed again. Errors still block.
+  if (validation && /^Warnings?:/i.test(validation) && !/\bErrors?:/i.test(validation) && await save.isVisible().catch(() => false)) {
+    console.log('editReserveCloud: warning only — saving again:', validation.slice(0, 120));
+    await save.click().catch(() => {});
+    await page.waitForTimeout(3000);
+    validation = await save.isVisible().catch(() => false) ? await readValidation() : '';
+  }
   if (validation) {
     console.log('editReserveCloud: blocked by validation —', validation);
     return validation;

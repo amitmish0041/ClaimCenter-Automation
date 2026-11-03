@@ -290,8 +290,16 @@ async function recoveryCloud(page, { recoveryType, amount }) {
     await page.waitForTimeout(800);
     await page.getByRole('button', { name: 'Save', exact: true }).first().click();
     await page.waitForTimeout(3000);
-    const err = await page.evaluate(() => { const p = document.getElementById('gw-south-panel'); return p && /Set Recovery Reserves/.test(document.body.innerText.slice(0, 3000)) ? p.innerText.slice(0, 300) : ''; });
-    if (err) throw new Error('not saved: ' + err.replace(/s+/g, ' '));
+    const readErr = () => page.evaluate(() => { const p = document.getElementById('gw-south-panel'); return p && /Set Recovery Reserves/.test(document.body.innerText.slice(0, 3000)) ? p.innerText.replace(/\s+/g, ' ').slice(0, 400) : ''; });
+    let err = await readErr();
+    // Warnings only (e.g. the aggregate-limit warning on BOP, 2026-11-03): CC saves on a second Save. Errors still block.
+    if (err && /Warnings?:/i.test(err) && !/Errors?( on current page| located)?:/i.test(err)) {
+      console.log('recovery reserve: warning only — saving again');
+      await page.getByRole('button', { name: 'Save', exact: true }).first().click();
+      await page.waitForTimeout(3000);
+      err = await readErr();
+    }
+    if (err) throw new Error('not saved: ' + err);
   });
   await step('recovery receipt', () => receiptCloud(page, { recoveryType, amount }));
   console.log(`Recovery (cloud): ${recoveryType} reserve + receipt $${amount}`);
@@ -345,6 +353,13 @@ async function receiptCloud(page, { recoveryType = 'Subrogation', amount = 500 }
   await page.waitForTimeout(800);
   await page.getByRole('button', { name: 'Update', exact: true }).first().click();
   await page.waitForTimeout(3500);
+  // Warnings only (aggregate limit, BOP 2026-11-03): a second Update saves it.
+  const south = await page.evaluate(() => { const p = document.getElementById('gw-south-panel'); return /Create Recovery/.test(document.body.innerText.slice(0, 3000)) && p && p.offsetParent ? p.innerText.replace(/\s+/g, ' ') : ''; });
+  if (south && /Warnings?:/i.test(south) && !/Errors?( on current page| located)?:/i.test(south)) {
+    console.log('recovery receipt: warning only — updating again');
+    await page.getByRole('button', { name: 'Update', exact: true }).first().click();
+    await page.waitForTimeout(3500);
+  }
   const err = await page.evaluate(() => /Create Recovery/.test(document.body.innerText.slice(0, 3000)) ? ((document.body.innerText.split('Errors on current page:')[1] || 'still on Create Recovery').replace(/\s+/g, ' ').slice(0, 300)) : '');
   if (err) throw new Error('receipt not saved: ' + err);
   return 'saved';
