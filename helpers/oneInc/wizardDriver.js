@@ -210,6 +210,17 @@ async function setContactRoleAndUpdate(page, name, role) {
     await settle(page, 2000);
     await markRoleSelect(true);
   }
+  // The Role list depends on the row's Related To (…RolesLV-<n>-Owner): blank offers only Driver/Passenger/…, no
+  // "Covered Party" (CONFIRMED 2026-11-03, VBR.042 BLOCKED). Try each Related To (claim, incidents, policy) until it does.
+  if (!await page.locator('select[data-oneinc-role="1"]').first().isVisible().catch(() => false)) {
+    const owner = page.locator('select[name*="RolesLV"][name$="-Owner"]:visible').last();
+    const owners = await owner.locator('option').evaluateAll((os) => os.map((o) => o.value).filter((v) => v && v !== '<none>')).catch(() => []);
+    for (const v of owners) {
+      await owner.selectOption(v).catch(() => {});
+      await settle(page, 1500);
+      if (await markRoleSelect(false)) break;
+    }
+  }
   const roleSel = page.locator('select[data-oneinc-role="1"]').first();
   if (!await roleSel.isVisible().catch(() => false)) {
     await page.getByRole('button', { name: 'Cancel', exact: true }).first().click().catch(() => {});
@@ -873,8 +884,13 @@ async function addJointPayees(page, list) {
 // kind: 'open' (a line with Available Reserves > 0), 'existing' (first existing line), 'new' ("Expense OR First and
 // Final", which opens Exposure / Cost Type / Cost Category).
 async function selectReserveLine(page, kind = 'open') {
-  const opts = (await optionsOf(page, 'Reserve Line')) || [];
-  const real = opts.filter((o) => o.t && !/^<none>$/i.test(o.t));
+  // The list fills in after Next re-renders the step: an early read sees only <none> (team run 2026-11-03 TC-055 BLOCKED
+  // "Reserve Line has no options" while the identical TC-041 passed) — re-read for up to ~15 s before giving up.
+  let real = [];
+  for (let i = 0; i < 6 && !real.length; i++) {
+    if (i) await settle(page, 2500);
+    real = ((await optionsOf(page, 'Reserve Line')) || []).filter((o) => o.t && !/^<none>$/i.test(o.t));
+  }
   if (!real.length) throw new Blocked('Reserve Line has no options');
   const isNew = (o) => /expense or first and final|new/i.test(o.t);
   if (kind === 'new') {

@@ -141,6 +141,15 @@ async function addReserve(page, claim, { costType = 'Claim Cost', costCategory, 
   await W.openClaim(page, claim);
   page._currentClaimNumber = claim;
   let err = await require('../financialsHelper').createReserve(page, { reserveAmount: amount, costType, costCategory, exposure, strict: true }).catch((e) => e.message);
+  // Right after the exposure is created the save is refused silently (adjuster AND admin); the same reserve on the same
+  // claim saved later (PA-PA-01-26-0748772, CONFIRMED 2026-11-03) — wait and retry once before the admin fallback.
+  if (err && /still open with no validation text/i.test(String(err))) {
+    await page.getByRole('button', { name: 'Cancel', exact: true }).first().click().catch(() => {});
+    await page.waitForTimeout(60000);
+    await W.openClaim(page, claim);
+    page._currentClaimNumber = claim;
+    err = await require('../financialsHelper').createReserve(page, { reserveAmount: amount, costType, costCategory, exposure, strict: true }).catch((e) => e.message);
+  }
   // The adjuster cannot reserve a NEW medical exposure on cloud TEST ("Save pressed but the reserve screen is still open
   // with no validation text", Medical Expense exposures 2026-11-03; no Reserve item at all, 2026-10-28) — data setup is
   // then done once as the admin in its own window (as claimCheck does); the cases still run as CC_USER.

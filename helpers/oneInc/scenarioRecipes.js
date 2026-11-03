@@ -74,7 +74,7 @@ add('GCCM-759/UIF/TC-012', 'AUTO_PA', [...FULL_PAYEES('claimant'), { next: true 
   { step2: { transactionType: 'Partial Payment' }, skipReserve: true }, { next: true }, { message: { re: /Reserve Line/i, present: true } }]);
 // Updated 759 sheet (QA review 2026-10-28): UIF.013 flipped — Claimant is HIDDEN on Step 2 for WC and SHOWN for non-WC.
 add('GCCM-759/UIF/TC-013', 'WC_PA', FULL_PAYMENTS('claimant', 'existing'), [H('Claimant')]);
-add('GCCM-759/UIF/TC-014', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Claimant', { value: /S/ })]);
+add('GCCM-759/UIF/TC-014', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Claimant', { value: /\S/ })]); // any name (/S/ only passed when the name had a capital S)
 add('GCCM-759/UIF/TC-015', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Transaction Type', { required: true, editable: true, includes: TXN_TYPES })]);
 add('GCCM-759/UIF/TC-016', 'AUTO_PA', NEW_LINE('Adjuster Expense'), [H('Transaction Type')]);
 add('GCCM-759/UIF/TC-017', 'AUTO_PA', [...FULL_PAYMENTS('claimant', 'existing'), { select: ['Transaction Type', 'Partial Payment'] }], [V('Payment Type', { readonly: true, value: /partial/i })]);

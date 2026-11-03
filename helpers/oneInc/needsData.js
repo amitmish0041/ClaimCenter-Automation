@@ -130,10 +130,16 @@ async function setExposureMedicare(page, match = 'Bodily Injury', { beneficiary 
   if (icd) {
     await page.locator('[id$="includedICDs_toolbar-Add"]').first().click();
     await W.settle(page, 1500);
-    // The new row's ICD Code box (no type attribute — `input[type=text]` timed out, 2026-11-03).
-    const box = page.locator('[id*="includedICDLVI"] input:not([type=hidden]):not([type=checkbox])').filter({ visible: true }).last();
-    await box.fill(icd);
-    await box.press('Tab').catch(() => {});
+    // The new row's ICD Code box is READ-ONLY: the code is picked with its search button (DiagnosticICDCodePopup: Code ›
+    // Search › Select) — CONFIRMED 2026-11-03 on PA-MD-01-23-0742279.
+    await page.locator('[id*="includedICDLVI"] [id$="-ICDCode-SelectICDCode"]').filter({ visible: true }).last().click();
+    await W.settle(page, 2500);
+    await page.locator('input[name="DiagnosticICDCodePopup-FindCode"]').fill(icd);
+    await W.clickButton(page, 'Search');
+    await W.settle(page, 2500);
+    const hit = page.locator('tr').filter({ hasText: new RegExp(icd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') }).getByText('Select', { exact: true }).first();
+    if (!await hit.isVisible().catch(() => false)) { await W.clickButton(page, 'Cancel').catch(() => {}); throw new W.Blocked(`ICD code ${icd} not found in the ICD code search`); }
+    await hit.click();
     await W.settle(page, 2500);
   }
   const orm = findField(await readScreen(page), 'Is There ORM?');
@@ -168,4 +174,4 @@ async function checkStatus(page, amount) {
   return observe(page, 'Check status', (st && st.value) || 'unknown');
 }
 
-module.exports = { addLastNameOnlyContact, clearClaimantAddress, tryNewPayment, setExposureMedicare, sendStatusOptions, checkStatus };
+module.exports = { addLastNameOnlyContact, clearClaimantAddress, tryNewPayment, setExposureMedicare, sendStatusOptions, checkStatus, _openExposureMatching: openExposureMatching };
