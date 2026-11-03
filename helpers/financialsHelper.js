@@ -455,7 +455,9 @@ async function findFirstPositiveReserveLine(page) {
     if (/claim total/i.test(firstCell)) continue;
     if (Number.isNaN(numeric) || numeric <= 0) continue;
 
-    return { amount: numeric, rowIndex: i, firstCell };
+    // Cloud Summary rows start with the exposure NUMBER ("1"); the payment wizard's Reserve Line options read
+    // "(1) 1st Party Vehicle - …; Claim Cost/Other" — return "(1)" so the line can be matched (2026-11-02).
+    return { amount: numeric, rowIndex: i, firstCell: /^\d+$/.test(firstCell) ? `(${firstCell})` : firstCell, rowText: tds.join(' | ') };
   }
 
   // Fall back to the EXPOSURES grid. The Financials Summary scan above returned
@@ -1978,7 +1980,7 @@ async function completeOnPremExposureData(page) {
 }
 
 async function createPaymentCloud(page, {
-  payeeName, reserveLine, transactionType, checkAmount,
+  payeeName, reserveLine, transactionType, checkAmount, payeeHint,
   category, boxNumber, memoPhrase,
 }) {
   await page.getByRole('button', { name: 'deferred Actions' }).click();
@@ -2024,6 +2026,13 @@ async function createPaymentCloud(page, {
     }
   }
 
+  // payeeHint: the reserve row's text (the Financials Summary row names the exposure claimant) — pick the payee named
+  // in it, since only that claimant's payee is offered the exposure's Reserve Line (2026-11-02).
+  if (!payeeName && payeeHint) {
+    const names = await page.locator('[name$="PrimaryPayee_Name"]').first().locator('option')
+      .evaluateAll((os) => os.map(o => (o.textContent || '').trim())).catch(() => []);
+    payeeName = names.find(n => n && !/^<?none>?$/i.test(n) && payeeHint.toLowerCase().includes(n.toLowerCase())) || payeeName;
+  }
   const chosenPayee = await selectByLabelOrFirst(page, 'Name', payeeName || reserveLine);
   console.log('createPaymentCloud: payee — ' + chosenPayee);
   await page.getByRole('button', { name: 'Next' }).click();
@@ -2052,8 +2061,12 @@ async function createPaymentCloud(page, {
   // Reserve Line is filtered BY PAYEE: a payee with no reserve on any of their exposures gets an empty list (2026-11-02,
   // CA-PA-01-26-0748712: insured "Summit Chalfont" had none, the reserves sat on the claimants). Go Back and try each
   // other payee until one has a reserve line; vendors CC refuses without a tax id fail step 1 and are skipped.
+  // A payee "has the line" only if the line offered is the one asked for: "Additional Insured PolicyInfo" got only the
+  // (2) BI line with no open reserve, and the Final Payment was refused (PMS PL50, 2026-11-02).
+  const lineOk = (t) => !!t && (!reserveLine || t.toLowerCase().includes(String(reserveLine).toLowerCase()));
   let lineText = await selectByLabelOrFirst(page, 'Reserve Line', reserveLine);
-  if (!lineText) {
+  if (!lineOk(lineText)) {
+    lineText = null;
     await page.getByRole('button', { name: 'Back' }).click();
     await page.waitForTimeout(2000);
     const names = await page.locator('[name$="PrimaryPayee_Name"]').first().locator('option').evaluateAll(
@@ -2070,6 +2083,7 @@ async function createPaymentCloud(page, {
       }
       if (!(await reserveLineSel.isVisible().catch(() => false))) { console.log('createPaymentCloud: payee "' + name + '" refused on step 1'); continue; }
       lineText = await selectByLabelOrFirst(page, 'Reserve Line', reserveLine);
+      if (!lineOk(lineText)) lineText = null;
       if (lineText) { console.log('createPaymentCloud: payee — ' + name + ' (has reserve line "' + lineText + '")'); break; }
       await page.getByRole('button', { name: 'Back' }).click();
       await page.waitForTimeout(2000);
@@ -2130,6 +2144,42 @@ async function createPaymentCloud(page, {
   }
 
   await finish.click();
+
+  // A FINAL payment's step 3 adds two required fields the partial one doesn't (2026-11-02, CA-PA-01-26-0748721):
+  // "Is this payment to an attorney or representative … settlement payment or payment of a judgment?" (Yes/No radio)
+  // and "Reason for Check". Unanswered, Finish just re-shows step 3 — the drain loop then saw the reserve unchanged
+  // and the next wizard failed. Answer them (No / first reason), retry, and fail loudly if CC still refuses.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.waitForTimeout(3000);
+    if (!(await finish.isVisible().catch(() => false))) return;
+    const why = await page.evaluate(() => (document.body.innerText.split('Errors on current page:')[1] || '').replace(/\s+/g, ' ').slice(0, 300)).catch(() => '');
+    console.log('createPaymentCloud: Finish refused — ' + (why || 'no message') + ' — answering step 3');
+    await page.locator('.gw-InputWidget').filter({ hasText: /payment to an attorney or representative/i })
+      .getByRole('radio', { name: 'No' }).first().click().catch(() => {});
+    await selectByLabelOrFirst(page, 'Reason for Check').catch(() => {});
+    await fixCloudInvalidControls(page).catch(() => {});
+    // "At least one document needs to be linked to checks over $1,000" (VBR.010): link the claim document OneInc's
+    // data step creates (recipes/workerK.addDocument — e2eSteps.close adds it before draining).
+    if (/document needs to be linked/i.test(why) || await page.getByText(/document needs to be linked/i).first().isVisible().catch(() => false)) {
+      await require('./oneInc/recipes/workerK').linkDocument(page).catch((e) => console.log('createPaymentCloud: link document failed — ' + e.message.slice(0, 200)));
+    }
+    // The linked document's row then needs "Send Status" (Missing required field, 2026-11-02): first real option.
+    {
+      const sendSel = page.locator('select[name*="SendStatus" i]:visible');
+      for (let i = 0; i < await sendSel.count(); i++) {
+        const sel = sendSel.nth(i);
+        if (await sel.inputValue().catch(() => 'x')) continue;
+        const v = await sel.locator('option').evaluateAll((os) => (os.find((o) => o.value && !/^<?none>?$/i.test(o.textContent.trim())) || {}).value);
+        if (v) { await sel.selectOption(v); await page.waitForTimeout(1200); console.log('createPaymentCloud: linked document Send Status set'); }
+      }
+    }
+    await finish.click();
+  }
+  await page.waitForTimeout(3000);
+  if (await finish.isVisible().catch(() => false)) {
+    const why = await page.evaluate(() => (document.body.innerText.split('Errors on current page:')[1] || '').replace(/\s+/g, ' ').slice(0, 300)).catch(() => '');
+    throw new Error('createPaymentCloud: Finish refused on step 3 — ' + (why || 'no message'));
+  }
 }
 
 // ── createPaymentOnPrem ──────────────────────────────────────────────────────
@@ -3051,10 +3101,10 @@ async function createPayment(page, opts) {
     // could never find a line to pay. costType/costCategory remain on-prem-only
     // (the cloud wizard has no equivalent field).
     const { paymentAmount, checkAmount, reserveLine, transactionType,
-            payeeName, category, boxNumber, memoPhrase } = opts;
+            payeeName, payeeHint, category, boxNumber, memoPhrase } = opts;
     return createPaymentCloud(page, {
       checkAmount: checkAmount ?? paymentAmount,
-      reserveLine, transactionType, payeeName, category, boxNumber, memoPhrase,
+      reserveLine, transactionType, payeeName, payeeHint, category, boxNumber, memoPhrase,
     });
   }
 

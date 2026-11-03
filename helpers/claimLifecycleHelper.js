@@ -4186,6 +4186,7 @@ async function drainAndCloseAllExposures(page, claimNumber) {
       paymentAmount  : line.amount,
       reserveLine    : line.firstCell,
       transactionType: 'Final Payment',
+      payeeHint      : line.rowText,
     });
     await approveLatestCheck(page, claimNumber);
   }

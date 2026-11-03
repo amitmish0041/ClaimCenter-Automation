@@ -131,7 +131,19 @@ async function linkDocument(page, name = DOC_NAME) {
   await W.clickButton(page, 'Link Document');
   await W.settle(page, 2500);
   // Document picker: one row per claim document with a "Select" action.
-  const row = page.locator('tr', { hasText: name }).filter({ has: page.getByRole('button', { name: 'Select', exact: true }) }).last();
+  // Two picker layouts: a per-row "Select" button, or (cloud TEST, 2026-11-02 payment wizard) a row CHECKBOX plus a
+  // "Select" button on the Search Results toolbar.
+  const plain = page.locator('tr', { hasText: name }).filter({ has: page.getByRole('checkbox') }).last();
+  const rowBtn = page.locator('tr', { hasText: name }).filter({ has: page.getByRole('button', { name: 'Select', exact: true }) }).last();
+  if (!await rowBtn.isVisible().catch(() => false) && await plain.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false)) {
+    await plain.getByRole('checkbox').first().click();
+    await W.settle(page, 1000);
+    await page.getByRole('button', { name: 'Select', exact: true }).first().click();
+    await W.settle(page, 3000);
+    if (!await linked()) throw new W.Blocked(`Link Document: "${name}" did not appear under Linked Documents`);
+    return;
+  }
+  const row = rowBtn;
   if (!await row.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false)) {
     const s = await readScreen(page);
     await page.getByRole('button', { name: /^(Cancel|Return to.*)$/ }).first().click().catch(() => {});

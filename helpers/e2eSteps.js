@@ -50,7 +50,8 @@ async function gate(test, testInfo, ctx = {}) {
     repaired = true;
     await repairCloud(ctx.page, ctx.claimNumber);
   }
-  const want = s === 'reserve' ? 'admin' : s === 'payment' ? 'standard' : null;
+  // close: its Final Payments as the admin (the standard user's would wait for an approver — on-prem the admin bypasses).
+  const want = s === 'reserve' || s === 'close' ? 'admin' : s === 'payment' ? 'standard' : null;
   if (!want || want === cloudUser) return;
   const B = require('./claimCenterBase');
   await (want === 'admin' ? B.loginAsAdmin(ctx.page) : B.loginToClaimCenter(ctx.page));
@@ -337,6 +338,16 @@ async function repairCloud(page, claimNumber) {
 // DMEC0002, zeroing is), approve each, sweep activities, close every exposure by coverage, then the claim.
 async function close(page, claimNumber) {
   const L = require('./claimLifecycleHelper');
+  // Final payments are usually over $1,000, and cloud checks over $1,000 need a linked document (VBR.010) — put
+  // OneInc's supporting document on the claim first; createPaymentCloud links it on step 3 when CC asks.
+  if (IS_CLOUD) {
+    const K = require('./oneInc/recipes/workerK');
+    const rows = await K.documentRows(page).catch(() => []);
+    if (!rows.some(t => t.toLowerCase().includes(K.DOC_NAME.toLowerCase()))) {
+      await K.addDocument(page).then(() => console.log('close: supporting document added')).catch(e => console.log('close: add document failed — ' + e.message));
+    }
+    await require('./claimCenterBase').openExistingClaim(page, claimNumber);
+  }
   await L.drainAndCloseAllExposures(page, claimNumber);
   await L.closeClaim(page, { closeReason: 'Covered - Settled' });
   await L.assertClaimStatus(page, 'Closed');
