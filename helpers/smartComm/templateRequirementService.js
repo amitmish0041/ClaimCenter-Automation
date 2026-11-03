@@ -1205,8 +1205,19 @@ function readDocx(localPath, template) {
     const anchors = parseCommentAnchors(documentXml);
     if (anchors.length) {
       console.log(`[SmartComm] templateRequirementService: ${template.digNumber} using comment-driven requirements (${anchors.length} BA-annotated fields)`);
+      // Text typed in front of a "Free Form/Editable" blank in its own paragraph is the BA's sample entry, not fixed
+      // wording — DIG151 "Policy Coverages: Workers’ Compensation [FORMTEXT]" (QA 2026-11-03: free text, not WC-only).
+      const samples = new Set();
+      for (const a of anchors) {
+        const c = comments[a.id];
+        if (!c || !/free\s*form/i.test(c.fullText)) continue;
+        const pStart = Math.max(documentXml.lastIndexOf('<w:p>', a.startIdx), documentXml.lastIndexOf('<w:p ', a.startIdx));
+        const t = textOfRuns(documentXml.slice(pStart, a.startIdx)).replace(/\s+/g, ' ').trim();
+        if (t && !/[:$#]$/.test(t)) samples.add(staticContentDescription(t));
+      }
       return {
-        requirements: buildRequirementsFromComments(paragraphs, anchors, comments), mode: 'comments', mentionsFraudLanguage,
+        requirements: buildRequirementsFromComments(paragraphs, anchors, comments).filter((r) => !samples.has(r.description)),
+        mode: 'comments', mentionsFraudLanguage,
         freeFormFields: freeFormFieldsFromDocx(documentXml, anchors, comments),
       };
     }

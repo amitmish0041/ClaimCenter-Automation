@@ -671,9 +671,12 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue
       const before = clean(r.toString()).replace(/\[\s*\]/g, '').trim();
       // Only a label end ("Other:", "$") or a preposition ("on", "dated") — "(including [ ] admission" and
       // "reports, [ ] x-ray" are checkboxes mid-line (DIG202).
+      // A "$" label means a money field (DIG151 Gross Loss "$ [ ]" — QA 2026-11-03: dollar fields take numbers).
+      if (/\$$/.test(before)) return 'money';
       if (before) return /[:$#]$|\b(on|of|for|to|by|at|dated|from|is|was|in|until|a|an|the|your|our)$/i.test(before);
       const cell = el.closest('td, th');
       const prev = cell && cell.previousElementSibling;
+      if (prev && /\$$/.test(clean(prev.textContent))) return 'money';
       if (prev && /:$/.test(clean(prev.textContent))) return true;
       // A data-entry grid (DIG202 mileage table: Date / Facility / Reason / Mileage): every cell in the row is an
       // empty field, nothing else — a checkbox row always has its label text in a cell next to it (DIG51).
@@ -683,7 +686,8 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue
       const labelText = (c) => { const k = c.cloneNode(true); k.querySelectorAll('span.th-data-value-editable').forEach((s) => s.remove()); return clean(k.textContent); };
       return Array.from(row.cells).every((c) => !labelText(c) && c.querySelector('span.th-data-value-editable'));
     }).catch(() => false);
-    if (textField) newValue = fallbackValue || 'QA-EDIT';
+    if (textField === 'money') newValue = String(900 + (Number(String(fallbackValue || '').match(/\d+$/)?.[0]) || 0));
+    else if (textField) newValue = fallbackValue || 'QA-EDIT';
   }
 
   if (newValue === undefined) {

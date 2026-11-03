@@ -1739,6 +1739,20 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // Built last-to-first above (to beat Thunderhead's span drift) — restore natural field order so the
   // known-value passes' "first match wins" logic, the report, and the retry loop all see fields in order.
   checks.sort((a, b) => a.idx - b.idx);
+  // A double-click can open ANOTHER field's editor (DIG151 2026-11-03: a "$" blank's popup was "insuredAddress", already
+  // edited as "Insured's Address:"), so that row was checked against an empty "[ ]". The same data name under a
+  // different label AND a different pre-edit value is that other field's editor — the test couldn't edit this one.
+  const shownOf = (c) => String(c.before || '').replace(/[[\]\s]/g, '').toLowerCase();
+  for (let k = 0; k < checks.length; k++) {
+    const c = checks[k];
+    if (!c.technicalName || /^(editable|field|text|value|input)\w*?\d*$/i.test(c.technicalName)) continue;
+    const first = checks.slice(0, k).find((o) => o.technicalName === c.technicalName);
+    if (!first || first.labelContext === c.labelContext || shownOf(first) === shownOf(c)) continue;
+    Object.assign(c, {
+      result: 'FAIL', technicalName: null, dictionaryField: null, dictionaryEditable: null, dictionaryMatchedOn: null, dictionaryAgrees: null,
+      reason: `The typed value landed in a different field ("${first.technicalName}", ${first.id}), not this one.`,
+    });
+  }
   };
   await editFieldsFirstPass(fields, interactiveChecks);
   // Known-value matching: several dictionary-tracked fields render with NO preceding label at all, so no
