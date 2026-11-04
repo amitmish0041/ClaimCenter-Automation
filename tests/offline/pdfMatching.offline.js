@@ -149,3 +149,26 @@ test('known-value matching: a field that names itself insured is never judged as
     assert.equal(v.fieldConcept({ technicalName: 'ToName', labelContext: 'Dear' }), null);
   } finally { dd.getAttributeByExactName = saved; }
 });
+
+test('overlay forms from a PDF mapping doc: blanks are compared by total, not by field-name labels (DIG218 / DIG105)', async () => {
+  const { _test: v } = require('../../helpers/smartComm/validationService');
+  const layout = require('../../helpers/smartComm/pdfLayoutText');
+  // Two rows, each labelled and holding its typed value; 0.75pt/px on a 816x1056px page.
+  const pg = { viewW: 612, viewH: 792, items: [
+    { str: 'Weekly Rate', x: 54, y: 562, w: 50 }, { str: 'OV1', x: 301, y: 562, w: 18 },
+    { str: 'Amount Paid', x: 54, y: 500, w: 50 }, { str: 'OV2', x: 301, y: 500, w: 18 },
+  ] };
+  const box = (top, value) => ({ kind: 'text', page: 0, pageW: 816, pageH: 1056, left: 400, top, width: 60, height: 14, value, typed: true });
+  const real = layout.extractPositionedItems;
+  layout.extractPositionedItems = async () => [pg];
+  try {
+    const edits = () => [box(300, 'OV1'), box(383, 'OV2')];
+    const sameCount = await v.buildOverlayChecks(edits(), 'x.pdf', () => {}, [{ label: 'Wkly Rate-1', fieldName: 'Wkly Rate-1' }, { label: 'Text18', fieldName: 'Text18' }]);
+    assert.equal(sameCount.filter((c) => /^OVL-M/.test(c.id)).length, 0, 'same number of blanks, only the names differ — nothing missing');
+    const short = await v.buildOverlayChecks(edits(), 'x.pdf', () => {}, [{ label: 'Wkly Rate-1', fieldName: 'Wkly Rate-1' }, { label: 'Text18', fieldName: 'Text18' }, { label: 'Year Paid-1', fieldName: 'Year Paid-1' }]);
+    const m = short.filter((c) => /^OVL-M/.test(c.id));
+    assert.equal(m.length, 1, 'one check for the whole form');
+    assert.equal(m[0].result, 'FAIL');
+    assert.match(m[0].reason, /3 "Free Form\/Editable" blanks, but the live form has 2/);
+  } finally { layout.extractPositionedItems = real; }
+});

@@ -419,6 +419,9 @@ function resolveXpath(payloadRootOrXml, xpathExpr) {
   if (!root) return { value: undefined, unsupported: true, reason: 'Payload has no <ccDocumentCreationRequest> root' };
   try {
     const result = evalExpr(root, xpathExpr, 0);
+    // ClaimCenter's placeholder address ("See Policy Tab" — no street/city/ZIP) is not a value a letter can print; the
+    // template correctly leaves it blank (DIG203/DIG210/DIG218 WC claimant address, false FAILs 2026-11-03/04).
+    if (/^\s*see policy tab\s*$/i.test(String(result.value || ''))) return { value: undefined, placeholder: true, reason: 'ClaimCenter placeholder address "See Policy Tab" (no real address on file)' };
     return result.value !== undefined ? { ...result, value: formatIfIsoDate(result.value) } : result;
   } catch (e) {
     return { value: undefined, unsupported: true, reason: `Interpreter error: ${e.message}` };

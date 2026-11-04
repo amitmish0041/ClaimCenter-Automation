@@ -927,6 +927,12 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
       if (parts.length > 1) effectiveTestData.claimantLastName = parts[parts.length - 1];
       if (parts.length > 2) effectiveTestData.claimantMiddleInitial = parts[1].charAt(0);
     }
+    // The payload's loss date is what the letter printed from; a stale test-data date (DIG3 2026-11-04: testData
+    // "June 08, 2026", payload and PDF "August 06, 2026" on PA-PA-01-26-0748059) was a false FAIL on every Date of Loss row.
+    if (payload && payload.lossDate && effectiveTestData.lossDate && payload.lossDate !== effectiveTestData.lossDate) {
+      console.log(`[SmartComm] ${scenario.scenarioId}: loss date — test data "${effectiveTestData.lossDate}" differs from the claim's payload "${payload.lossDate}"; using the payload's.`);
+      effectiveTestData.lossDate = payload.lossDate;
+    }
     const context = {
       layoutText,
       testData: effectiveTestData, scenario, template, recipient, additionalRecipient,
@@ -947,6 +953,11 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
         fromPhone: payload.from && payload.from.phone,
         fromEmail: payload.from && payload.from.email,
         fromTitle: payload.from && payload.from.title,
+        // Data Dictionary "Claim Representative" / "Claim Rep Name": the adjuster assigned to the Related To exposure,
+        // else the claim's — not the sender (DIG16 2026-11-04: "CLAIM REP: Richard Shearer" printed, sender Bill Folmar).
+        claimRepName: (rawPayloadRoot && ((rawPayloadRoot.exposure && rawPayloadRoot.exposure.id && rawPayloadRoot.exposure.assignedUserExpanded && rawPayloadRoot.exposure.assignedUserExpanded.displayName)
+          || (rawPayloadRoot.claim && rawPayloadRoot.claim.assignedUserExpanded && rawPayloadRoot.claim.assignedUserExpanded.displayName)))
+          || (payload.from && payload.from.name),
         agentName: payload.agent && payload.agent.name,
         attorneyName: payload.attorney && payload.attorney.name,
         attorneyPhone: payload.attorney && payload.attorney.phone,
@@ -1943,7 +1954,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
   // reported as a defect when the test simply couldn't edit it (QA review 2026-10-26). A field that took the edit but
   // the value vanished stays FAIL — that can be a real non-editable field.
   for (const c of interactiveChecks) {
-    if (c.result !== 'FAIL' || !/landed in a different field|did not open a recognized editor/i.test(c.reason || '')) continue;
+    if (c.result !== 'FAIL' || !/landed in a different field|did not open a recognized editor|could not double-click/i.test(c.reason || '')) continue;
     c.result = 'BLOCKED';
     c.reason = `${c.reason} — the test couldn't edit this field, so its editability isn't verified (not a template defect by itself; check it by hand).`;
   }
@@ -2462,6 +2473,24 @@ async function buildOverlayChecks(edits, pdfPath, log, mappingFreeForm = []) {
   if (liveText.length && named / liveText.length >= 0.5) {
     for (const f of mappingFreeForm) (docByKey[labelKey(f.label)] = docByKey[labelKey(f.label)] || { label: f.label, n: 0 }).n++;
   }
+  // A PDF mapping doc names its blanks by PDF field name or the nearest text ("Text18", "Wkly Rate-1", "1. Name of
+  // Insured____"), which rarely equals the live form's label — per-label counts reported 20 "missing" lines on DIG218
+  // (doc 92 blanks, live 111) and 45 on DIG105 (doc 106, live 104) (2026-11-04). There the totals decide; the unmatched
+  // doc labels are listed as candidates.
+  if (mappingFreeForm.some((f) => f.fieldName) && Object.keys(docByKey).length) {
+    const docTotal = mappingFreeForm.length;
+    const liveTotal = liveText.length;
+    if (docTotal > liveTotal) {
+      const unmatched = Object.values(docByKey).filter((d) => labelKey(d.label) && d.n > (liveByKey[labelKey(d.label)] || 0)).map((d) => truncateLabel(d.label, 40));
+      checks.push({
+        id: 'OVL-M1',
+        description: 'Every free-form line from the mapping doc is on the live form',
+        expected: `${docTotal} line(s)`, actual: `${liveTotal} line(s)`, result: 'FAIL',
+        reason: `The mapping doc has ${docTotal} "Free Form/Editable" blanks, but the live form has ${liveTotal} — ${docTotal - liveTotal} line(s) the user has nowhere to write (same defect as Jira SMART-1522). Likely among: ${unmatched.slice(0, 12).join('; ')}${unmatched.length > 12 ? `; +${unmatched.length - 12} more` : ''}.`,
+      });
+    }
+    Object.keys(docByKey).forEach((k) => delete docByKey[k]);
+  }
   Object.values(docByKey).filter((d) => labelKey(d.label) && d.n > (liveByKey[labelKey(d.label)] || 0)).forEach((d, i) => {
     const live = liveByKey[labelKey(d.label)] || 0;
     checks.push({
@@ -2876,7 +2905,7 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
     // Underwriting Company field, whose label "RECEIVED OF" matches no dictionary row, reported as a FAIL).
     const sameText = (a, b) => pdfValidationService.normalizeWs(a || '').replace(/[[\]]/g, '').trim().toLowerCase() === pdfValidationService.normalizeWs(b || '').trim().toLowerCase();
     const editedByTest = (interactiveChecks || []).some((c) => c.observedChanged === true
-      && (c.dictionaryField === row.attributeName || [result.value, ...(result.alsoAccept || [])].some((x) => (String(x).length >= 4 || (c.technicalName || '').toLowerCase().includes(String(row.attributeName || '').split(/s+/).pop().toLowerCase())) && sameText(c.before, x))));
+      && (c.dictionaryField === row.attributeName || [result.value, ...(result.alsoAccept || [])].some((x) => (String(x).length >= 4 || (c.technicalName || '').toLowerCase().includes(String(row.attributeName || '').split(/\s+/).pop().toLowerCase())) && sameText(c.before, x))));
     const datePart = pdfValidationService.dateLossPart(row.attributeName, result.value);
     // Every template field this attribute belongs to is switched off for THIS scenario (e.g. Agent Number,
     // which prints only for an added additional recipient — DIG239 2026-10-16, user direction): the payload
@@ -2915,7 +2944,7 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
       wasEditedByTest: !matchedCheck && editedByTest,
       // What the edited field(s) showed BEFORE the test's edit — checked against the payload value when the edit consumed
       // the only printed occurrence (pdfValidationService.editedBeforeResult).
-      editedBefore: !matchedCheck && editedByTest ? (interactiveChecks || []).filter((c) => c.observedChanged === true && !(String(c.committedMarker || '') === 'X' && /^\[?\s*\]?$/.test(String(c.before || '').trim())) && (c.dictionaryField === row.attributeName || [result.value, ...(result.alsoAccept || [])].some((x) => (String(x).length >= 4 || (c.technicalName || '').toLowerCase().includes(String(row.attributeName || '').split(/s+/).pop().toLowerCase())) && sameText(c.before, x)))).map((c) => c.before).filter(Boolean) : undefined,
+      editedBefore: !matchedCheck && editedByTest ? (interactiveChecks || []).filter((c) => c.observedChanged === true && !(String(c.committedMarker || '') === 'X' && /^\[?\s*\]?$/.test(String(c.before || '').trim())) && (c.dictionaryField === row.attributeName || [result.value, ...(result.alsoAccept || [])].some((x) => (String(x).length >= 4 || (c.technicalName || '').toLowerCase().includes(String(row.attributeName || '').split(/\s+/).pop().toLowerCase())) && sameText(c.before, x)))).map((c) => c.before).filter(Boolean) : undefined,
       docOrder: Number.MAX_SAFE_INTEGER,
     });
   }

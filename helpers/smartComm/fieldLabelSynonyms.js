@@ -87,8 +87,8 @@ const LABEL_TO_TESTDATA_FIELD = {
   // separate role.
   // Same "document sender, not assigned adjuster" distinction as "From
   // Name" below — see that entry's note.
-  'CLAIM REPRESENTATIVE': 'payload.fromName',
-  'CLAIM REP NAME': 'payload.fromName',
+  'CLAIM REPRESENTATIVE': 'payload.claimRepName',
+  'CLAIM REP NAME': 'payload.claimRepName',
   'CLAIM REPRESENTATIVE PHONE': 'payload.fromPhone',
   'CLAIM REPRESENTATIVE EMAIL': 'payload.fromEmail',
   // ClaimCenter's own role code for a claimant's attorney is "plaintiffs"

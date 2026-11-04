@@ -172,3 +172,25 @@ test('a fill line left over from the previous field is not part of the next labe
   assert.ok(fixed.some((t) => /^Dealer:/.test(t)), `"Dealer:" starts its own check: ${JSON.stringify(fixed)}`);
   assert.ok(!fixed.some((t) => /^_{2,}\s*Dealer/.test(t)), `no leading fill line: ${JSON.stringify(fixed)}`);
 });
+
+const enabledStatics = (reqs) => reqs.filter((r) => r.type === 'requiredText' && r.enabled !== false && /^Static content/.test(r.description)).map((r) => r.expectedValue);
+
+test('a phone extension left after the sender\'s phone is sample data, not fixed wording (DIG3 "x7346.")', async () => {
+  const { requirements } = await requirementsFor(
+    [['Dear ', [1, 'John Smith'], ','], ['If you have any questions, please contact me at ', [0, '800-877-0600'], ' x7346.']],
+    { 0: 'From Phone', 1: 'Claimant Name' },
+  );
+  const fixed = enabledStatics(requirements);
+  assert.ok(!fixed.some((t) => /^x7346\.?$/.test(t.trim())), `extension not checked: ${JSON.stringify(fixed)}`);
+  assert.ok(fixed.some((t) => /please contact me at/.test(t)), `the sentence is still checked: ${JSON.stringify(fixed)}`);
+});
+
+test('text typed in front of a Free Form blank is the BA\'s sample entry (DIG151 "Workers’ Compensation")', async () => {
+  const { requirements } = await requirementsFor(
+    [['Dear ', [1, 'John Smith'], ','], ['Policy Coverages:'], ['Workers’ Compensation', [2, ' FORMTEXT ']], ['Thank you for reporting this loss to us today.']],
+    { 1: 'Claimant Name', 2: 'Free Form/Editable' },
+  );
+  const fixed = enabledStatics(requirements);
+  assert.ok(!fixed.some((t) => /Workers’ Compensation/.test(t)), `sample entry not checked: ${JSON.stringify(fixed)}`);
+  assert.ok(fixed.some((t) => /Thank you for reporting/.test(t)), `other wording still checked: ${JSON.stringify(fixed)}`);
+});

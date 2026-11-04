@@ -945,6 +945,12 @@ async function getRequirements(template, dataDir) {
       r.enabled = false;
       r.disabledReason = 'A placeholder address in the mapping doc\'s mock-up — sample data, not fixed wording; the claim\'s real address prints here.';
     }
+    // A phone extension on its own ("x7346." — DIG3 2026-11-04): the BA's sample of the sender's phone, whose real value
+    // prints from the sender's profile.
+    if (r.type === 'requiredText' && r.enabled !== false && /^\s*(x|ext\.?)\s*\d{2,6}\.?\s*$/i.test(String(r.expectedValue || ''))) {
+      r.enabled = false;
+      r.disabledReason = 'A phone extension on its own in the mapping doc — the sender\'s sample phone, not fixed wording; the real sender\'s phone prints here.';
+    }
   }
   for (const r of res.requirements || []) {
     if (r.type !== 'requiredText' || r.enabled === false || !FRAUD_NOTICE_RE.test(String(r.expectedValue || ''))) continue;
