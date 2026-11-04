@@ -2558,6 +2558,21 @@ async function searchPolicy(page, policyNumber, lossDate, policyType) {
         step = await stepAfterNext();
       }
     }
+    // A loss date over a year old raises "Is the year selected for the date of loss correct?" only AFTER the first Next
+    // (2026-11-04, PAF-7050918 / PMG-7050914), so the pre-Next pass above never saw it. Affirm it and press Next again.
+    if (/Step\s*1\s*of\s*5/i.test(step)) {
+      // A div role=radio — a script-dispatched click doesn't stick; it needs a real click.
+      const yesRadio = page.getByRole('radiogroup', { name: /year selected for the date of loss correct/i }).getByRole('radio', { name: /^Yes$/i }).first();
+      const yes = await yesRadio.click({ timeout: 5000 }).then(() => true).catch(() => false);
+      if (yes) {
+        console.log('searchPolicy: answered "Is the year selected for the date of loss correct?" -> Yes after Next; pressing Next again');
+        await page.waitForTimeout(600);
+        await page.getByRole('button', { name: /^Next$/i }).first().click().catch(() => {});
+        // Step 2 can take well over 2.5 s to render after the policy attaches (HP-6055957 reached it just after the check).
+        await page.getByRole('heading', { name: /Step\s*2\s*of\s*5/i }).first().waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
+        step = await stepAfterNext();
+      }
+    }
     if (/Step\s*1\s*of\s*5/i.test(step) || !step) {
       // CC's Validation Results panel is a COLLAPSED tab at the edge of the
       // screen and its content is not in the DOM until opened - which is why
