@@ -59,8 +59,27 @@ function baseResult(tc, cls, story) {
   };
 }
 
+// Known findings (regression baseline): FAILs reviewed and confirmed as product behaviour, kept in
+// <results>/TestData/known-findings-<tier>.json as { scenarioId: { since, match, note } }. A FAIL whose reason matches
+// "match" is reported as a KNOWN finding; any other FAIL is NEW — the regression signal the team acts on.
+let KNOWN = null;
+function knownFindings() {
+  if (KNOWN) return KNOWN;
+  try {
+    const f = require('path').join(report.RESULTS_DIR, 'TestData', `known-findings-${String(process.env.CC_TIER || 'test').toLowerCase()}.json`);
+    KNOWN = JSON.parse(fs.readFileSync(f, 'utf8'));
+  } catch { KNOWN = {}; }
+  return KNOWN;
+}
+
 function annotate(r, story, readiness) {
   r.jira = story || null;
+  const kf = knownFindings()[r.scenarioId];
+  if (r.status === 'FAIL' && kf) {
+    if (!kf.match || new RegExp(kf.match, 'i').test(r.reason || '')) {
+      r.knownFinding = `Known finding (same result since ${kf.since}): ${kf.note}`;
+    } else r.knownFinding = `CHANGED — this case has a known finding (${kf.note}) but failed differently this time; review it.`;
+  }
   const labels = (r.checks || []).filter((c) => c.result !== 'PASS').map((c) => (/"([^"]+)"/.exec(c.description) || [])[1]).filter(Boolean);
   r.bugs = r.status === 'FAIL' || r.status === 'BLOCKED' ? matchBugs(readiness, labels) : [];
   const jiraTxt = story ? ` (Jira: dev ${story.dev ? `${story.dev.key} ${story.dev.status}` : 'n/a'}, test exec ${story.exec ? `${story.exec.key} ${story.exec.status}` : 'n/a'})` : '';
@@ -70,6 +89,7 @@ function annotate(r, story, readiness) {
   } else if (r.status === 'BLOCKED' && story && story.readiness === 'DEV_PENDING') {
     r.devNote = `Story development is not Done in Jira${jiraTxt}.`;
   }
+  if (r.knownFinding) r.devNote = `${r.knownFinding}${r.devNote ? ' ' + r.devNote : ''}`;
   if (r.bugs.length) r.devNote = `${r.devNote ? r.devNote + ' ' : ''}Related logged bug(s): ${r.bugs.map((b) => `${b.key} (${b.status})`).join(', ')}.`;
   return r;
 }
@@ -395,6 +415,7 @@ function annotate(r, story, readiness) {
   const paths = save();
   const S = run.summary;
   log(`[OneInc] DONE — discovered ${S.discovered}, executed ${S.executed}: ${S.passed} PASS, ${S.failed} FAIL, ${S.blocked} BLOCKED; ${S.notExecuted} NOT EXECUTED; pass ${S.passPct}% of executed`);
+  log(`[OneInc] FAIL breakdown — ${S.knownFails} known finding(s), ${S.failed - S.knownFails} NEW failure(s) to review`);
   log(`[OneInc] REPORT ${paths.html}`);
   log(`[OneInc] JSON ${paths.json}`);
   log(`[OneInc] CSV ${paths.csv}`);
