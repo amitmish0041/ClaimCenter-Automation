@@ -39,6 +39,36 @@ async function cancelEdit(page) {
   await W.settle(page, 1500);
 }
 
+// Ability to pay refuses any vehicle incident without a description ("Vehicle incident description must not be
+// empty" — 803 TC-022 on PA-PA-01-26-0748919, the insured's vehicle, 2026-11-04). Fill every blank one.
+async function fillVehicleDescriptions(page) {
+  const claim = await claimNo(page);
+  await W.navigate(page, 'lossDetails');
+  const n = await page.locator('[id*="EditableVehicleIncidentsLV-"][id$="-Make_button"]').count();
+  const filled = [];
+  for (let i = 0; i < n; i++) {
+    await W.openClaim(page, claim);
+    if (!await openVehicle(page, i)) continue;
+    await W.clickButton(page, 'Edit');
+    await W.settle(page, 2000);
+    let did = false;
+    for (const label of ['Damage Description', 'Description']) {
+      const d = page.getByLabel(label, { exact: true }).first();
+      if (await d.isVisible().catch(() => false) && !(await d.inputValue().catch(() => 'x')).trim()) {
+        await d.fill('Automated test - vehicle damage').catch(() => {});
+        did = true; break;
+      }
+    }
+    if (!did) { await cancelEdit(page); continue; }
+    await W.clickButton(page, 'Update');
+    await W.settle(page, 3000);
+    if (await page.getByRole('button', { name: 'Update', exact: true }).first().isVisible().catch(() => false)) { await cancelEdit(page); continue; }
+    filled.push(i + 1);
+  }
+  await W.openClaim(page, claim);
+  return filled.length ? `vehicle incident description filled on incident(s) ${filled.join(', ')}` : '';
+}
+
 // Claim Loss Cause / Detailed Loss Cause (Loss Details › Edit) — e.g. 'Theft of Auto' / 'Total' for VBR.029's theft branch.
 async function setLossCause(page, lossCause, detailed) {
   testOnly('setLossCause');
@@ -134,6 +164,8 @@ async function prepareVinIncident(page, { year = '1987', lossCause, detailed } =
   const open = onVehicle.find((num) => rows.some((r) => r.expo.startsWith(`(${num})`) && /claim cost/i.test(r.cost) && r.remaining > 0));
   if (!open) throw new W.Blocked(`exposure(s) ${onVehicle.join(', ')} on the vehicle without a VIN have no open Claim Cost reserve`);
   await W.openClaim(page, claim);
+  const desc = await fillVehicleDescriptions(page);
+  if (desc) done.push(desc);
   done.push(await A.revalidate(page));
   await W.openClaim(page, claim);
   page.__vinExposure = open;

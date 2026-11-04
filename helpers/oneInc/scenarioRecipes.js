@@ -132,7 +132,7 @@ add('GCCM-799/UIF/TC-001', 'AUTO_PA', FULL_PAYEES('claimant'), [V('Pay To The Or
 add('GCCM-799/UIF/TC-002', 'AUTO_PA', [...NEW_LINE('Legal Expense'), { select: ['Adjuster Number', /^800/] }],
   [V('Is the legal expense for a legal opinion on coverage or to litigate a coverage issue?', { required: true, radios: ['Yes', 'No'] })]);
 add('GCCM-799/UIF/TC-003', 'AUTO_PA', NEW_LINE('Adjuster Expense'), [H('Is the legal expense for a legal opinion on coverage or to litigate a coverage issue?')]);
-add('GCCM-799/UIF/TC-004', 'AUTO_MI', FULL_PAYMENTS('claimant', 'existing'), [V('Original Billed Amount', { editable: true, unlessBlocked: MI_MCCA })]);
+add('GCCM-799/UIF/TC-004', 'AUTO_MI', FULL_PAYMENTS('claimant', 'existing'), [V('Original Billed Amount', { editable: true, unlessBlocked: MI_MCCA })], 'NOT VERIFIED: "required" when the payment is MCCA RFR eligible — the test payment is not; visibility and editability are checked.');
 add('GCCM-799/UIF/TC-005', 'PROP_PA', FULL_PAYMENTS('claimant', 'existing'), [H('Original Billed Amount')]);
 // Updated GCCM-800 test plan (QA review 2026-10-28): enter the Total Amount of Payment (the page refreshes) BEFORE reading 1099 Box Number.
 const TOTAL_AMOUNT = (amt) => [{ call: ['wizardDriver.fillTotalAmount', amt] }];
@@ -141,13 +141,15 @@ add('GCCM-799/UIF/TC-007', 'PROP_PA', FULL_PAYMENTS('claimant', 'existing'), [H(
 add('GCCM-799/UIF/TC-008', 'AUTO_PA', [{ open: 'full' }, { payee: 'vendor' }, { next: true }, { reserve: 'new' }, { select: ['Cost Type', 'Adjuster Expense'] }, { select: ['Adjuster Number', 0] }, ...TOTAL_AMOUNT('1.41')],
   [V('1099 Box Number', { required: true, editable: true, value: /^07/, includes: ['06-Medical Payments to Providers', '07-All Other Taxable Payments', '14-Gross Proceeds Paid to an Attorney'] })],
   VENDOR_NOTE + ' Expense payment (new line, Adjuster Expense) with an adjuster number that is not a "no tax ID" code; expects the Box 7 default.');
-add('GCCM-799/UIF/TC-010', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [{ header: { name: 'Category', present: true } }]);
+add('GCCM-799/UIF/TC-010', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [{ header: { name: 'Category', present: true } }], 'NOT VERIFIED: the Category cell being editable / required on a medical or WC indemnity line, and read-only for Deductible/FormerDeductible — only the column is checked.');
 add('GCCM-799/UIF/TC-014', 'WC_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Average Weekly Wage', { required: true, editable: true, unlessBlocked: WC_LOST_WAGES })]);
 add('GCCM-799/UIF/TC-015', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [H('Average Weekly Wage')]);
 add('GCCM-799/UIF/TC-016', 'WC_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Disability Weekly Rate', { required: true, editable: true, unlessBlocked: WC_LOST_WAGES })]);
 add('GCCM-799/UIF/TC-017', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [H('Disability Weekly Rate')]);
-add('GCCM-799/UIF/TC-023', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Service Period Start', { editable: true })], MED_PAYMENT + ' — visibility/editability checked; "required" needs a medical payment.');
-add('GCCM-799/UIF/TC-024', 'AUTO_PA', FULL_PAYMENTS('claimant', 'existing'), [V('Service Period End', { editable: true })], MED_PAYMENT + ' — visibility/editability checked; "required" needs a medical payment.');
+// Pass audit 2026-11-04: Service Period is required only on a medical / WC indemnity payment, so these run on a Medical
+// Expense reserve line (ND_PA_MED) and assert "required" too — before, a non-medical payment let them pass unverified.
+add('GCCM-799/UIF/TC-023', 'ND_PA_MED', FULL_PAYMENTS('claimant', 'match:Medical'), [V('Service Period Start', { editable: true, required: true })], 'Medical Expense reserve line (medical payment).');
+add('GCCM-799/UIF/TC-024', 'ND_PA_MED', FULL_PAYMENTS('claimant', 'match:Medical'), [V('Service Period End', { editable: true, required: true })], 'Medical Expense reserve line (medical payment).');
 add('GCCM-799/UIF/TC-027', 'AUTO_PA', [...FULL_PAYMENTS('claimant', 'existing'), { answer: ['Payment for a total loss?', 'Yes'] }], [V('VIN', { required: true, editable: true })]);
 add('GCCM-799/UIF/TC-028', 'AUTO_PA', [...FULL_PAYMENTS('claimant', 'existing'), { answer: ['Payment for a total loss?', 'No'] }], [H('VIN')]);
 add('GCCM-799/UIF/TC-029', 'AUTO_PA', [...FULL_PAYMENTS('claimant', 'existing'), { answer: ['Payment for a total loss?', 'Yes'] }], [V('Is the owner keeping this Vehicle?', { required: true, radios: ['Yes', 'No'] })]);
@@ -168,7 +170,7 @@ add('GCCM-799/UIF/TC-053', 'AUTO_PA', FULL_INSTRUCTIONS('claimant'), [V('Claim N
 add('GCCM-799/UIF/TC-054', 'AUTO_PA', FULL_INSTRUCTIONS('claimant'), [V('Is this payment to an attorney or representative of the insured or claimant AND is the settlement payment or payment of a judgment?', { required: true, radios: ['Yes', 'No'] })]);
 add('GCCM-799/UIF/TC-055', 'WC_PA', FULL_INSTRUCTIONS('claimant'), [H('Is this payment to an attorney or representative of the insured or claimant AND is the settlement payment or payment of a judgment?')],
   'Uses a PA WC claim: the rule hides the question for loss type WC regardless of state.');
-add('GCCM-799/UIF/TC-057', 'AUTO_PA', FULL_INSTRUCTIONS('claimant'), [{ header: { name: 'Send Status', present: true } }]);
+add('GCCM-799/UIF/TC-057', 'AUTO_PA', FULL_INSTRUCTIONS('claimant'), [{ header: { name: 'Send Status', present: true } }], 'NOT VERIFIED: Send Status being editable and required on a linked-document row — only the column is checked.');
 add('GCCM-799/UIF/TC-061', 'AUTO_PA', FULL_INSTRUCTIONS('insured'), [H('Approval Required')]);
 add('GCCM-799/UIF/TC-066', 'AUTO_PA', FULL_PAYEES('claimant'), [{ button: { name: 'Add Payee', present: false } }]);
 add('GCCM-799/UIF-001/TC-067', 'AUTO_PA', [{ nav: 'checks' }, { openFirstRow: 'check' }], [
@@ -182,20 +184,21 @@ add('GCCM-1003/UIF/TC-002', 'AUTO_PA', QUICK(), [{ text: { re: /Tax Reporting/i,
 add('GCCM-1003/UIF/TC-003', 'AUTO_PA', QUICK(), [V('Transaction Type', { required: true, editable: true, includes: TXN_TYPES })]);
 add('GCCM-1003/UIF/TC-005', 'AUTO_PA', [...QUICK(), { select: ['Transaction Type', 'Partial Payment'] }], [V('Payment Type', { readonly: true, value: /partial/i })]);
 add('GCCM-1003/UIF/TC-006', 'AUTO_PA', QUICK(), [V('Type', { required: true, includes: ['Additional Claimant'] })]);
-add('GCCM-1003/UIF/TC-008', 'AUTO_PA', QUICK(), [V('Mailing Address'), { text: { re: /Do you want to edit the Mailing Address\?/i, present: true } }]);
-add('GCCM-1003/UIF/TC-009', 'AUTO_PA', QUICK(), [V('Pay To The Order Of', { readonly: true })]);
+add('GCCM-1003/UIF/TC-008', 'AUTO_PA', QUICK(), [V('Mailing Address', { editable: true }), { text: { re: /Do you want to edit the Mailing Address\?/i, present: true } }]);
+// Pass audit: the case expects "mandatory and editable once Edit is clicked" (as GCCM-799 TC-001), not just read-only.
+add('GCCM-1003/UIF/TC-009', 'AUTO_PA', QUICK(), [V('Pay To The Order Of', { readonly: true }), { click: 'Edit' }, V('Pay To The Order Of', { editable: true, required: true })]);
 add('GCCM-1003/UIF/TC-011', 'AUTO_PA', QUICK(), [H('Adjuster Number')], 'Quick Payment opened from a Claim Cost reserve row.');
 add('GCCM-1003/UIF/TC-012', 'AUTO_PA', QUICK(), [{ button: { name: 'Edit', present: true } }, { click: 'Edit' }, V('Pay To The Order Of', { editable: true })]);
 add('GCCM-1003/UIF/TC-013', 'AUTO_PA', QUICK(), [V('Reserve Line', { required: true, value: /\S/ })]);
 add('GCCM-1003/UIF/TC-015', 'AUTO_PA', QUICK(), [H('Is the legal expense for a legal opinion on coverage or to litigate a coverage issue?')]);
 add('GCCM-1003/UIF/TC-017', 'AUTO_PA', QUICK(), [H('NAIC Expense Reporting')]);
 add('GCCM-1003/UIF/TC-018', 'AUTO_PA', QUICK(), [V('Total Amount of Payment', { required: true }), { fill: ['Total Amount of Payment', '1.37'] }, { fieldKind: { label: 'Total Amount of Payment', kind: 'masked' } }, H('Blind Check Amount')]);
-add('GCCM-1003/UIF/TC-019', 'AUTO_PA', QUICK(), [V('Service Period Start', { editable: true })]);
-add('GCCM-1003/UIF/TC-020', 'AUTO_PA', QUICK(), [V('Service Period End', { editable: true })]);
+add('GCCM-1003/UIF/TC-019', 'ND_PA_MED', [{ call: ['reuseExt.openQuickOnRow', 'claim cost', 'open', 'Medical'] }], [V('Service Period Start', { editable: true, required: true })], 'Quick Check on the Medical Expense reserve line (medical payment).');
+add('GCCM-1003/UIF/TC-020', 'ND_PA_MED', [{ call: ['reuseExt.openQuickOnRow', 'claim cost', 'open', 'Medical'] }], [V('Service Period End', { editable: true, required: true })], 'Quick Check on the Medical Expense reserve line (medical payment).');
 add('GCCM-1003/UIF/TC-021', 'AUTO_PA', QUICK(), [V('Cause of Loss', { readonly: true, value: /\S/ })]);
 add('GCCM-1003/UIF/TC-023', 'PROP_PA', QUICK(), [H('Original Billed Amount')]);
 add('GCCM-1003/UIF/TC-025', 'PROP_PA', QUICK(), [H('PA Tort Code')]);
-add('GCCM-1003/UIF/TC-027', 'AUTO_PA', QUICK(), [{ header: { name: 'Category', present: true } }]);
+add('GCCM-1003/UIF/TC-027', 'AUTO_PA', QUICK(), [{ header: { name: 'Category', present: true } }], 'NOT VERIFIED: the Category cell being editable / required on a medical or WC indemnity line, and read-only for Deductible/FormerDeductible — only the column is checked.');
 add('GCCM-1003/UIF/TC-032', 'AUTO_PA', QUICK(), [H('Average Weekly Wage')]);
 add('GCCM-1003/UIF/TC-034', 'AUTO_PA', QUICK(), [H('Disability Weekly Rate')]);
 add('GCCM-1003/UIF/TC-042', 'AUTO_PA', QUICK(), [V('Payment for a total loss?', { required: true, radios: ['Yes', 'No'] })]);
@@ -204,12 +207,13 @@ add('GCCM-1003/UIF/TC-045', 'AUTO_PA', [...QUICK(), { answer: ['Payment for a to
 add('GCCM-1003/UIF/TC-046', 'AUTO_PA', [...QUICK(), { answer: ['Payment for a total loss?', 'Yes'] }], [V('Is the owner keeping this Vehicle?', { required: true })]);
 add('GCCM-1003/UIF/TC-047', 'AUTO_PA', [...QUICK(), { answer: ['Payment for a total loss?', 'No'] }], [H('Is the owner keeping this Vehicle?')]);
 add('GCCM-1003/UIF/TC-049', 'AUTO_PA', [...QUICK(), { answer: ['Payment for a total loss?', 'No'] }], [H('Is this vehicle owned by the Insured?')]);
-add('GCCM-1003/UIF/TC-068', 'AUTO_PA', QUICK_DETAILS(), [V('Invoice Number/Remarks', { required: false })],
-  'Test case expects NOT visible for non-vendor ClaimsPay types; Full Check (GCCM-799 TC-051) expects visible/not required — reported as observed.');
+// Pass audit: the case expects NOT visible (ClaimsPay Type is not Vendor — claimant payee); it used to assert visible.
+add('GCCM-1003/UIF/TC-068', 'AUTO_PA', QUICK_DETAILS(), [H('Invoice Number/Remarks')],
+  'ClaimsPay Type Contact(s) (claimant payee). Note: the Full Check case GCCM-799 TC-051 expects this field visible/not required.');
 add('GCCM-1003/UIF/TC-069', 'AUTO_PA', QUICK_DETAILS(), [V('Remarks Line 2', { required: false, editable: true })]);
 add('GCCM-1003/UIF/TC-070', 'AUTO_PA', QUICK_DETAILS(), [V('Claim Number', { readonly: true }), H('Memo')]);
 add('GCCM-1003/UIF/TC-071', 'AUTO_PA', QUICK_DETAILS(), [V('Is this payment to an attorney or representative of the insured or claimant AND is the settlement payment or payment of a judgment?', { required: true })]);
-add('GCCM-1003/UIF/TC-074', 'AUTO_PA', QUICK_DETAILS(), [{ header: { name: 'Send Status', present: true } }]);
+add('GCCM-1003/UIF/TC-074', 'AUTO_PA', QUICK_DETAILS(), [{ header: { name: 'Send Status', present: true } }], 'NOT VERIFIED: Send Status being editable and required on a linked-document row — only the column is checked.');
 add('GCCM-1003/UIF/TC-075', 'AUTO_PA', QUICK_DETAILS(), [V('ClaimsPay Type')]);
 add('GCCM-1003/UIF/TC-076', 'AUTO_PA', QUICK_DETAILS(), [V('ClaimsPay Method', { required: true })]);
 add('GCCM-1003/UIF/TC-080', 'AUTO_PA', QUICK_DETAILS(), [V('Payment Delivery', { editable: true, includes: PAY_DELIVERY, excludes: NOT_IN_PAY_DELIVERY })]);

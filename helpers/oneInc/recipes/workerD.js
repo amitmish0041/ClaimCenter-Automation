@@ -35,8 +35,10 @@ module.exports = (api) => {
   // first. With Type = Vendor, Method offers ONLY "Vendor Preferred" (CONFIRMED 2026-10-21), so the manual change to
   // Mailed Check the case starts from is impossible: checked as an option first (FAIL = finding), and only when it
   // exists is it chosen and Payment Delivery checked.
-  add('GCCM-759/CPD/TC-058', 'AUTO_PA', [...FULL_INSTRUCTIONS('vendor'), { select: ['ClaimsPay Type', /^vendor$/i] }],
-    [V('ClaimsPay Method', { editable: true, includes: ['Mailed Check'] })],
+  // Pass audit 2026-11-04: the case is about Payment Delivery (defaults to Certified, only Expedite offered besides it)
+  // once Mailed Check is chosen — that is now asserted, not just that Mailed Check is offered.
+  add('GCCM-759/CPD/TC-058', 'AUTO_PA', [...FULL_INSTRUCTIONS('vendor'), { select: ['ClaimsPay Type', /^vendor$/i] }, { select: ['ClaimsPay Method', /mailed check/i] }],
+    [V('ClaimsPay Method', { editable: true, includes: ['Mailed Check'] }), V('Payment Delivery', { value: /certified/i, includes: ['Certified', 'Expedite'], excludes: ['Standard'] })],
     VENDOR_NOTE + ' ClaimsPay Type is set to Vendor first (CC leaves it blank for a vendor payee and Method has no options until it is set). Payment Delivery = Certified is checked once Mailed Check is offered.');
 
   // "No error" mirrors: Finish via reuseExt.finishObserve, whose check lookup reads EVERY page of Financials › Checks.

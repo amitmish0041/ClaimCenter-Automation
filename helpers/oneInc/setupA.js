@@ -216,6 +216,14 @@ async function setClaimDenied(page, value = 'Denied in Full') {
   await openLossDetailsGeneral(page);
   await editAndSave(page, 'Loss Details Claim Denied?', async () => {
     await selectByLabel(page, 'Claim Denied?', value === '<none>' ? /^<none>$/ : value);
+    // WC claims filed tonight carry "Date Employer Notified" = today with CC's pre-filled 04:25 time, so a save before
+    // 04:25 fails "Date must be in the past" (803 TC-005/018, 763 TC-056, 2026-11-04). Move it to yesterday.
+    const dn = findField(await readScreen(page), 'Date Employer Notified');
+    const d = new Date(), mmddyyyy = (x) => `${String(x.getMonth() + 1).padStart(2, '0')}/${String(x.getDate()).padStart(2, '0')}/${x.getFullYear()}`;
+    if (dn && String(dn.value || '').includes(mmddyyyy(d))) {
+      const y = new Date(d); y.setDate(y.getDate() - 1);
+      await fillByLabel(page, 'Date Employer Notified', mmddyyyy(y)).catch(() => {});
+    }
     const r = findField(await readScreen(page), 'Reason for Denial');
     if (r && /^(No|<none>)$/i.test(value) === false && r.kind !== 'text' && !r.value) {
       if (r.kind === 'select') await selectByLabel(page, 'Reason for Denial', /^(?!<none>)./);

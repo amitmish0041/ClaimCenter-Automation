@@ -132,7 +132,7 @@ module.exports = (api) => {
   add('GCCM-799/UIF/TC-060', 'AUTO_PA', VJ([INS]), [CT(C_AND_V), V('Approval Required', { required: true, editable: true })], VJ_NOTE);
   const SNI_NOTE = MORT_NOTE + ' Secondary insured = the contact CC types "Secondary Named Insured" (from the policy).';
   add('GCCM-759/CPD/TC-039', 'PROP_MORT', MORT_FULL(INS, [SNI_REAL]), [CT(CONTACTS), CM(CHOICE)], SNI_NOTE + ' ' + 'CPD.001 (no email → Other/Mailed Check) may take precedence; reported as observed.');
-  add('GCCM-759/CPD/TC-053', 'PROP_MORT', MORT_FULL(INS, [SNI_REAL]), [CT(CONTACTS)], SNI_NOTE);
+  add('GCCM-759/CPD/TC-053', 'PROP_MORT', MORT_FULL(INS, [SNI_REAL]), [CT(CONTACTS)], SNI_NOTE + ' NOT VERIFIED: the approval-required payload flags (PCON/SCON_Approval_Reqd) — not on screen.');
   add('GCCM-759/CPD/TC-040', 'PROP_MORT', MORT_FULL(VENDOR, [INS, SNI_REAL]), [CT(C_AND_V)], SNI_NOTE + ' ' + VJ_NOTE);
   add('GCCM-759/CPD/TC-052', 'PROP_MORT', MORT_FULL(VENDOR, [INS, SNI_REAL]), [CT(C_AND_V), V('Approval Required')],
     SNI_NOTE + ' ' + VJ_NOTE + ' PCON/SCON_Approval_Reqd are payload flags (not on screen); the visible "Approval Required" field is checked instead.');
@@ -144,7 +144,7 @@ module.exports = (api) => {
   const PJ_NOTE = 'Secondary claimant = a second PERSON contact on the claim (not the insured / exposure claimant), typed "Additional Claimant" in the joint payee grid.';
   const DT_NOTE = ' Secondary claimant = David Thomas (typed Additional Claimant); he has payment contact details (QA mailbox) set on the claim at claim creation.' + HO_NOTE;
   add('GCCM-759/CPD/TC-041', 'PROP_PA', HOJ(CLM, [DT], true), [CT(CONTACTS), CM(CHOICE), REST], PJ_NOTE + DT_NOTE);
-  add('GCCM-759/CPD/TC-055', 'PROP_PA', HOJ(CLM, [DT], true), [CT(CONTACTS), REST], PJ_NOTE + DT_NOTE);
+  add('GCCM-759/CPD/TC-055', 'PROP_PA', HOJ(CLM, [DT], true), [CT(CONTACTS), REST], PJ_NOTE + DT_NOTE + ' NOT VERIFIED: the approval-required payload flags (PCON/SCON_Approval_Reqd) — not on screen.');
   add('GCCM-759/CPD/TC-042', 'PROP_PA', HOJ(VENDOR, [CLM, DT], true), [CT(C_AND_V), REST], PJ_NOTE + DT_NOTE + ' ' + VJ_NOTE);
   add('GCCM-759/CPD/TC-054', 'PROP_PA', HOJ(VENDOR, [CLM, DT], true), [CT(C_AND_V), V('Approval Required'), REST], PJ_NOTE + DT_NOTE + ' ' + VJ_NOTE);
   // CPD.001 negative (QA review 2026-10-26): BOTH the primary and the secondary payee must have an e-mail. Primary = the insured
@@ -194,7 +194,7 @@ module.exports = (api) => {
 
   // ════ 4. Lienholder / mortgagee / joint leftovers, HO building damage ══════════════════════════════════════════
   const JSTEP1 = (primary, joint) => [{ open: 'full' }, ...PRIMARY(primary), { joint }];
-  add('GCCM-759/UIF/TC-004', 'AUTO_LIEN', JSTEP1(INS, [LIEN]), [{ header: { name: 'Type', present: true } }], JOINT_NOTE + ' The joint-payee grid Type column is checked (its per-row dropdown is not addressable by label).');
+  add('GCCM-759/UIF/TC-004', 'AUTO_LIEN', JSTEP1(INS, [LIEN]), [{ header: { name: 'Type', present: true } }], JOINT_NOTE + ' The joint-payee grid Type column is checked. NOT VERIFIED: the per-row Type dropdown being editable/mandatory and offering "Additional Claimant" (not addressable by label).');
   add('GCCM-759/UIF/TC-008', 'AUTO_LIEN', JSTEP1(INS, [LIEN]), [{ header: { name: 'Type', present: true } }, { header: { name: 'ClaimsPay Payee Type', present: false } }], JOINT_NOTE);
   // Updated 759 sheet (QA review 2026-10-26): with nothing selected in the Name, Type displays <none>.
   add('GCCM-759/UIF/TC-005', 'AUTO_PA', [{ open: 'full' }], [V('Type', { value: /^<none>$/i })], 'Checked with no payee selected: Type is shown with <none> (updated sheet).');

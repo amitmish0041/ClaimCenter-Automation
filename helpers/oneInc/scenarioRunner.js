@@ -78,7 +78,9 @@ function shiftAmount(v, slot) {
   const a = Number((v && v.amount) || 1.37);
   // Whole-dollar amounts are boundary values ($1,000.00 document rule, $5,000 mortgagee, $99,999 cap): keep them
   // exact — shifting 763 TC-030 to $1,000.01 made it a false failure (2026-11-04).
-  if (Math.round(a * 100) % 100 === 0) return { ...(v || {}), amount: a.toFixed(2) };
+  // Cent amounts (< $0.10, e.g. 803 TC-028's $0.01 minimum) are boundary values too — a shift could make them $0.00.
+  // A plain $1.00 is just a small default and still shifts (two $1.00 checks to one payee trip the duplicate warning).
+  if ((a >= 100 && Math.round(a * 100) % 100 === 0) || a < 0.1) return { ...(v || {}), amount: a.toFixed(2) };
   const shifted = a <= 1 ? a - 0.01 * slot : a + 0.01 * slot;
   return { ...(v || {}), amount: shifted.toFixed(2) };
 }

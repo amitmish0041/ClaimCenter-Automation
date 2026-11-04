@@ -89,6 +89,10 @@ function annotate(r, story, readiness) {
   } else if (r.status === 'BLOCKED' && story && story.readiness === 'DEV_PENDING') {
     r.devNote = `Story development is not Done in Jira${jiraTxt}.`;
   }
+  // A recipe whose notes say "NOT VERIFIED: …" checks only part of the expected result (pass audit 2026-11-04): its
+  // PASS is labelled partial so nobody reads it as full coverage.
+  const nv = /NOT VERIFIED:\s*([^]*)$/.exec(r.notes || '');
+  if (r.status === 'PASS' && nv) { r.partial = true; r.devNote = `Partially verified — not checked by the tool: ${nv[1].trim()}`; }
   if (r.knownFinding) r.devNote = `${r.knownFinding}${r.devNote ? ' ' + r.devNote : ''}`;
   if (r.bugs.length) r.devNote = `${r.devNote ? r.devNote + ' ' : ''}Related logged bug(s): ${r.bugs.map((b) => `${b.key} (${b.status})`).join(', ')}.`;
   return r;
@@ -415,6 +419,7 @@ function annotate(r, story, readiness) {
   const paths = save();
   const S = run.summary;
   log(`[OneInc] DONE — discovered ${S.discovered}, executed ${S.executed}: ${S.passed} PASS, ${S.failed} FAIL, ${S.blocked} BLOCKED; ${S.notExecuted} NOT EXECUTED; pass ${S.passPct}% of executed`);
+  log(`[OneInc] PASS breakdown — ${S.passed - S.partialPasses} fully verified, ${S.partialPasses} partially verified (see the notes)`);
   log(`[OneInc] FAIL breakdown — ${S.knownFails} known finding(s), ${S.failed - S.knownFails} NEW failure(s) to review`);
   log(`[OneInc] REPORT ${paths.html}`);
   log(`[OneInc] JSON ${paths.json}`);

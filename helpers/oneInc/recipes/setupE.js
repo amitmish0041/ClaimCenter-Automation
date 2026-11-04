@@ -21,7 +21,9 @@ module.exports = (api) => {
   // Quick Payment defaults the payee Type to Other, which VBR.031 refuses for a non-Address-Book contact ("…payee type of
   // Vendor or Other. A tax id is required…", CONFIRMED 2026-10-21) — pick a person payee type instead.
   const TYPE_Q = /Additional Claimant|Claimant/;
-  const PAY_FULL = [{ open: 'full' }, { payee: PAYEE }, { next: true }, { reserve: 'open' }, { step2: { transactionType: 'Partial Payment', amount: '1.37' } }, { validate: { expect: null } }];
+  // The Full Check needs the same person payee Type: with the default (Other) Step 2's Reserve Line list is empty — 803
+  // TC-046 BLOCKED "Reserve Line has no options" on 10/27 and 11/04.
+  const PAY_FULL = [{ open: 'full' }, { payee: PAYEE }, { select: ['Type', TYPE_Q] }, { next: true }, { reserve: 'open' }, { step2: { transactionType: 'Partial Payment', amount: '1.37' } }, { validate: { expect: null } }];
   const PAY_QUICK = [{ open: 'quick', needOpenReserve: true }, { payee: PAYEE }, { select: ['Type', TYPE_Q] }, { step2: { transactionType: 'Partial Payment', amount: '1.37' } }, { validate: { expect: null } }];
   const AFTER = [
     call('openLatestCheck', PAYEE),

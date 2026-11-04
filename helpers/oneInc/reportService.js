@@ -58,6 +58,7 @@ function summarize(results) {
     discovered: results.length, executed, passed, failed, blocked, notExecuted,
     passPct: pct(passed, executed), decidedPassPct: pct(passed, passed + failed),
     pendingDevFailures: results.filter((r) => r.status === 'FAIL' && r.devNote && !r.knownFinding).length,
+    partialPasses: results.filter((r) => r.status === 'PASS' && r.partial).length,
     knownFails: results.filter((r) => r.status === 'FAIL' && r.knownFinding && !/^CHANGED/.test(r.knownFinding)).length,
     byStory: Object.values(byStory).sort((a, b) => a.story.localeCompare(b.story, undefined, { numeric: true })),
     byAutomation,
