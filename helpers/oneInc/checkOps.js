@@ -137,7 +137,7 @@ async function createQuickCheck(page, { txn = 'Partial Payment', costType = 'cla
   if (requireVoidable && process.env.ONEINC_VOIDABLE_NEW !== '1') {
     throw new W.Blocked('needs a NEW voidable check: a check becomes "Requested" only after OneInc acknowledges it, which OneInc does not do on TEST (the Financials Escalation batch takes it only to Requesting). Set ONEINC_VOIDABLE_NEW=1 once OneInc processes TEST payments.');
   }
-  const amt = amount || `1.${41 + Math.floor(Math.random() * 58)}`;
+  const amt = amount || `0.${41 + Math.floor(Math.random() * 58)}`; // ≤ $1.00 approval authority (see createFullCheck)
   if (!page.__oneIncParties) await W.getParties(page).catch(() => {});
   if (/claim cost/i.test(costType)) await ensureOpenReserve(page);
   await require('./reuseExt').openQuickOnRow(page, costType, 'open');
@@ -184,7 +184,9 @@ async function createQuickCheck(page, { txn = 'Partial Payment', costType = 'cla
 // a OneInc check to look at on Check/Payment Details. Records page.__createdCheck = { amount }.
 async function createFullCheck(page, { payee = 'claimant', type, joint, amount, txn = 'Partial Payment' } = {}) {
   gate('Creating a check');
-  const amt = amount || `1.${41 + Math.floor(Math.random() * 58)}`;
+  // $0.41–$0.98: new claims can carry a $1.00 approval authority — a $1.4x check sat "Pending approval" with no check
+  // number, so "open the first check" found nothing to open (799 UIF-001 TC-067, 2026-11-03).
+  const amt = amount || `0.${41 + Math.floor(Math.random() * 58)}`;
   if (!page.__oneIncParties) await W.getParties(page).catch(() => {});
   await W.openPayment(page, 'actions', { needOpenReserve: true });
   let msgs = '';

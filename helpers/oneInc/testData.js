@@ -140,6 +140,11 @@ const D = {
       return hit.some((r) => r.remaining >= min) ? '' : `${costType} line under /${src(exposure)}/ has only $${Math.max(...hit.map((r) => r.remaining))} remaining (< $${min})`;
     },
     build: async (page, claim) => {
+      // A just-added exposure on a claim not yet assigned refuses the reserve silently (adjuster AND admin); claimCheck
+      // assigns the claim only AFTER the test data, so assign first (PA-PA-01-26-0748835: refused at setup, saved once
+      // assigned — 2026-11-03).
+      await W.openClaim(page, claim);
+      await W.assignClaimAndExposures(page).catch(() => {});
       const err = await X().addReserve(page, claim, { amount, costType, exposure: src(exposure) });
       if (!err) return `added a $${amount} ${costType} reserve on /${src(exposure)}/`;
       // The exposure already has a line of this cost type — CC offers no Cost Category for a second one (CONFIRMED

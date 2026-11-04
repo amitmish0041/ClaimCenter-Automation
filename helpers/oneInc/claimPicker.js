@@ -148,7 +148,27 @@ function policyCandidates(profile, { exclude = [] } = {}) {
   const yearAgo = new Date(today); yearAgo.setFullYear(yearAgo.getFullYear() - 1);
   // Aged profiles (minAgeYears) want the opposite: an existing claim at least that old.
   const ageYears = (r) => (today - new Date(r.lossDate)) / 31557600000;
-  return allRecords()
+  // Extra policies found in PolicyCenter TEST (in force, no claims yet) — <TestData>/extra-policies-<tier>.json
+  // { "WC:PA": [{ policyNumber, effective, expiration, name }] } (user direction 2026-11-03: the TEST claim list's WC PA
+  // policies were all exhausted — claimant numbers used up). They come FIRST: no claims → no claimant-number clashes.
+  // Loss date: 7 days ago, kept inside the term. Not for aged profiles (minAgeYears).
+  let extra = [];
+  if (!p.minAgeYears && !p.policies) {
+    try {
+      const file = path.join(STATE_DIR, `extra-policies-${TIER}.json`);
+      extra = (JSON.parse(fs.readFileSync(file, 'utf8'))[`${p.lob}:${p.state}`] || [])
+        .filter((e) => e.policyNumber && !used.has(e.policyNumber))
+        .map((e) => {
+          const eff = new Date(e.effective); const exp = new Date(e.expiration || '2999-01-01');
+          const d = new Date(today); d.setDate(d.getDate() - 7);
+          if (d < eff) d.setTime(eff.getTime() + 86400000);
+          if (d >= exp || d > today) return null;
+          return { policyNumber: e.policyNumber, lossDate: fmt(d), state: p.state, basedOn: `PolicyCenter TEST in-force policy (${e.name || 'extra list'})`, extra: true };
+        }).filter(Boolean)
+        .sort((a, b) => (poolUse[a.policyNumber] || 0) - (poolUse[b.policyNumber] || 0));
+    } catch (_) { /* no extra list */ }
+  }
+  return [...extra, ...allRecords()
     .filter((r) => r.lob === p.lob && r.state === p.state && p.prefix.test(r.claimNumber || '') && r.policyNumber && r.lossDate
       && (!p.policies || p.policies.includes(r.policyNumber))
       && (p.minAgeYears ? ageYears(r) >= p.minAgeYears : new Date(r.lossDate) >= yearAgo))
@@ -162,7 +182,7 @@ function policyCandidates(profile, { exclude = [] } = {}) {
       d.setDate(d.getDate() + 1 + (p.policies ? Math.floor(Math.random() * 20) : 0));
       return { policyNumber: r.policyNumber, lossDate: fmt(d > today ? today : d), state: r.state, basedOn: `${r.claimNumber} (DoL ${r.lossDate})` };
     })
-    .filter(Boolean);
+    .filter(Boolean)];
 }
 
 // Ordered candidate claims for a profile (pinned > provisioned pool > remembered > seeds > newest test-data claims).

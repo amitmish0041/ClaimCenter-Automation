@@ -33,7 +33,8 @@ module.exports = (api) => {
   // ── VBR.042 — payee without a first name ───────────────────────────────────────────────────────────────────────
   const NOFIRST = 'NOFIRSTNAME';
   add('GCCM-1013/VBR/TC-047', 'AUTO_PA', VAL([nd('addLastNameOnlyContact', NOFIRST), { open: 'full' }, { select: ['Name', NOFIRST] }, { next: true }, { reserve: 'open' },
-    { step2: { transactionType: 'Partial Payment', amount: '1.37' } }], /must have first and last name/i), [],
+    // CC's wording (CONFIRMED 2026-11-03, at Next on Step 1): "Payee NOFIRSTNAME must have a first name and last name."
+    { step2: { transactionType: 'Partial Payment', amount: '1.37' } }], /must have (a )?first (name )?and last name/i), [],
   `Setup: a claim-only person "${NOFIRST}" with a last name and NO first name (Parties Involved › New Contact › Person, role Covered Party — only Last name is required there), picked as the payee.`);
 
   // ── VBR.098 — claim that has not passed Ability to Pay ─────────────────────────────────────────────────────────

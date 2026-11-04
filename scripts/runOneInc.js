@@ -372,6 +372,12 @@ function annotate(r, story, readiness) {
     } catch (e) {
       r = { ...results.get(tc.scenarioId), status: 'FAIL', reason: `automation crashed: ${e.message.split('\n')[0]}`, error: e.message, stack: e.stack, automationError: true };
     }
+    // A case that changed a ContactManager vendor reverts it whatever its result: the restore in its checks never ran
+    // when the case BLOCKED, leaving ESQUIRE's Levy attached for later cases (2026-11-03).
+    if ((RECIPES[tc.scenarioId].steps || []).some((s) => s && Array.isArray(s.call) && /^contactManager\.(set|apply)/.test(String(s.call[0])))) {
+      const left = await require('../helpers/oneInc/contactManager').restoreVendors(pages[w]).catch((e) => `restore failed: ${e.message.split('\n')[0]}`);
+      if (left) log(`[OneInc] ${tc.scenarioId}: ContactManager restore — ${String(left).slice(0, 200)}`);
+    }
     results.set(tc.scenarioId, annotate({ ...r, automation: 'AUTOMATED' }, story, readiness));
     log(`[OneInc] (${n}/${toRun.length}) ${tc.scenarioId}: ${r.status}${r.reason ? ' — ' + String(r.reason).slice(0, 220) : ''}`);
     run.done = (run.done || 0) + 1;

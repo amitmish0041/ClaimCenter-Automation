@@ -161,6 +161,9 @@ async function checkClaim(page, claim, { prepare = false, lienholders = false, p
       if (!lines.length && prepare) {
         await W.cancelWizard(page);
         page._currentClaimNumber = claim;
+        // An unassigned claim/exposure refuses a reserve silently (adjuster and admin) — assign first (2026-11-03).
+        await W.assignClaimAndExposures(page).then((d) => d.length && out.repaired.push(`assigned ${d.join(', ')} (before the reserve)`)).catch(() => {});
+        await W.openClaim(page, claim, log);
         const reserve = () => require('../financialsHelper').createReserve(page, { reserveAmount: 2500, costType: 'CLPD', costCategory: 'ClaimCost' }).catch((e) => e.message);
         let err = await reserve();
         // CONFIRMED 2026-10-28: benjsmit has NO "Reserve" item under Actions › New Transaction on cloud TEST (su has it).
@@ -214,6 +217,9 @@ async function checkClaim(page, claim, { prepare = false, lienholders = false, p
       if (lines.length && !out.openReserve && prepare) {
         await W.cancelWizard(page);
         page._currentClaimNumber = claim;
+        // An unassigned claim/exposure refuses a reserve silently (adjuster and admin) — assign first (2026-11-03).
+        await W.assignClaimAndExposures(page).then((d) => d.length && out.repaired.push(`assigned ${d.join(', ')} (before the reserve)`)).catch(() => {});
+        await W.openClaim(page, claim, log);
         let err = await require('../financialsHelper').createReserve(page, { reserveAmount: 2500, costType: 'Claim Cost', strict: true }).catch((e) => e.message);
         // CC offers no Cost Category for a cost type the exposure already has a line for (CONFIRMED 2026-10-21 on
         // PA-PA-01-26-0748484) — raise the existing $0 line instead. Every line is at $0 here, so editing one changes

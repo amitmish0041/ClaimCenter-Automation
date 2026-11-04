@@ -421,14 +421,24 @@ async function setIndemnityExposure(page, values) {
   };
   const s0 = await readScreen(page);
   if (Object.entries(values).every(([l, v]) => same(s0, l, v))) return 'Indemnity exposure already set';
-  await editAndSave(page, 'Indemnity exposure', async () => {
+  const fillAll = async () => {
     for (const [label, want] of Object.entries(values)) {
       const f = findField(await readScreen(page), label);
       if (!f) throw new W.Blocked(`Indemnity exposure has no "${label}" field`);
       if (f.kind === 'select') await selectByLabel(page, label, want === '<none>' ? /^<none>$/ : want);
       else await fillByLabel(page, label, want === '<none>' ? '' : want);
     }
-  });
+  };
+  try {
+    await editAndSave(page, 'Indemnity exposure', fillAll);
+  } catch (e) {
+    // "This claimant number already exists on another claim" (a later claim on the policy took it — 799 UIF TC-014…021
+    // BLOCKED 2026-11-03): pick a free number on Loss Details, then save the exposure again.
+    if (!/claimant number already exists/i.test(e.message)) throw e;
+    await fixClaimantNumber(page);
+    await openWcExposure(page, 'Indemnity');
+    await editAndSave(page, 'Indemnity exposure', fillAll);
+  }
   await openWcExposure(page, 'Indemnity');
   const s1 = await readScreen(page);
   const bad = Object.entries(values).filter(([l, v]) => !same(s1, l, v)).map(([l]) => l);

@@ -238,7 +238,8 @@ async function execute(page, items, res, ctx, capture) {
     ctx.log(`[OneInc] ${res.scenarioId}:   ${row.result} — ${row.description} (actual: ${String(row.actual).slice(0, 140)})`);
   };
 
-  for (const item of items) {
+  for (let idx = 0; idx < items.length; idx++) {
+    const item = items[idx];
     if (isCheck(item)) {
       const s = await current();
       await evaluate(item, s, state, record);
@@ -251,12 +252,44 @@ async function execute(page, items, res, ctx, capture) {
     const k = Object.keys(item)[0];
     const v = item[k];
     if (k === 'open') {
-      await W.openPayment(page, v === 'quick' ? 'quick' : v === 'financials' ? 'financials' : 'actions', { needZeroReserve: !!item.zeroReserve, needOpenReserve: !item.zeroReserve && (!!item.needOpenReserve || v === 'quick') });
+      const how = v === 'quick' ? 'quick' : v === 'financials' ? 'financials' : 'actions';
+      const opts = { needZeroReserve: !!item.zeroReserve, needOpenReserve: !item.zeroReserve && (!!item.needOpenReserve || v === 'quick') };
+      try {
+        await W.openPayment(page, how, opts);
+      } catch (e) {
+        // "has not passed the Ability to Pay validation level" because a claim filed LATER on the same policy took this
+        // claim's claimant number (799 UIF TC-055 on WC-PA-01-26-0748836, 2026-11-03) — test data, not the rule: pick a
+        // free number on Loss Details and open again once.
+        if (!/Ability to Pay/i.test(e.message) || !/claimant number already exists/i.test(await W.abilityToPayErrors(page))) throw e;
+        await W.cancelWizard(page).catch(() => {});
+        ctx.log(`[OneInc] ${res.scenarioId}: claimant number taken by another claim — ${await require('./setupA').fixClaimantNumber(page)}`);
+        if (res.claim) await W.openClaim(page, res.claim);
+        await W.openPayment(page, how, opts);
+      }
     } else if (k === 'payee') await W.selectPayee(page, v);
     else if (k === 'joint') await W.addJointPayees(page, v);
     // Generic hook for extension modules: { call: ['<module>.<fn>', ...args] } runs require('./<module>')[fn](page, ...args).
     else if (k === 'call') { const [modFn, ...args] = v; const [mod, fn] = modFn.split('.'); await require(`./${mod}`)[fn](page, ...args); }
-    else if (k === 'next') await W.nextFillingServicePeriod(page);
+    else if (k === 'next') {
+      const before = await W.currentStep(page).catch(() => null);
+      await W.nextFillingServicePeriod(page);
+      // The rule a later validate step EXPECTS fired already on this Next (the wizard stayed put showing it): judge the
+      // case here instead of failing the next step ("Reserve Line has no options" — 1013 TC-077 levy / TC-047 no first
+      // name, 2026-11-03). Steps up to that validate are skipped; checks after it still run.
+      const vi = items.findIndex((x, j) => j > idx && x && x.validate);
+      const pending = vi > 0 ? items[vi].validate : null;
+      if (pending && pending.expect) {
+        const after = await W.currentStep(page).catch(() => null);
+        const s2 = await readScreen(page);
+        if (before && after && after.n === before.n && pending.expect.test([...s2.messages, s2.south].join(' / '))) {
+          ctx.log(`[OneInc] ${res.scenarioId}: the expected rule fired on this Next — evaluating it here`);
+          screen = null;
+          await validate(page, pending, res, ctx, capture, record, () => { screen = null; });
+          idx = vi;
+          continue;
+        }
+      }
+    }
     else if (k === 'reserve') await W.selectReserveLine(page, v);
     else if (k === 'select') await W.select(page, v[0], v[1]);
     else if (k === 'fill') await W.fill(page, v[0], await resolveValue(page, v[1]));

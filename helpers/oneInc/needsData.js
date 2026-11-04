@@ -108,6 +108,9 @@ async function includedIcds(page) {
 }
 async function setExposureMedicare(page, match = 'Bodily Injury', { beneficiary = 'Yes', icd = null } = {}) {
   testOnly('setExposureMedicare');
+  // CC keeps ICD codes WITHOUT the dot (S134XXA) and its search finds nothing for "S13.4XXA" (CONFIRMED 2026-11-03).
+  const code = icd ? String(icd).replace(/\./g, '').toUpperCase() : null;
+  const plain = (x) => norm(String(x).replace(/\./g, ''));
   await W.cancelWizard(page).catch(() => {});
   await openExposureMatching(page, match);
   await page.getByText('Medicare', { exact: true }).first().click();
@@ -115,7 +118,7 @@ async function setExposureMedicare(page, match = 'Bodily Injury', { beneficiary 
   const cur = findField(await readScreen(page), 'Is Claimant a Medicare Beneficiary?');
   const have = await includedIcds(page);
   const wantVal = beneficiary === '<none>' ? '' : beneficiary;
-  const sameIcd = icd ? have.length === 1 && norm(have[0]).startsWith(norm(icd)) : have.length === 0;
+  const sameIcd = icd ? have.length === 1 && plain(have[0]).startsWith(plain(code)) : have.length === 0;
   if (cur && norm(cur.value) === norm(wantVal) && sameIcd) return `Medicare already ${beneficiary || '<none>'}, ICD ${icd || 'none'}`;
   await W.clickButton(page, 'Edit');
   await W.settle(page, 2000);
@@ -134,12 +137,19 @@ async function setExposureMedicare(page, match = 'Bodily Injury', { beneficiary 
     // Search › Select) — CONFIRMED 2026-11-03 on PA-MD-01-23-0742279.
     await page.locator('[id*="includedICDLVI"] [id$="-ICDCode-SelectICDCode"]').filter({ visible: true }).last().click();
     await W.settle(page, 2500);
-    await page.locator('input[name="DiagnosticICDCodePopup-FindCode"]').fill(icd);
+    await page.locator('input[name="DiagnosticICDCodePopup-FindCode"]').fill(code.slice(0, 4)); // the search matches a code prefix
     await W.clickButton(page, 'Search');
     await W.settle(page, 2500);
-    const hit = page.locator('tr').filter({ hasText: new RegExp(icd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') }).getByText('Select', { exact: true }).first();
-    if (!await hit.isVisible().catch(() => false)) { await W.clickButton(page, 'Cancel').catch(() => {}); throw new W.Blocked(`ICD code ${icd} not found in the ICD code search`); }
-    await hit.click();
+    // The result ROW (a leaf <tr>) holding the code: a plain tr filter also matched the popup's layout rows, whose first
+    // "Select" is not the result's (re-run 2026-11-03 still "not found").
+    const marked = await page.evaluate((c) => {
+      const row = [...document.querySelectorAll('tr')].find((r) => r.offsetParent && !r.querySelector('tr') && new RegExp(`\\b${c}\\b`, 'i').test(r.innerText || ''));
+      const link = row && [...row.querySelectorAll('a, [role=link], .gw-LinkWidget, div, span')].find((e) => (e.innerText || '').trim() === 'Select');
+      if (link) link.setAttribute('data-nd-icd', '1');
+      return !!link;
+    }, code);
+    if (!marked) { await W.clickButton(page, 'Cancel').catch(() => {}); throw new W.Blocked(`ICD code ${code} not found in the ICD code search`); }
+    await page.locator('[data-nd-icd="1"]').first().click();
     await W.settle(page, 2500);
   }
   const orm = findField(await readScreen(page), 'Is There ORM?');
@@ -150,7 +160,7 @@ async function setExposureMedicare(page, match = 'Bodily Injury', { beneficiary 
   const after = findField(await readScreen(page), 'Is Claimant a Medicare Beneficiary?');
   const icds = await includedIcds(page);
   if (!after || norm(after.value) !== norm(wantVal)) throw new W.Blocked(`Medicare beneficiary did not stick (shows "${after ? after.value : '?'}")`);
-  if (icd && !icds.some((x) => norm(x).includes(norm(icd)))) throw new W.Blocked(`ICD code ${icd} did not stick (included codes: ${icds.join(', ') || 'none'})`);
+  if (icd && !icds.some((x) => plain(x).includes(plain(code)))) throw new W.Blocked(`ICD code ${icd} did not stick (included codes: ${icds.join(', ') || 'none'})`);
   return `exposure /${match}/ Medicare beneficiary → ${beneficiary}, included ICD codes → ${icds.join(', ') || 'none'}`;
 }
 
