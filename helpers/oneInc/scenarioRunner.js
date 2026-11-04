@@ -76,6 +76,9 @@ function isPaymentRecipe(recipe) {
 
 function shiftAmount(v, slot) {
   const a = Number((v && v.amount) || 1.37);
+  // Whole-dollar amounts are boundary values ($1,000.00 document rule, $5,000 mortgagee, $99,999 cap): keep them
+  // exact — shifting 763 TC-030 to $1,000.01 made it a false failure (2026-11-04).
+  if (Math.round(a * 100) % 100 === 0) return { ...(v || {}), amount: a.toFixed(2) };
   const shifted = a <= 1 ? a - 0.01 * slot : a + 0.01 * slot;
   return { ...(v || {}), amount: shifted.toFixed(2) };
 }

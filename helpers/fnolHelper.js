@@ -414,9 +414,11 @@ async function fillRequiredAcrossTabsCloud(page) {
       const dateInput = t.locator('xpath=../..//input[contains(@class,"gw-DateValueWidget--dateInput")]').first();
       if (await dateInput.isVisible().catch(() => false)) {
         if (!((await dateInput.inputValue().catch(() => 'x')) || '').trim()) {
-          const d = new Date();
+          const d = new Date(); d.setDate(d.getDate() - 1);
           // Hire / birth dates must precede the loss date (WC: "Date of hire must be before the date of loss",
-          // 2026-10-21); reported/notified dates stay today, which is after the loss.
+          // 2026-10-21); reported/notified dates use yesterday (still after the loss, today-7): the widget's
+          // pre-filled time (04:25) with today's date is in the future for a claim filed after midnight, and later
+          // edits then fail "Date Employer Notified : Date must be in the past" (WC-PA-01-26-0748913, 2026-11-04).
           const wlabel = await dateInput.evaluate((el) => { const w = el.closest('.gw-InputWidget'); const l = w && w.querySelector('.gw-label'); return ((l && l.innerText) || el.name || '').toLowerCase(); }).catch(() => '');
           const today = /hire|birth/.test(wlabel) ? '01/01/2020' : String(d.getMonth() + 1).padStart(2, '0') + '/' +
                         String(d.getDate()).padStart(2, '0') + '/' + d.getFullYear();

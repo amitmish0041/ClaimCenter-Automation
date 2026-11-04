@@ -143,6 +143,24 @@ async function assignExposuresTo(page, who = 'Benjamin Smith', group = 'Recovery
   if (rows.length && rows.every((r) => norm(r) === norm(who))) return `exposures already owned by ${who}`;
   await page.locator('[id$="ExposuresLV-_Checkbox"]:visible').first().click();
   await page.waitForTimeout(800);
+  // Assign stays DISABLED for the adjuster on claims assigned to "General Casualty Section" (CONFIRMED 2026-11-04,
+  // PA-PA-01-26-0748880; 763 VBR TC-004 timed out) — do the data setup as the admin in its own window, like reserves.
+  const assignBtn = page.getByRole('button', { name: 'Assign', exact: true }).first();
+  const disabled = await assignBtn.evaluate((e) => e.getAttribute('aria-disabled') === 'true' || e.classList.contains('gw-disabled') || !!e.closest('[aria-disabled="true"]')).catch(() => false);
+  if (disabled && page.__oneIncUser !== 'admin' && process.env.CC_ADMIN_USER) {
+    const claim = await page.evaluate(() => ((document.body.innerText || '').match(/Claim:\s*([A-Z]{2,4}-[A-Z]{2}-[\d-]+)/) || [])[1] || '');
+    const ctx = await page.context().browser().newContext({ viewport: { width: 1600, height: 1000 } });
+    try {
+      const ap = await ctx.newPage();
+      ap.setDefaultTimeout(20000);
+      await require('../claimCenterBase').loginAsAdmin(ap);
+      ap.__oneIncUser = 'admin';
+      await W.openClaim(ap, claim);
+      const done = await assignExposuresTo(ap, who, group);
+      await W.openClaim(page, claim);
+      return `${done} (as admin: Assign is disabled for the adjuster on this claim)`;
+    } finally { await ctx.close().catch(() => {}); }
+  }
   await W.clickButton(page, 'Assign');
   const opts = ((await W.optionsOf(page, 'Select from list:')) || []).map((o) => o.t);
   const inList = opts.find((t) => norm(t).startsWith(norm(who)));

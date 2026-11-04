@@ -98,6 +98,15 @@ async function prepareVinIncident(page, { year = '1987', lossCause, detailed } =
   await vin.fill('');
   await vin.press('Tab').catch(() => {});
   await A.fillByLabel(page, 'Year', String(year));
+  // Ability to pay refuses a vehicle incident without a description ("Vehicle incident description must not be
+  // empty" — PA-PA-01-26-0748858 after this setup, 2026-11-04): fill it while the incident is in edit.
+  for (const label of ['Damage Description', 'Description']) {
+    const d = page.getByLabel(label, { exact: true }).first();
+    if (await d.isVisible().catch(() => false) && !(await d.inputValue().catch(() => 'x')).trim()) {
+      await d.fill('Automated test - vehicle damage').catch(() => {});
+      break;
+    }
+  }
   await W.settle(page, 1200);
   for (let r = 0; r < 2; r++) {
     await W.clickButton(page, 'Update');

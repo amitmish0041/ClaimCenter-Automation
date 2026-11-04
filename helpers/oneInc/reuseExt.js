@@ -341,8 +341,8 @@ async function finishObserve(page) {
     // claim's "At least one aggregate limit … exceeded" (CONFIRMED 2026-10-21 a warnings-only page that saves on a
     // second Finish). Any other warning stops here and becomes the outcome.
     let passed = '';
-    const ignorable = (t) => /duplicate/i.test(t) || (!/\bErrors?\s*:/i.test(t)
-      && t.replace(/^Validation Results\s*Clear\s*Warnings:\s*/i, '').split(/(?<=\.)\s+/).every((x) => /aggregate limit/i.test(x)));
+    const ignorable = (t) => /duplicate/i.test(t) || (!/Errors?s*:/i.test(t)
+      && t.replace(/^Validation Resultss*Clears*Warnings:s*/i, '').split(/(?<=.)s+/).every((x) => /aggregate limit/i.test(x)));
     if (await W.inWizard(page) && ms.length && ms.every((m) => ignorable(m.t))) {
       passed = fmtMsgs(ms);
       const notDup = page.getByRole('radio', { name: 'Not a duplicate check', exact: true }).first();
@@ -351,7 +351,17 @@ async function finishObserve(page) {
       await settle();
       ms = await typedMessages(page);
     }
-    if (await W.inWizard(page)) outcome = `stopped at Finish: ${fmtMsgs(ms) || 'no message'}`;
+    if (await W.inWizard(page)) {
+      // The panel can be read before its lines render — "Validation Results Clear Warnings" with no warning text (763
+      // VBR TC-009, 2026-11-04). Wait and take the whole panel so the report names the warning.
+      let text = fmtMsgs(ms);
+      if (!text || /^\s*(\[panel\]\s*)?Validation Results\s*Clear\s*(Warnings|Errors)?\s*:?\s*$/i.test(text)) {
+        await page.waitForTimeout(2500);
+        const panel = await page.evaluate(() => ((document.getElementById('gw-south-panel') || {}).innerText || '').replace(/\s+/g, ' ').trim()).catch(() => '');
+        text = [fmtMsgs(await typedMessages(page)), panel && `[panel] ${panel}`].filter(Boolean).join(' / ').slice(0, 600);
+      }
+      outcome = `stopped at Finish: ${text || 'no message'}`;
+    }
     else {
       const chk = await newestCheck(page, amount);
       outcome = (chk ? `submitted: ${describeCheck(chk)}` : `submitted, but no ${amount} check is listed on Financials › Checks`)

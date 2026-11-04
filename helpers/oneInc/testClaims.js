@@ -33,7 +33,9 @@ function canFnol(profile) {
 // claim, NEG_PER_CLAIM at a time, instead of one new claim each (user direction 2026-11-03: 76 new claims for
 // 763+803 took ~11 min each).
 const NEG_PER_CLAIM = Math.max(1, Number(process.env.ONEINC_NEG_PER_CLAIM || 5));
-const MUTATES = /finish|void|delete|create|ensure|escalate|clear|add|set|apply|unlink|remove|close|reopen|link|approve|reject/i;
+// prepare/change/assign/update/fix/deny/repair also edit the claim (prepareVinIncident left a shared claim failing
+// Ability to pay for 803 TC-015/021/022/027, 2026-11-04).
+const MUTATES = /finish|void|delete|create|ensure|escalate|clear|add|set|apply|unlink|remove|close|reopen|link|approve|reject|prepare|change|assign|update|fix|deny|repair/i;
 function isNegativeOnly(recipe) {
   const all = [...((recipe && recipe.steps) || []), ...((recipe && recipe.checks) || [])].filter(Boolean);
   const vals = all.filter((s) => s.validate);
