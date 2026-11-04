@@ -136,7 +136,7 @@ function annotate(r, story, readiness) {
     console.log(`[OneInc] DATA STEP — ${toRun.length} scenario(s) selected (${scope}), ${plans.length} claim type(s)`);
     for (const p of plans) {
       console.log(p.fresh
-        ? `[OneInc] DATA ${p.profile}: needs ${p.want} claim(s) (${p.payIds.length} payment scenario(s) one each${p.readIds.length ? `, ${p.readIds.length} screen check(s) share one` : ''}) — ${p.unused.length} Unused in stock → create ${p.toCreate}`
+        ? `[OneInc] DATA ${p.profile}: needs ${p.want} claim(s) (${p.payIds.length} payment scenario(s) one each, ${p.negIds.length} negative(s) sharing ${p.negGroups.length}, ${p.posIds.length} simple positive(s) sharing ${p.posGroups.length}${p.readIds.length ? `, ${p.readIds.length} screen check(s) share one` : ''}) — ${p.unused.length} Unused in stock → create ${p.toCreate}`
         : `[OneInc] DATA ${p.profile}: ${p.payIds.length + p.readIds.length} scenario(s) use existing claims (aged loss date / OneInc-acknowledged check) — nothing to create`);
     }
     const total = plans.reduce((n, p) => n + p.toCreate, 0);
@@ -273,13 +273,14 @@ function annotate(r, story, readiness) {
   // take them too); new claims are filed only for the shortfall.
   const fresh = freshPlanned;
   const assigned = new Map(); // scenarioId → [claim] | { blocked: why } | { existing: true }
+  const amountSlot = new Map(); // scenarioId → slot k in a shared simple-positive claim (k cents off the amount)
   if (fresh) {
     const claimPicker = require('../helpers/oneInc/claimPicker');
     const testClaims = require('../helpers/oneInc/testClaims');
     const plans = testClaims.plan(toRun.map(({ tc }) => tc.scenarioId), RECIPES, isPaymentRecipe);
     run.freshClaims = {};
-    for (const { profile, fresh: canFnol, payIds, readIds, want } of Object.values(plans)) {
-      const ids = [...payIds, ...readIds];
+    for (const { profile, fresh: canFnol, payIds, negIds, negGroups, posIds, posGroups, readIds, want } of Object.values(plans)) {
+      const ids = [...payIds, ...negIds, ...posIds, ...readIds];
       if (!canFnol) {
         log(`[OneInc] fresh data: ${profile} needs existing claim data a new FNOL cannot produce (aged loss date, or a check OneInc already acknowledged) — its ${ids.length} scenario(s) use the pool claims`);
         for (const id of ids) assigned.set(id, { existing: true });
@@ -293,9 +294,9 @@ function annotate(r, story, readiness) {
       if (stock.length) log(`[OneInc] fresh data: ${profile} — using ${stock.length} Unused claim(s) from the test-data stock: ${stock.join(', ')}`);
       if (need > 0) {
         const t0 = new Date().toISOString();
-        log(`[OneInc] fresh data: ${profile} — creating ${need} new claim(s) with their test data (${payIds.length} payment scenario(s) need one each, ${readIds.length ? `${readIds.length} screen check(s) share one` : 'no screen checks'}); each FNOL takes a few minutes`);
-        code = await testClaims.provision(profile, need, { log, headless: arg('headless', false) });
-        made = (claimPicker.readPool()[profile] || []).filter((e) => e.usable && e.status === 'Unused' && String(e.createdAt) >= t0).map((e) => e.claim).slice(0, need);
+        log(`[OneInc] fresh data: ${profile} — creating ${need} new claim(s) with their test data (${payIds.length} payment scenario(s) need one each, ${negIds.length} negative(s) share ${negGroups.length}, ${readIds.length ? `${readIds.length} screen check(s) share one` : 'no screen checks'}); each FNOL takes a few minutes`);
+        code = await testClaims.provision(profile, need, { log, headless: arg('headless', false), runId });
+        made = (claimPicker.readPool()[profile] || []).filter((e) => e.usable && e.status === 'Unused' && e.reservedFor === runId).map((e) => e.claim).slice(0, need);
         testClaims.markUsed(profile, made, { runId });
         log(`[OneInc] fresh data: ${profile} — new claim(s): ${made.join(', ') || 'none'}`);
       }
@@ -305,6 +306,10 @@ function annotate(r, story, readiness) {
       const queue = got.slice();
       const usedFor = [];
       for (const id of payIds) { const c = queue.shift(); assigned.set(id, c ? [c] : { blocked: why }); if (c) usedFor.push({ claim: c, id }); }
+      // Negative-only payment scenarios (the rule refuses Finish — nothing saved): one claim per group (testClaims.plan).
+      for (const group of negGroups) { const c = queue.shift(); for (const id of group) { assigned.set(id, c ? [c] : { blocked: why }); if (c) usedFor.push({ claim: c, id }); } }
+      // Simple positives: one claim per group, each case its own amount slot (scenarioRunner shiftAmount).
+      for (const group of posGroups) { const c = queue.shift(); group.forEach((id, k) => { assigned.set(id, c ? [c] : { blocked: why }); amountSlot.set(id, k); if (c) usedFor.push({ claim: c, id }); }); }
       const shared = queue.shift() || got[got.length - 1];
       for (const id of readIds) { assigned.set(id, shared ? [shared] : { blocked: why }); if (shared) usedFor.push({ claim: shared, id }); }
       testClaims.markUsed(profile, got, { runId, scenarios: usedFor });
@@ -362,6 +367,7 @@ function annotate(r, story, readiness) {
     log(`[OneInc] (${n}/${toRun.length}) ${tc.scenarioId} — starting${pages.length > 1 ? ` [worker ${w + 1}]` : ''}: ${tc.name.slice(0, 100)}`);
     let r;
     try {
+      ctxs[w].amountSlot = amountSlot.get(tc.scenarioId) || 0; // set, not copied: ctx carries lastClaim / dataChecked across cases
       r = await runScenario(pages[w], tc, RECIPES[tc.scenarioId], ctxs[w]);
     } catch (e) {
       r = { ...results.get(tc.scenarioId), status: 'FAIL', reason: `automation crashed: ${e.message.split('\n')[0]}`, error: e.message, stack: e.stack, automationError: true };

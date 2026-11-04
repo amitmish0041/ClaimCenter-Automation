@@ -79,13 +79,29 @@ function allRecords() {
 // come first, so runs use known-good claims instead of hunting through migrated data (per user direction 2026-10-20:
 // create the claims the scenarios need upfront).
 const POOL_FILE = path.join(STATE_DIR, `claim-pool-${TIER}.json`);
-function readPool() { try { return JSON.parse(fs.readFileSync(POOL_FILE, 'utf8')); } catch (_) { return {}; } }
+// {} only when there is no file: a read that lands mid-write (parallel builders / team Runners) is retried — returning {}
+// there made the next save wipe the shared pool.
+function readPool() {
+  for (let i = 0; i < 20; i++) {
+    let text;
+    try { text = fs.readFileSync(POOL_FILE, 'utf8'); } catch (e) { if (e.code === 'ENOENT') return {}; }
+    try { if (text !== undefined) return JSON.parse(text); } catch (_) { /* partial write */ }
+    const t = Date.now() + 250; while (Date.now() < t) { /* wait for the writer */ }
+  }
+  throw new Error(`claim pool ${POOL_FILE} is unreadable (still being written?) — not overwriting it`);
+}
 function addToPool(profile, entry) {
-  const pool = readPool();
-  const prev = (pool[profile] || []).find((e) => e.claim === entry.claim) || {};
-  pool[profile] = (pool[profile] || []).filter((e) => e.claim !== entry.claim).concat({ ...prev, ...entry }); // keep policy/lossDate on re-check
-  fs.mkdirSync(path.dirname(POOL_FILE), { recursive: true });
-  fs.writeFileSync(POOL_FILE, JSON.stringify(pool, null, 2));
+  // Parallel claim builders share this file: re-read after writing and re-apply if another writer's save dropped it.
+  for (let i = 0; i < 5; i++) {
+    const pool = readPool();
+    const prev = (pool[profile] || []).find((e) => e.claim === entry.claim) || {};
+    pool[profile] = (pool[profile] || []).filter((e) => e.claim !== entry.claim).concat({ ...prev, ...entry }); // keep policy/lossDate on re-check
+    fs.mkdirSync(path.dirname(POOL_FILE), { recursive: true });
+    fs.writeFileSync(POOL_FILE, JSON.stringify(pool, null, 2));
+    const t = Date.now() + 300 + Math.floor(Math.random() * 700); while (Date.now() < t) { /* let a concurrent save land */ }
+    const now = (readPool()[profile] || []).find((e) => e.claim === entry.claim);
+    if (now && Object.keys(entry).every((k) => JSON.stringify(now[k]) === JSON.stringify(entry[k]))) return;
+  }
 }
 // A policy FNOL can't use (claimant numbers exhausted, not in this environment, …) — remembered on the share so no
 // later run tries it again.

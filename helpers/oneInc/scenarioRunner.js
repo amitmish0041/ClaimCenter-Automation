@@ -74,6 +74,12 @@ function isPaymentRecipe(recipe) {
     || (typeof s.click === 'string' && /^finish$/i.test(s.click))));
 }
 
+function shiftAmount(v, slot) {
+  const a = Number((v && v.amount) || 1.37);
+  const shifted = a <= 1 ? a - 0.01 * slot : a + 0.01 * slot;
+  return { ...(v || {}), amount: shifted.toFixed(2) };
+}
+
 async function runScenario(page, tc, recipe, ctx) {
   const started = Date.now();
   const res = {
@@ -255,7 +261,10 @@ async function execute(page, items, res, ctx, capture) {
     else if (k === 'select') await W.select(page, v[0], v[1]);
     else if (k === 'fill') await W.fill(page, v[0], await resolveValue(page, v[1]));
     else if (k === 'answer') await W.answer(page, v[0], v[1]);
-    else if (k === 'step2') await W.completePaymentsStep(page, v);
+    // Positive cases sharing a claim (testClaims.plan posGroups) each pay a different amount — the same payee + amount
+    // twice raises "Possible duplicate payment found" (CONFIRMED 2026-10-21). Slot k: ≤ $1.00 goes DOWN k cents (stays
+    // within the $1.00 approval authority), anything else UP k cents.
+    else if (k === 'step2') await W.completePaymentsStep(page, ctx.amountSlot ? shiftAmount(v, ctx.amountSlot) : v);
     else if (k === 'click') await W.clickButton(page, v);
     else if (k === 'nav') await W.navigate(page, v);
     else if (k === 'menu') {
@@ -454,6 +463,9 @@ async function validate(page, v, res, ctx, capture, record, dirty) {
     v.expect ? 'error displayed' : 'no error', actual, result, extra));
   if (!advanced) {
     if (v.expect && v.expect.test(text)) return rowFor(`shown at Next: ${text.slice(0, 300)}`, 'PASS');
+    // An earlier payment on a SHARED claim (testClaims posGroups/negGroups) with the same payee + amount — not a verdict
+    // on this case's rule (it hid the expected message, GCCM-1003 TC-083, 2026-10-21).
+    if (/Possible duplicate payment found/i.test(text)) throw new W.Blocked(`ClaimCenter stopped on "Possible duplicate payment found" (an earlier payment on claim ${res.claim} matches) — not a verdict on this rule`);
     if (!v.expect) return rowFor(`error(s) at Next: ${text.slice(0, 300) || '(wizard did not advance, no message)'}`, 'FAIL');
     // The payment WAS refused, but by a different business rule (PMS…, "not allowed", "must…", amount mismatch) — a
     // verdict on the scenario, not a missing prerequisite: FAIL, showing the rule that fired, for the BA to confirm.

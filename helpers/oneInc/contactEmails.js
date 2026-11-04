@@ -130,6 +130,10 @@ async function setAllContactEmails(page) {
   const contacts = await contactNames(page);
   const done = [];
   for (const { name, roles } of contacts) {
+    // Agents / vendors / lienholders / attorneys: never a person payee needing payment contact details (the warning is
+    // "payees other than vendor"), an agency's e-mail cannot even be saved ("Tax ID (EIN) missing"), and each one costs
+    // ~1 min of claim setup — skipped (2026-11-03, setup time 11 min/claim).
+    if (KEEP_LINKED.test(roles) && !PARTY_ROLES.test(roles)) { done.push(`${name}: skipped (${roles.slice(0, 40)})`); continue; }
     try {
       await openContact(page, name);
       const body = await page.evaluate(() => document.body.innerText || '');

@@ -134,7 +134,17 @@ for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnolAs && !F
     for (let i = 1; made < count && i <= count + 3 && !envDown; i++) {
       const started = Date.now();
       let claim = null;
-      const pol = claimPicker.policyCandidates(profile, { exclude: tried })[0];
+      // Parallel builders (testClaims.provision, ONEINC_PROVISION_SLICE="k/W"): builder k takes every W-th policy, so two
+      // never file on the same policy at once.
+      const [sk, sw] = String(process.env.ONEINC_PROVISION_SLICE || '0/1').split('/').map(Number);
+      const cands = claimPicker.policyCandidates(profile, { exclude: tried });
+      let pol = (sw > 1 ? cands.filter((_, j) => j % sw === sk) : cands)[0];
+      // Fewer policies than builders (PROP_PA had one — two builders filed the same policy + loss date, 2026-11-03): share
+      // the policy but move this builder's loss date back k days so the claims differ.
+      if (!pol && cands[0]) {
+        const d = new Date(cands[0].lossDate); d.setDate(d.getDate() - sk);
+        pol = { ...cands[0], lossDate: `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}` };
+      }
       if (!pol) { console.log(`[Provision] ${profile}: no unused policy left in the TEST claim list`); break; }
       tried.push(pol.policyNumber);
       try {
@@ -164,7 +174,8 @@ for (const [name, p] of Object.entries(claimPicker.PROFILES)) if (p.fnolAs && !F
         const chk = await checkClaim(page, claim, { prepare: true, lienholders: /^(AUTO_LIEN|PROP_MORT)$/.test(profile), profile });
         // status Unused: stock for the next run (helpers/oneInc/testClaims.js) — a run marks it Used when it takes it.
         const entry = { claim, policy: policyNumber, lossDate: pol.lossDate, basedOn: pol.basedOn, createdAt: new Date().toISOString(), status: 'Unused', usable: chk.usable, data: chk.data, payees: chk.payees.map((p) => p.name),
-          payeeWithDetails: chk.payeeWithDetails, reserveLines: chk.reserveLines, repaired: chk.repaired, problem: chk.problem };
+          payeeWithDetails: chk.payeeWithDetails, reserveLines: chk.reserveLines, repaired: chk.repaired, problem: chk.problem,
+          ...(process.env.ONEINC_RESERVED_FOR ? { reservedFor: process.env.ONEINC_RESERVED_FOR } : {}) }; // made FOR a run: no other run's stock pick takes it
         claimPicker.addToPool(profile, entry);
         summary.push({ profile, ...entry });
         if (chk.usable) made++;

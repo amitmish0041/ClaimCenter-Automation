@@ -28,16 +28,52 @@ function canFnol(profile) {
 
 // What the selected scenarios need, per claim type: payment scenarios one claim each, read-only ones one shared claim
 // (shareFresh types: one claim for everything).
+// A NEGATIVE payment scenario: every validate step expects an error (the rule refuses Finish, so no payment is saved)
+// and no step changes the claim (no finish / void / escalate / add / set / clear … call, no Finish click). Those share a
+// claim, NEG_PER_CLAIM at a time, instead of one new claim each (user direction 2026-11-03: 76 new claims for
+// 763+803 took ~11 min each).
+const NEG_PER_CLAIM = Math.max(1, Number(process.env.ONEINC_NEG_PER_CLAIM || 5));
+const MUTATES = /finish|void|delete|create|ensure|escalate|clear|add|set|apply|unlink|remove|close|reopen|link|approve|reject/i;
+function isNegativeOnly(recipe) {
+  const all = [...((recipe && recipe.steps) || []), ...((recipe && recipe.checks) || [])].filter(Boolean);
+  const vals = all.filter((s) => s.validate);
+  if (!vals.length || vals.some((s) => !(s.validate && s.validate.expect))) return false;
+  if (all.some((s) => typeof s.click === 'string' && /^finish$/i.test(s.click))) return false;
+  // ContactManager vendor edits (reverted from the ledger) and picking a vendor change no claim data.
+  const claimSafe = (fn) => /^contactManager\.|selectVendorByTaxId$|restoreVendors$/.test(fn);
+  return !all.some((s) => Array.isArray(s.call) && !claimSafe(String(s.call[0])) && MUTATES.test(String(s.call[0])));
+}
+// A SIMPLE POSITIVE: submits one payment and only checks "no validation error" — no other check, no setup call that
+// changes the claim, no Finish-observe / void / escalate. Those share a claim POS_PER_CLAIM at a time, each with its own
+// amount (scenarioRunner shiftAmount), so CC's duplicate-payment check never matches (user direction 2026-11-03).
+const POS_PER_CLAIM = Math.max(1, Number(process.env.ONEINC_POS_PER_CLAIM || 3));
+function isSimplePositive(recipe) {
+  const steps = (recipe && recipe.steps) || [];
+  const vals = steps.filter((s) => s && s.validate);
+  if (vals.length !== 1 || vals[0].validate.expect) return false;
+  if (((recipe && recipe.checks) || []).length) return false;
+  if (steps.some((s) => s && typeof s.click === 'string' && /^finish$/i.test(s.click))) return false;
+  const okCall = (fn) => /^contactManager\.|selectVendorByTaxId$|restoreVendors$|fillRequired$/.test(fn);
+  return !steps.some((s) => s && Array.isArray(s.call) && !okCall(String(s.call[0])));
+}
+// Groups of negative ids, NEG_PER_CLAIM per claim.
+const negGroups = (negIds) => { const g = []; for (let i = 0; i < negIds.length; i += NEG_PER_CLAIM) g.push(negIds.slice(i, i + NEG_PER_CLAIM)); return g; };
+
 function plan(ids, RECIPES, isPaymentRecipe) {
   const out = {};
   for (const id of ids) {
     const profile = RECIPES[id].profile;
-    const p = out[profile] = out[profile] || { profile, fresh: canFnol(profile), payIds: [], readIds: [] };
+    const p = out[profile] = out[profile] || { profile, fresh: canFnol(profile), payIds: [], negIds: [], posIds: [], readIds: [] };
     const share = !!(claimPicker.PROFILES[profile] || {}).shareFresh;
-    (share || !isPaymentRecipe(RECIPES[id]) ? p.readIds : p.payIds).push(id);
+    if (share || !isPaymentRecipe(RECIPES[id])) p.readIds.push(id);
+    else if (isNegativeOnly(RECIPES[id])) p.negIds.push(id);
+    else if (isSimplePositive(RECIPES[id])) p.posIds.push(id);
+    else p.payIds.push(id);
   }
   for (const p of Object.values(out)) {
-    p.want = p.payIds.length + (p.readIds.length ? 1 : 0);
+    p.negGroups = negGroups(p.negIds);
+    p.posGroups = []; for (let i = 0; i < p.posIds.length; i += POS_PER_CLAIM) p.posGroups.push(p.posIds.slice(i, i + POS_PER_CLAIM));
+    p.want = p.payIds.length + p.negGroups.length + p.posGroups.length + (p.readIds.length ? 1 : 0);
     p.unused = unused(p.profile);
     p.toCreate = p.fresh ? Math.max(0, p.want - p.unused.length) : 0;
   }
@@ -45,9 +81,13 @@ function plan(ids, RECIPES, isPaymentRecipe) {
 }
 
 // Unused, usable claims of a type, oldest first (so stock does not sit around).
-function unused(profile) {
+// A claim another run is building for itself (reservedFor, set while it provisions) is not stock for anyone else —
+// concurrent runs took each other's new claims ("only 2 of 3 new AUTO_PA claim(s)", 2026-11-03). Reservations older
+// than 12 h (a run that died) are released.
+function unused(profile, runId = '') {
+  const stale = (e) => !e.createdAt || Date.now() - new Date(e.createdAt).getTime() > 12 * 3600000;
   return (claimPicker.readPool()[profile] || [])
-    .filter((e) => e.usable && e.status === 'Unused')
+    .filter((e) => e.usable && e.status === 'Unused' && (!e.reservedFor || e.reservedFor === runId || stale(e)))
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
     .map((e) => e.claim);
 }
@@ -98,11 +138,22 @@ async function exportSheet() {
 // Create `count` new claims of a type (FNOL + declared data). Always as the .env adjuster (a claim created under su is
 // owned by Super User — no examiner number, payments refused), assigned to Benjamin Smith unless CC_ASSIGNEE_NAME says
 // otherwise. Resolves with the provisioner's exit code (3 = TEST is not filing claims right now).
-function provision(profile, count, { log = console.log, headless = false } = {}) {
+// Claims are built by up to ONEINC_PROVISION_WORKERS (default 3) browsers at once, each on its own slice of the policy
+// list (~11 min a claim, one at a time made 76 claims a 14-hour job — 2026-11-03). Resolves with the worst exit code.
+const PROVISION_WORKERS = Math.max(1, Math.min(4, Number(process.env.ONEINC_PROVISION_WORKERS || 3)));
+async function provision(profile, count, opts = {}) {
+  const w = Math.min(PROVISION_WORKERS, count);
+  if (w <= 1) return provisionOne(profile, count, opts);
+  const share = (k) => Math.floor(count / w) + (k < count % w ? 1 : 0);
+  const codes = await Promise.all([...Array(w).keys()].map((k) => new Promise((r) => setTimeout(r, k * 20000))
+    .then(() => provisionOne(profile, share(k), { ...opts, slice: `${k}/${w}` }))));
+  return codes.includes(3) ? 3 : Math.max(...codes.map((c) => Number(c) || 0));
+}
+function provisionOne(profile, count, { log = console.log, headless = false, slice = '', runId = '' } = {}) {
   const { spawn } = require('child_process');
   const root = path.join(__dirname, '..', '..');
   const dotenvUser = (() => { try { return require('dotenv').parse(fs.readFileSync(path.join(root, '.env'))); } catch (_) { return {}; } })();
-  const env = { CC_ASSIGNEE_NAME: 'Benjamin Smith', ...process.env, ...(dotenvUser.CC_USER && dotenvUser.CC_PASS ? { CC_USER: dotenvUser.CC_USER, CC_PASS: dotenvUser.CC_PASS } : {}) };
+  const env = { CC_ASSIGNEE_NAME: 'Benjamin Smith', ...process.env, ...(dotenvUser.CC_USER && dotenvUser.CC_PASS ? { CC_USER: dotenvUser.CC_USER, CC_PASS: dotenvUser.CC_PASS } : {}), ...(slice ? { ONEINC_PROVISION_SLICE: slice } : {}), ...(runId ? { ONEINC_RESERVED_FOR: runId } : {}) };
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [path.join(root, 'scripts', 'provisionOneIncClaims.js'), '--profiles', profile, '--count', String(count),
       ...(headless ? ['--headless'] : [])], { cwd: root, env });
@@ -119,4 +170,4 @@ function provision(profile, count, { log = console.log, headless = false } = {})
   });
 }
 
-module.exports = { canFnol, plan, unused, markUsed, exportSheet, provision, SHEET_FILE };
+module.exports = { canFnol, plan, unused, markUsed, exportSheet, provision, SHEET_FILE, isNegativeOnly };

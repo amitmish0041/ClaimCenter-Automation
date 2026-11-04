@@ -108,6 +108,14 @@ async function checkClaim(page, claim, { prepare = false, lienholders = false, p
       await W.openClaim(page, claim, log);
     };
     if (prepare) await validate();
+    // Test data that failed BEFORE Ability to pay (a reserve on a just-added exposure is refused silently, adjuster and
+    // admin, until a passing Ability to pay raises the exposure's validation level — ND_PA_MED, 2026-11-03): retry once.
+    if (prepare && items.length && (out.data || []).some((d) => !d.ok)) {
+      const again = await require('./testData').ensure(page, claim, items.filter((it) => (out.data.find((d) => d.id === it.id) || {}).ok === false), { build: true, log, out });
+      out.data = out.data.map((d) => again.find((a) => a.id === d.id) || d);
+      again.filter((d) => d.note).forEach((d) => out.repaired.push(`${d.label} (after Ability to pay): ${d.note}`));
+      await W.openClaim(page, claim, log);
+    }
     // Then fix what "New Payment Error" names and retry (fixing one can reveal the next). Also used after a reserve
     // is added — a new exposure re-opens the Surcharging screen (CONFIRMED 2026-10-21).
     const openWizard = async () => { for (let round = 0; ; round++) {
