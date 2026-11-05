@@ -19,7 +19,23 @@ const STATE_DEFAULTS = {
   IA: { city: 'Des Moines',  county: 'Polk',       zip: '50301' },
   IN: { city: 'Indianapolis',county: 'Marion',     zip: '46201' },
   GA: { city: 'Atlanta',     county: 'Fulton',     zip: '30301' },
+  OH: { city: 'Columbus',    county: 'Franklin',   zip: '43215' },
+  MD: { city: 'Baltimore',   county: 'Baltimore',  zip: '21201' },
+  NM: { city: 'Albuquerque', county: 'Bernalillo', zip: '87102' },
+  WI: { city: 'Madison',     county: 'Dane',       zip: '53703' },
+  IL: { city: 'Springfield', county: 'Sangamon',   zip: '62701' },
+  TX: { city: 'Austin',      county: 'Travis',     zip: '78701' },
+  ME: { city: 'Augusta',     county: 'Kennebec',   zip: '04330' },
+  SD: { city: 'Pierre',      county: 'Hughes',     zip: '57501' },
+  NC: { city: 'Raleigh',     county: 'Wake',       zip: '27601' },
+  UT: { city: 'Salt Lake City', county: 'Salt Lake', zip: '84101' },
+  TN: { city: 'Nashville',   county: 'Davidson',   zip: '37201' },
+  AL: { city: 'Montgomery',  county: 'Montgomery', zip: '36104' },
+  SC: { city: 'Columbia',    county: 'Richland',   zip: '29201' },
 };
+const STATE_NAMES = { PA: 'Pennsylvania', MI: 'Michigan', VA: 'Virginia', DE: 'Delaware', IA: 'Iowa', IN: 'Indiana', GA: 'Georgia',
+  OH: 'Ohio', MD: 'Maryland', NM: 'New Mexico', WI: 'Wisconsin', IL: 'Illinois', TX: 'Texas', ME: 'Maine', SD: 'South Dakota',
+  NC: 'North Carolina', UT: 'Utah', TN: 'Tennessee', AL: 'Alabama', SC: 'South Carolina' };
 
 // ── fillEmptyTextboxesByLabel ────────────────────────────────────────────────
 // Sweeps every empty visible textbox/textarea on the CURRENT screen and fills
@@ -2541,9 +2557,16 @@ async function searchPolicy(page, policyNumber, lossDate, policyType) {
     // only failed much later with "wizard still open on Step 1" and no
     // validation text anywhere. An unverified navigation makes every subsequent
     // symptom misleading.
-    const stepAfterNext = async () => page.evaluate(() =>
-      ((document.body.innerText || '').match(/Step\s*\d+\s*of\s*5[^\n]*/i) || [''])[0].trim()
-    ).catch(() => '');
+    // Read the visible page HEADING first: the body text can still hold a stale "Step 1 of 5" (screen-reader
+    // announcement) after the wizard has moved on — 2026-11-05 CPO-8882575 sat on Step 2 and was reported stuck.
+    const stepAfterNext = async () => page.evaluate(() => {
+      const re = /Step\s*\d+\s*of\s*5[^\n]*/i;
+      for (const h of document.querySelectorAll('h1, [role="heading"]')) {
+        const t = (h.innerText || '').trim();
+        if (h.offsetParent && re.test(t)) return t.match(re)[0].trim();
+      }
+      return ((document.body.innerText || '').match(re) || [''])[0].trim();
+    }).catch(() => '');
     let step = await stepAfterNext();
     if (/Step\s*1\s*of\s*5/i.test(step)) {
       // The wizard's own left-nav entry is an alternative route once Find Policy
@@ -2572,6 +2595,12 @@ async function searchPolicy(page, policyNumber, lossDate, policyType) {
         await page.getByRole('heading', { name: /Step\s*2\s*of\s*5/i }).first().waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
         step = await stepAfterNext();
       }
+    }
+    // Legacy (mainframe) policies can take well over 20 s to load Step 2 — BOP-8845704 was on Step 2 by the time the
+    // error below was raised. Give it up to 60 s before calling the wizard stuck.
+    if (/Step\s*1\s*of\s*5/i.test(step) || !step) {
+      await page.getByRole('heading', { name: /Step\s*[2-5]\s*of\s*5/i }).first().waitFor({ state: 'visible', timeout: 60000 }).catch(() => {});
+      step = await stepAfterNext();
     }
     if (/Step\s*1\s*of\s*5/i.test(step) || !step) {
       // CC's Validation Results panel is a COLLAPSED tab at the edge of the
@@ -3920,6 +3949,33 @@ async function completeCloudLossDetails(page) {
   return true;
 }
 
+// A legacy policy (CAA-8845970, 2026-11-05) offers no policy location, so the Loss Location picker's only choice is
+// "New..." and its blank address fails "Missing required field City". Fill an empty address for the loss state.
+async function fillEmptyLossAddressCloud(page, lossState = 'PA') {
+  const d = STATE_DEFAULTS[lossState] || STATE_DEFAULTS.PA;
+  const city = page.locator('input[name$="-City"], input[name$="_City"], input[name$="City"]').first();
+  if (!await city.isVisible().catch(() => false)) return;
+  if (((await city.inputValue().catch(() => 'x')) || '').trim()) return;
+  const filled = [];
+  const fill = async (sel, v, label) => {
+    const el = page.locator(sel).first();
+    if (await el.isVisible().catch(() => false) && !((await el.inputValue().catch(() => 'x')) || '').trim()) {
+      await el.fill(v).catch(() => {}); filled.push(label);
+    }
+  };
+  await fill('input[name*="AddressLine1"]', '100 Main St', 'Address 1');
+  await fill('input[name$="City"]', d.city, 'City');
+  await fill('input[name*="PostalCode"]', d.zip, 'ZIP');
+  for (const sel of ['select[name$="State"]', 'select[name*="Jurisdiction"]']) {
+    const el = page.locator(sel).first();
+    if (await el.isVisible().catch(() => false) && !/[a-z]/i.test(await el.locator('option:checked').textContent().catch(() => '') || '')
+        || /none/i.test(await el.locator('option:checked').textContent().catch(() => '') || '')) {
+      await el.selectOption({ label: STATE_NAMES[lossState] || 'Pennsylvania' }).then(() => filled.push(sel)).catch(() => {});
+    }
+  }
+  console.log('fillLossDetailsCloud: empty loss address filled for ' + lossState + ' — ' + filled.join(', '));
+}
+
 async function fillLossDetailsCloud(page, {
   lossState = 'PA',
   lossCauseCode = '',
@@ -4073,6 +4129,7 @@ async function fillLossDetailsCloud(page, {
 
   // Address Picker — selects a policy location, auto-filling City/State/Jurisdiction
   await selectFirstOption(page, '[name*="Address_Picker"],[name*="addressPicker"],[name*="LossLocation"]');
+  await fillEmptyLossAddressCloud(page, lossState);
 
   // Next → Step 4 (Parties Involved) — only one click here.
   // finishFNOL handles Step 4→5 and the Step 5 "Save & Assign" submission.
