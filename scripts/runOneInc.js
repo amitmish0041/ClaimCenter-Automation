@@ -321,6 +321,12 @@ function annotate(r, story, readiness) {
         log(`[OneInc] fresh data: ${profile} — creating ${need} new claim(s) with their test data (${payIds.length} payment scenario(s) need one each, ${negIds.length} negative(s) share ${negGroups.length}, ${readIds.length ? `${readIds.length} screen check(s) share one` : 'no screen checks'}); each FNOL takes a few minutes`);
         code = await testClaims.provision(profile, need, { log, headless: arg('headless', false), runId });
         made = (claimPicker.readPool()[profile] || []).filter((e) => e.usable && e.status === 'Unused' && e.reservedFor === runId).map((e) => e.claim).slice(0, need);
+        // Short (a builder crashed or a policy failed FNOL) and TEST is up: one more pass for the shortfall.
+        if (made.length < need && code !== 3) {
+          log(`[OneInc] fresh data: ${profile} — got ${made.length} of ${need}; filing the other ${need - made.length} once more`);
+          code = await testClaims.provision(profile, need - made.length, { log, headless: arg('headless', false), runId });
+          made = (claimPicker.readPool()[profile] || []).filter((e) => e.usable && e.status === 'Unused' && e.reservedFor === runId).map((e) => e.claim).slice(0, need);
+        }
         testClaims.markUsed(profile, made, { runId });
         log(`[OneInc] fresh data: ${profile} — new claim(s): ${made.join(', ') || 'none'}`);
       }
@@ -397,8 +403,9 @@ function annotate(r, story, readiness) {
       r = { ...results.get(tc.scenarioId), status: 'FAIL', reason: `automation crashed: ${e.message.split('\n')[0]}`, error: e.message, stack: e.stack, automationError: true };
     }
     // A case that changed a ContactManager vendor reverts it whatever its result: the restore in its checks never ran
-    // when the case BLOCKED, leaving ESQUIRE's Levy attached for later cases (2026-11-03).
-    if ((RECIPES[tc.scenarioId].steps || []).some((s) => s && Array.isArray(s.call) && /^contactManager\.(set|apply)/.test(String(s.call[0])))) {
+    // when the case BLOCKED, leaving ESQUIRE's Levy attached for later cases (2026-11-03). Checks count too: VBR.036 changes
+    // BAIKOW's address in its checks, and a BLOCKED TC-189 left it changed (2026-11-06).
+    if ([...(RECIPES[tc.scenarioId].steps || []), ...(RECIPES[tc.scenarioId].checks || [])].some((s) => s && Array.isArray(s.call) && /^contactManager\.(set|apply)/.test(String(s.call[0])))) {
       const left = await require('../helpers/oneInc/contactManager').restoreVendors(pages[w]).catch((e) => `restore failed: ${e.message.split('\n')[0]}`);
       if (left) log(`[OneInc] ${tc.scenarioId}: ContactManager restore — ${String(left).slice(0, 200)}`);
     }

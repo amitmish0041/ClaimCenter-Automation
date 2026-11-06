@@ -120,6 +120,14 @@ async function makePayment(page, opts = {}) {
       res.messages = [...s2.messages, s2.south].filter(Boolean);
       throw new W.Blocked(`payment step refused Next: ${res.messages.join(' / ').slice(0, 300) || 'no message'}`);
     }
+    // Step 3 "Is this payment to an attorney or representative of the insured or claimant AND is the settlement payment
+    // or payment of a judgment?" — the check's represented flag (DMTV0050-0053 compliance letters, 2026-11-06).
+    if (opts.represented) {
+      const q = page.locator('.gw-InputWidget').filter({ hasText: /attorney or representative/i });
+      await q.getByRole('radio', { name: 'Yes', exact: true }).first().click({ force: true });
+      await W.settle(page, 1500);
+      res.fields['Payment to attorney/representative (settlement)?'] = 'Yes';
+    }
     await W.answerUnansweredNo(page);
     for (let r = 0; r < 2; r++) if (!(await W.fillRequiredEmpties(page)).length) break;
     const inv = findField(await readScreen(page), 'Invoice Number/Remarks');

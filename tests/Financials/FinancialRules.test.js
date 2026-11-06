@@ -557,10 +557,11 @@ async function claimLevelRecoveryReserve(page) {
   await W.settle(page, 3500);
   // A claim that already has recovery reserves lists them first; Add appends the new row LAST (2026-11-06) — always add
   // one and work on the highest row index.
-  // The screen may already show an empty row (as the Reserve screen does) — use it; Add only when there is none, so
-  // no second empty row is left to fail the Save (application error, 2026-11-06).
-  const hasBlank = await page.evaluate(() => [...document.querySelectorAll('select[name*="EditableRecoveryReservesLV-"][name$="-Exposure"]')].some((x) => x.offsetParent && /claim-level|none|^$/i.test(((x.options[x.selectedIndex] || {}).text || '').trim()) && !x.disabled));
-  if (!hasBlank) { await page.getByRole('button', { name: 'Add', exact: true }).first().click(); await W.settle(page, 3000); }
+  // ALWAYS Add and use only the NEW (last) row. Reusing an "empty-looking" row matched the claim's EXISTING recovery
+  // reserve on PA-PA-01-26-0749033 and changed it $10,000 → $100 (2026-11-06) — never touch existing rows.
+  const nBefore = await page.evaluate(() => new Set([...document.querySelectorAll('[name*="EditableRecoveryReservesLV-"]')].map((e) => (e.name.match(/EditableRecoveryReservesLV-(\d+)-/) || [])[1]).filter(Boolean)).size);
+  await page.getByRole('button', { name: 'Add', exact: true }).first().click();
+  await W.settle(page, 3000);
   const ix = await page.evaluate(() => Math.max(-1, ...[...document.querySelectorAll('[name*="EditableRecoveryReservesLV-"]')].map((e) => Number((e.name.match(/EditableRecoveryReservesLV-(\d+)-/) || [])[1])).filter((n) => !Number.isNaN(n))));
   // Plan in the page, set through Playwright: a DOM value change was not taken by CC (the default Subrogation category
   // stayed, 2026-11-06 rerun).
@@ -578,6 +579,7 @@ async function claimLevelRecoveryReserve(page) {
     }
     return out;
   }, ix);
+  if (ix < nBefore) throw new Error(`Recovery Reserve: Add did not create a new row (rows before ${nBefore}, highest index ${ix}) — not touching existing rows`);
   const picked = {};
   for (const p of plan) {
     await page.locator(`select[name="${p.name}"]`).first().selectOption(p.value).catch(() => {});
@@ -984,3 +986,51 @@ test.describe('E Reinsurance - WC activity', () => {
     if (added.length) await R.check(page, ti, { description: 'Subject shows exposure type, amount and RE company number', expected: 'Reinsurance Reserve <exposure type> for $<amount> to <RE company>', actual: added[0], ok: /Reinsurance Reserve .+ for \$[\d,.]+ to \d+/i.test(added[0]) });
   });
 });Object.assign(META, { 'TR-564': { ...FIN40, name: 'TC062_DMTPS526: Reinsurance reserve activity for WC claims with an RE company', expected: 'reinsurance_reserve activity whose subject shows exposure type, amount and RE company number' } });
+
+// ── C Payments: TR-558 state compliance letters (DMTV0050-0053) ─────────────────────────────────────────────────────
+// The rule keys off the CHECK's represented flag — step 3 "Is this payment to an attorney or representative … AND is
+// the settlement payment or payment of a judgment?" = Yes — so any auto claim in the state with a 3rd-party claimant
+// on an open reserve line works. Candidates: TEST claim list (V: drive) per state; PA-MD-01-26-0746804 is a
+// represented MD claim found with Advanced Search.
+Object.assign(META, { 'TR-558': { ...FIN40, name: 'TC056_DMTV0050-0053: State compliance letter activities when a represented claimant is paid (Auto PA/VA/MD/GA)', expected: 'PA / VA / MD / GA Compliance Letter activity created for the represented-claimant payment; not duplicated by a second payment' } });
+const COMPLIANCE = {
+  PA: { rule: 'DMTV0051', claims: ['PA-PA-01-26-0749042', 'PA-PA-01-26-0748059', 'PA-PA-01-26-0748058', 'PA-PA-01-26-0748056'] },
+  VA: { rule: 'DMTV0050', claims: ['PA-VA-85-26-0747149', 'PA-VA-85-26-0747146', 'PA-VA-85-26-0747145', 'PA-VA-85-26-0747142'] },
+  MD: { rule: 'DMTV0052', claims: ['PA-MD-01-26-0746804', 'PA-MD-01-26-0747723', 'PA-MD-01-26-0747419', 'PA-MD-01-26-0747417'] },
+  GA: { rule: 'DMTV0053', claims: ['PA-GA-03-26-0747705', 'PA-GA-03-26-0747674', 'PA-GA-03-26-0747158', 'PA-GA-10-25-0746646'] },
+};
+test.describe('C Payments - compliance letters', () => {
+  test('TR-558 [TC056 / DMTV0050-0053]: compliance letter activity when a represented claimant is paid (PA / VA / MD / GA)', async ({ page }, ti) => {
+    let first = true;
+    const fails = [];
+    for (const [st, { rule, claims }] of Object.entries(COMPLIANCE)) {
+      let done = false;
+      for (const cn of claims) {
+        if (first) { await R.asAdmin(page, cn); first = false; } else await B.openExistingClaim(page, cn).catch(() => {});
+        const tx = await R.transactionRows(page, cn).catch(() => []);
+        const third = tx.map((r) => (r.match(/\(\d+\) 3rd Party [^-]+- ([A-Za-z][A-Za-z .'-]+?) (Collision|Property Damage|Liability|Auto|Bodily|Comprehensive|Uninsured|Underinsured|Medical|Claim Cost)/) || [])[1]).find(Boolean);
+        if (!third) { R.note(ti, st, `${cn}: no 3rd-party claimant on a reserve line — next claim`); continue; }
+        const actRe = new RegExp(`${st}\\s*Compliance|Compliance Letter|${st} compliance`, 'i');
+        const before = (await R.workplanRows(page, cn)).filter((r) => actRe.test(r));
+        await B.openExistingClaim(page, cn);
+        let res; let err = '';
+        try { res = await P.makePayment(page, { payee: third, payeeType: /^Claimant$/, reserveLine: 'match:3rd Party', represented: true }); } catch (e) { err = e.message.split('\n')[0]; }
+        if (!res || !res.finished) { R.note(ti, st, `${cn}: payment to ${third} not made — ${err || (res && res.messages.join(' | '))}`); await B.openExistingClaim(page, cn).catch(() => {}); continue; }
+        if (!ti._fr || !ti._fr.claim) R.setClaim(ti, cn, 'su (admin)');
+        await B.openExistingClaim(page, cn);
+        const row = await P.checkRow(page, res.amount, third);
+        await R.step(page, ti, `${st}: ${cn} — $${res.amount} payment to the claimant ${third} on the 3rd-party line, "payment to an attorney or representative … settlement" = Yes → ${row ? `${row.number || '(no number)'} ${row.status}` : 'not listed'}${res.messages.length ? ` (CC said: ${res.messages.join(' | ').slice(0, 200)})` : ''}`);
+        await page.waitForTimeout(5000);
+        const after = (await R.workplanRows(page, cn)).filter((r) => actRe.test(r));
+        const added = after.filter((r) => !before.includes(r));
+        await R.step(page, ti, `${st}: compliance activities before ${before.length}, after ${after.length} — new: ${added.join(' | ').slice(0, 300) || 'none'}`);
+        await R.check(page, ti, { description: `${st}: ${rule} ${st} Compliance Letter activity for the represented-claimant payment`, expected: `New "${st} Compliance" activity`, actual: added.join(' | ').slice(0, 300) || (before.length ? `none new (already ${before.length}: ${before[0].slice(0, 150)})` : 'none'), ok: added.length > 0 }).catch((e) => fails.push(e.message.split('\n')[0]));
+        done = true;
+        break;
+      }
+      if (!done) await R.check(page, ti, { description: `${st}: a claim with a 3rd-party claimant to pay`, expected: 'payment made', actual: 'no candidate claim could be paid (see notes)', ok: false });
+    }
+    if (fails.length) throw new Error('Compliance letter not created for: ' + fails.join(' || '));
+    ti.annotations.push({ type: 'manual', description: 'Step 7 (no duplicate when the activity already exists) is shown by the before/after counts on claims that already had one; a deliberate second payment was not made.' });
+  });
+});

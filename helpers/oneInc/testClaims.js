@@ -166,8 +166,13 @@ function provisionOne(profile, count, { log = console.log, headless = false, sli
       buf = lines.pop();
       for (const line of lines) if (/^\[(Provision|TestData)\]/.test(line)) log(line);
     });
-    child.stderr.on('data', () => {});
-    child.on('close', resolve);
+    // A builder that dies says so in the run log: one of three crashed silently and the run got 5 of 8 claims (2026-11-06).
+    let err = '';
+    child.stderr.on('data', (d) => { err = (err + d.toString()).slice(-2000); });
+    child.on('close', (code) => {
+      if (code && code !== 3) log(`[Provision] ${profile}${slice ? ` builder ${slice}` : ''}: exited with code ${code}${err.trim() ? ` — ${err.trim().split(/\r?\n/).slice(-3).join(' | ').slice(0, 600)}` : ''}`);
+      resolve(code);
+    });
     child.on('error', () => resolve(1));
   });
 }
