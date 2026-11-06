@@ -193,7 +193,16 @@ async function openQuickOnExpenseRow(page) {
   testOnly('openQuickOnExpenseRow');
   const rows = await X.reserveRows(page).catch(() => []);
   let made = '';
-  if (!rows.some((r) => /expense/i.test(r.cost))) {
+  if (!rows.some((r) => /expense/i.test(r.cost))) made = `${await buildExpenseRow(page)}; `;
+  await X.openQuickOnRow(page, 'expense', 'any');
+  return `${made}opened Quick Payment on the expense row`;
+}
+// The build half of openQuickOnExpenseRow, also used by testData's reserveRow item (fresh claims for the Quick expense
+// cases — the New Reserve screen offers only Claim Cost on cloud, so a reserve cannot make the row; 2026-11-06).
+// costType: 'Adjuster Expense' (default) or 'Legal Expense'.
+async function buildExpenseRow(page, costType = 'Adjuster Expense') {
+  testOnly('buildExpenseRow');
+  {
     if (process.env.ONEINC_ALLOW_FINISH !== '1') throw new W.Blocked('building the expense reserve row submits a payment — enable ONEINC_ALLOW_FINISH=1 (TEST only)');
     const amt = `1.${41 + Math.floor(Math.random() * 58)}`;
     await W.openPayment(page, 'actions');
@@ -201,7 +210,7 @@ async function openQuickOnExpenseRow(page) {
       await W.selectPayee(page, 'vendor');
       await W.nextFillingServicePeriod(page);
       await W.selectReserveLine(page, 'new');
-      await W.select(page, 'Cost Type', 'Adjuster Expense');
+      await W.select(page, 'Cost Type', costType);
       await W.completePaymentsStep(page, { transactionType: 'First and Final', amount: amt });
       await W.nextFillingServicePeriod(page);
       await W.answerUnansweredNo(page);
@@ -224,10 +233,8 @@ async function openQuickOnExpenseRow(page) {
     } finally {
       await W.cancelWizard(page).catch(() => {});
     }
-    made = `built an Adjuster Expense reserve row with a $${amt} First and Final vendor payment; `;
+    return `built an ${costType} reserve row with a $${amt} First and Final vendor payment`;
   }
-  await X.openQuickOnRow(page, 'expense', 'any');
-  return `${made}opened Quick Payment on the expense row`;
 }
 
 // ── VBR.036 — check mailing address vs the payee's Address Book address ───────────────────────────────────────────
@@ -362,4 +369,4 @@ async function cmClaimsPayReview(page) {
   return results.map((r) => `${r.type}: ${r.result}`).join(' | ');
 }
 
-module.exports = { chooseMailedCheck, setLossCause, prepareVinIncident, selectVinLine, openQuickOnVinLine, openQuickOnExpenseRow, waitContactAddress, checkMailingAddress, cmClaimsPayReview };
+module.exports = { buildExpenseRow, chooseMailedCheck, setLossCause, prepareVinIncident, selectVinLine, openQuickOnVinLine, openQuickOnExpenseRow, waitContactAddress, checkMailingAddress, cmClaimsPayReview };

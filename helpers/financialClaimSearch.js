@@ -28,16 +28,20 @@ async function searchClaims(page, criteria = {}) {
   const sel = async (label, value) => { if (value) await W.select(page, label, value).catch((e) => { throw new Error(`Advanced Search: ${label} = ${value}: ${e.message.split('\n')[0]}`); }); };
   if (criteria.policy) await W.fill(page, 'Policy #', criteria.policy);
   await sel('Assigned To Group', criteria.group);
-  if (criteria.group) await page.getByRole('checkbox', { name: /Include Child Groups/i }).first().check().catch(() => {});
+  // "Include Child Groups" is a Yes/No radio pair (not a checkbox).
+  if (criteria.group) {
+    await page.locator('.gw-InputWidget').filter({ hasText: /Include Child Groups/ }).getByRole('radio', { name: 'Yes', exact: true }).first().click({ force: true }).catch(() => {});
+    await W.settle(page, 1000);
+  }
   await sel('Claim Status', criteria.status);
   await sel('Line of Business', criteria.lob);
   await sel('Loss Location State', criteria.lossState);
   await sel('Flagged Type', criteria.flagged);
-  // High-Risk Indicators is a multi-select <select> (not checkboxes): select the labels in it.
-  if ((criteria.indicators || []).length) {
-    const box = page.locator('.gw-InputWidget').filter({ hasText: /High-Risk Indicators/ }).locator('select').first();
-    await box.selectOption(criteria.indicators.map((label) => ({ label })));
-    await W.settle(page, 1500);
+  // High-Risk Indicators is a SHUTTLE: pick in the left list ("available items"), then "Add to selected" (2026-11-06).
+  for (const label of criteria.indicators || []) {
+    await page.locator('select[id$="IndicatorSearch_select-left"]').selectOption({ label });
+    await page.locator('[id$="IndicatorSearch_add"]').click();
+    await W.settle(page, 1200);
   }
   await page.getByRole('button', { name: 'Search', exact: true }).last().click();
   await W.settle(page, 6000);

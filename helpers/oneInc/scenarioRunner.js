@@ -167,7 +167,9 @@ async function runScenario(page, tc, recipe, ctx) {
         await W.openClaim(page, claim, ctx.log);
       }
       const caseNeeds = process.env.ONEINC_SKIP_DATA_CHECK === '1' ? [] : TD.deriveNeeds(recipe);
-      const need = [...((ctx.dataChecked[claim]) || []), ...(caseNeeds.length ? await TD.ensure(page, claim, caseNeeds, { log: ctx.log }) : [])].filter((d) => !d.ok);
+      // On a claim created for THIS run (fresh test data) a missing buildable need is built now; existing claims are never changed.
+      const fresh = Array.isArray(own) && own.includes(claim);
+      const need = [...((ctx.dataChecked[claim]) || []), ...(caseNeeds.length ? await TD.ensure(page, claim, caseNeeds, { log: ctx.log, build: fresh }) : [])].filter((d) => !d.ok);
       res.testData = ctx.dataChecked[claim] || null;
       if (need.length) throw new W.Blocked(`claim ${claim} is missing test data: ${need.map((d) => `${d.label} (${d.problem})`).join('; ')}`);
       if (caseNeeds.length) await W.openClaim(page, claim, ctx.log);

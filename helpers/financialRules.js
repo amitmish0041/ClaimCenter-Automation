@@ -369,6 +369,25 @@ function saveResult(ti, meta) {
     reason: ti.error ? String(ti.error.message || '').split('\n')[0] : '',
   };
   fs.writeFileSync(ti.outputPath('fr-result.json'), JSON.stringify(out, null, 2));
+  return writeDoc(out).catch((e) => console.log(`Word document for ${out.scenarioId} not written: ${String(e.message).split('\n')[0]}`));
+}
+
+// The case's Word document, written AS THE CASE ENDS (screenshots still on disk): the next Playwright run wipes
+// test-results/, which lost the run-7 passes on 2026-11-06. Latest run of a case overwrites its document; the result
+// JSON is kept beside it. FIN_DOCS_DIR overrides the Desktop folder.
+async function writeDoc(out) {
+  const os = require('os');
+  const path = require('path');
+  const root = process.env.FIN_DOCS_DIR || path.join(os.homedir(), 'Desktop', 'Financial test cases', 'Results');
+  const d = new Date();
+  const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const dir = path.join(root, day);
+  fs.mkdirSync(dir, { recursive: true });
+  const base = String(out.scenarioId || 'case').replace(/[^A-Za-z0-9_-]+/g, '_');
+  const { buildOne } = require('../scripts/oneIncCaseReviews');
+  fs.writeFileSync(path.join(dir, `${base}.docx`), await buildOne(out, `FinancialRules_${day}`));
+  fs.writeFileSync(path.join(dir, `${base}.json`), JSON.stringify(out, null, 2));
+  console.log(`Word document: ${path.join(dir, base + '.docx')} (${out.status})`);
 }
 
 // Approve level after level until no approval activity is left (Scott Shenk → Mallory Redcay for a $1.98M BI reserve,

@@ -52,7 +52,7 @@ const idOf = (title) => title.split(' ')[0].replace(/:$/, '');
 
 test.afterEach(async ({}, ti) => {
   const id = idOf(ti.title);
-  R.saveResult(ti, { scenarioId: id, tcId: id, ...(META[id] || { name: ti.title }) });
+  await R.saveResult(ti, { scenarioId: id, tcId: id, ...(META[id] || { name: ti.title }) });
   if (ti._fr && ti._fr.claim) R.releaseClaim(ti._fr.claim);
 });
 

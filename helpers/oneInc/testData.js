@@ -326,7 +326,12 @@ const D = {
       const ok = hit.some((r) => (state === 'zero' ? !(r.remaining > 0) : state === 'open' ? r.remaining > 0 : true));
       return ok ? '' : `none (rows: ${rows.map((r) => `${r.expo.slice(0, 25)} ${r.cost} $${r.remaining}`).join(' | ') || 'none'})`;
     },
-    build: null,
+    // An expense row (Quick Payment opens from it — 1003 UIF TC-004/010/026/043, VBR expense cases). Fresh claims never
+    // had one, so these cases were BLOCKED on new test data (team run 2026-11-06, 1003 TC-026). New Reserve offers only
+    // Claim Cost on cloud, so the row is made by a small vendor First and Final on a new expense line
+    // (manualToAuto.buildExpenseRow — submits a payment, TEST only).
+    build: state !== 'zero' && /expense/i.test(cost) && !expo
+      ? (page) => require('./manualToAuto').buildExpenseRow(page, /legal/i.test(cost) ? 'Legal Expense' : 'Adjuster Expense') : null,
     manual: state === 'zero' ? 'a reserve line drained to $0 (Final Payment on it)' : /expense/i.test(cost) ? 'an expense reserve row (vendor First and Final on a new Expense line)' : 'a reserve on that exposure (Actions › Reserve)',
   }),
 
