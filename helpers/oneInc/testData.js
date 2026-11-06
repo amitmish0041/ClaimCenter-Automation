@@ -162,6 +162,33 @@ const D = {
     },
   }),
 
+  // A third-party "Property Damage Other Than Vehicle Damage" exposure (VBR.008), added through Actions › New Exposure ›
+  // Choose by Coverage › <vehicle> › Property Damage Liability › its first leaf, "PD Liability - Other than Vehicle
+  // Damage" (CONFIRMED 2026-11-05 on PA-PA-01-26-0748936; Financials names its line "3rd Party Property Damage Other Than
+  // Vehicle Damage"). noReserve: the exposure must have no reserve line yet (VBR.013 "no prior reserve history").
+  pdExposure: ({ noReserve = false } = {}) => ({
+    id: `pdExposure${noReserve ? ':noReserve' : ''}`,
+    label: `Exposure "Property Damage Liability › PD Liability - Other than Vehicle Damage"${noReserve ? ' with no reserve line' : ''}`,
+    check: async (page) => {
+      const { k, rows } = await exposureIndex(page, /Other Than Vehicle/i);
+      if (k < 0) return `no Property Damage Other Than Vehicle Damage exposure (exposures: ${rows.map((r) => r.t.slice(0, 50)).join(' | ') || 'none'})`;
+      if (!noReserve) return '';
+      const lines = (await X().reserveRows(page)).filter((r) => /Other Than Vehicle/i.test(r.expo));
+      return lines.length ? `the Other Than Vehicle exposure already has a reserve line (${lines.map((r) => `${r.cost} ${r.remaining}`).join(', ')})` : '';
+    },
+    build: async (page, claim) => {
+      const { k } = await exposureIndex(page, /Other Than Vehicle/i);
+      if (k >= 0) return 'exposure already on the claim';
+      // The bare "Property Damage Liability" is the submenu header, not a leaf: clicking it opened no New Exposure screen
+      // and the fill then pressed Update on a Workplan activity (2026-11-05, PA-PA-01-26-0748979). Name the leaf.
+      await require('./claimCheck').addExposures(page, claim, [{ coverageLabel: 'Property Damage Liability > PD Liability - Other than Vehicle Damage' }]);
+      await W.openClaim(page, claim);
+      if ((await exposureIndex(page, /Other Than Vehicle/i)).k < 0) throw new Error('New Exposure › PD Liability - Other than Vehicle Damage did not save');
+      return 'added a Property Damage Liability › PD Liability - Other than Vehicle Damage exposure';
+    },
+    manual: 'a claim whose Other Than Vehicle Damage exposure has never been reserved (exposures cannot be deleted — use a new claim)',
+  }),
+
   // An expense cost-type reserve row (Quick Payment expense cases open from it). On a vehicle exposure the New Reserve
   // screen offers only Claim Cost (CONFIRMED 2026-10-21) — worker D made these rows with a small vendor First and Final
   // payment on a new "Expense OR First and Final" line. Not automated yet.

@@ -1129,7 +1129,10 @@ async function fillCloudNewExposure(page, coverageLabel) {
   let saved = false;
   let lastState = null;
   let warningPresses = 0;
-  for (let round = 0; round < 8 && !saved; round++) {
+  // A claimant-number refusal does not use up a round: a policy with many claims can refuse a dozen numbers in a row
+  // (151-156 all taken on policy 1002233493, 2026-11-05), which used to exhaust the 8 rounds.
+  let bumps = 0;
+  for (let round = 0; round < 8 + bumps && !saved; round++) {
     // Answer radios on EVERY round, including the first. "Reserve Required?" is
     // required from the moment the New Exposure screen opens, so gating this on
     // round > 0 guaranteed the first Update was always rejected. The incident
@@ -1155,6 +1158,7 @@ async function fillCloudNewExposure(page, coverageLabel) {
         if (bumped) {
           page._cloudUsedClaimantNumbers.add(bumped);
           if (page._policyNumber) addUsedClaimantNumber(page._policyNumber, bumped);
+          if (bumps < 40) bumps++;
           console.log('CLOUD exposure: claimant number rejected — retrying with ' + bumped);
         } else {
           console.log('CLOUD exposure: claimant number rejected but no unused number remains');

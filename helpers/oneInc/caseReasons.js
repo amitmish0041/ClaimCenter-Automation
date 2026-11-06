@@ -57,7 +57,6 @@ const REASONS = {
   'GCCM-1013/INT/TC-105': M('HiMarley case id sent in the OneInc payload (PM_CaseID) — ' + PAYLOAD),
   'GCCM-1013/INT/TC-106': M(DOC_SEND),
   'GCCM-1013/INT/TC-107': M(DOC_SEND),
-  'GCCM-1013/INT/TC-108': M(DOC_SEND + ' (needs a linked document that is not stored in ImageRight)'),
   'GCCM-1013/INT/TC-109': M(DOC_SEND),
   'GCCM-1013/INT/TC-110': M(DOC_SEND),
   'GCCM-1013/INT/TC-111': M(DOC_SEND),
@@ -72,6 +71,20 @@ const REASONS = {
   'GCCM-803/TC/TC-025': M(ALLIANCE),
   'GCCM-1003/VBR/TC-170': M(ALLIANCE),
   'GCCM-1003/VBR/TC-088': M('Quick Payment pays ONE reserve line (the Financials row it is opened from) and has no "Add Payment" (CONFIRMED 2026-10-27), so a claim cost and an expense cannot be put on one Quick check and VBR.003 cannot be reached there — BA: confirm the case does not apply to Quick Payment. The rule itself is automated on the Full Check wizard (GCCM-763 VBR TC-006)'),
+  // ── Manual → automated sweep 2026-11-05 (recipes/manualSweep.js): the cases of those groups that stay manual ──
+  // Quick Payment opens from an existing Financials reserve row, so it cannot pay an exposure with no reserve, a claim-level
+  // line, or a NEW reserve line — the Full Check versions of these rules are automated (GCCM-763 / GCCM-803).
+  'GCCM-763/VBR/TC-038': M('Every new exposure on TEST gets a $1,000 Claim Cost reserve as it is created (PD Liability - Other than Vehicle Damage, 4 claims on 2026-11-05: PA-PA-01-26-0749019/21/24/27), so an exposure with NO reserve history cannot be built; needs an existing exposure that has never been reserved, or BA confirmation of how to create one.'),
+  'GCCM-1003/VBR/TC-121': M('Quick Payment opens only from an existing Financials reserve row, so it cannot pay an exposure with NO prior reserve history (the precondition). The Full Check case (GCCM-763 TC-038) is automated — BA: confirm whether this Quick Payment case applies'),
+  'GCCM-1003/VBR/TC-134': M('Quick Payment opens only from an exposure reserve row — there is no claim-level row to open it from, and the Full Check refuses a claim-level line with "Missing required field Exposure" (GCCM-763 TC-051/052 finding). BA: confirm whether this Quick Payment case applies'),
+  'GCCM-1003/VBR/TC-135': M('Quick Payment opens only from an exposure reserve row — there is no claim-level row to open it from, and the Full Check refuses a claim-level line with "Missing required field Exposure" (GCCM-763 TC-051/052 finding). BA: confirm whether this Quick Payment case applies'),
+  'GCCM-1003/VBR/TC-160': M('Quick Payment has no new-reserve-line option (it pays the Financials row it is opened from), so VBR.027 "new reserve line within the wizard" cannot be reached. The Full Check case (GCCM-803 TC-015) is automated — BA: confirm whether this Quick Payment case applies'),
+  'GCCM-1003/VBR/TC-161': M('Quick Payment has no new-reserve-line option (it pays the Financials row it is opened from), so VBR.027 "new reserve line within the wizard" cannot be reached. The Full Check case (GCCM-803 TC-016) is automated — BA: confirm whether this Quick Payment case applies'),
+  ...Object.fromEntries(['GCCM-1003/CPD/TC-213', 'GCCM-1003/CPD/TC-215', 'GCCM-759/CPD/TC-036', 'GCCM-759/CPD/TC-038'].map((id) => [id,
+    M('Needs the payment to be part of an ACTIVE check recurrence with a stored OneInc payment token (CPD.007) — a stored token comes from OneInc, which does not report back on TEST. The no-recurrence default (TC-212/214, TC-035/037) is automated')])),
+  'GCCM-1008/APD/TC-008': M(`Needs a DIGITAL payment (ACH / debit / prepaid / virtual card) and a PayPal or Venmo one — the method is chosen by the payee on OneInc's side; ${NO_ONEINC}`),
+  'GCCM-1008/APD/TC-011': M(`Needs a mortgagee payment with Monitored = Yes — "Monitored" comes back in OneInc's Payment Feedback (Additional Payment Details › Payment Feedback Received › Monitored); ${NO_ONEINC}`),
+  'GCCM-1008/APD/TC-012': M(`Needs a mortgagee payment with Monitored = No where the contact chose Direct Deposit / Direct to Debit on OneInc's side; ${NO_ONEINC}`),
 };
 
 module.exports = { REASONS };

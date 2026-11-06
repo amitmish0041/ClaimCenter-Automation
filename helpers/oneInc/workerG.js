@@ -115,10 +115,24 @@ async function setReserveAmount(page, expo, amount) {
   await inp.fill(String(amount));
   await inp.press('Tab').catch(() => {});
   await W.settle(page, 1200);
+  // A change of $50,000 or more needs "Explanation for Increase/decrease" (CONFIRMED 2026-11-05: "An Explanation is
+  // required for any reserve change of $50,000 or more"). It is an unlabelled grid <select> (options New Loss - Serious
+  // Injury or Damage / Reserve Change - New Information - Liability / - Damages), so it is found by its options.
+  // It is sometimes drawn late (half the $151,000 builds missed it, 2026-11-05), so it is waited for, and set again
+  // before every Save that CC refused for it.
+  const setExplanation = async (wait) => {
+    const expl = page.locator('select:visible').filter({ has: page.locator('option', { hasText: /Reserve Change - New Information/ }) }).first();
+    if (!await expl.waitFor({ state: 'visible', timeout: wait }).then(() => true).catch(() => false)) return;
+    if (!/^\s*(<none>)?\s*$/i.test(await expl.evaluate((s) => (s.options[s.selectedIndex] || {}).text || '').catch(() => 'x'))) return;
+    await expl.selectOption({ label: 'Reserve Change - New Information - Damages' }).catch(() => {});
+    await W.settle(page, 1200);
+  };
+  await setExplanation(Number(amount) >= 50000 ? 6000 : 500);
   let msgs = '';
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 4; i++) {
     const save = page.getByRole('button', { name: /^(Save|Update)$/ }).first();
     if (!await save.isVisible().catch(() => false)) break;
+    if (/Explanation is required/i.test(msgs)) await setExplanation(6000);
     await save.click();
     await W.settle(page, 3500);
     const s = await readScreen(page);

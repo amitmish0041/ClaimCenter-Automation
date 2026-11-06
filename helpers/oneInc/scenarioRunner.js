@@ -302,7 +302,8 @@ async function execute(page, items, res, ctx, capture) {
     // Positive cases sharing a claim (testClaims.plan posGroups) each pay a different amount — the same payee + amount
     // twice raises "Possible duplicate payment found" (CONFIRMED 2026-10-21). Slot k: ≤ $1.00 goes DOWN k cents (stays
     // within the $1.00 approval authority), anything else UP k cents.
-    else if (k === 'step2') await W.completePaymentsStep(page, ctx.amountSlot ? shiftAmount(v, ctx.amountSlot) : v);
+    // step2.exact: a boundary amount with cents ($99,999.99, VBR.011) is never shifted.
+    else if (k === 'step2') await W.completePaymentsStep(page, ctx.amountSlot && !(v && v.exact) ? shiftAmount(v, ctx.amountSlot) : v);
     else if (k === 'click') await W.clickButton(page, v);
     else if (k === 'nav') await W.navigate(page, v);
     else if (k === 'menu') {

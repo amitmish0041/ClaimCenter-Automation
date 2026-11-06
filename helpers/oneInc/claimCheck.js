@@ -22,6 +22,9 @@ const exposuresFor = (claim) => EXPOSURES[String(claim).split('-')[0]] || null;
 async function addExposures(page, claim, exposures) {
   const prev = process.env.CC_EXISTING_CLAIM;
   process.env.CC_EXISTING_CLAIM = claim;
+  // Policy number from the claim header, so the per-policy store of claimant numbers already taken is consulted.
+  const pol = (/Pol:\s*(\d{6,})/.exec(await page.locator('body').innerText().catch(() => '')) || [])[1];
+  if (pol) page._policyNumber = pol;
   try {
     await require('../fnolHelper').completeFNOL(page, { policyType: '', exposures });
   } finally {

@@ -167,10 +167,10 @@ const RECOVERY_TYPE = { BOP: 'Subrogation', CP: 'Subrogation', CA: 'Subrogation'
 
 // Recovery reserve, then a receipt for the FULL amount: a partial receipt leaves an open recovery reserve that CC
 // auto-zeros on exposure close, and DMTV0039 refuses that same-day (confirmed live on PA, see PA_Auto.e2e E2E-PA-009).
-async function recovery(page, lob, amount = 500) {
+async function recovery(page, lob, amount = 500, { skipSubro = false } = {}) {
   const F = require('./financialsHelper');
   const recoveryType = RECOVERY_TYPE[lob] || 'Subrogation';
-  if (IS_CLOUD) return recoveryCloud(page, { recoveryType, amount });
+  if (IS_CLOUD) return recoveryCloud(page, { recoveryType, amount, skipSubro });
   await F.createRecoveryReserve(page, { recoveryType, reserveAmount: amount });
   await F.createRecoveryReceipt(page, { recoveryType, receiptAmount: amount });
 }
@@ -260,7 +260,7 @@ async function openSubrogationCloud(page) {
   }
 }
 
-async function recoveryCloud(page, { recoveryType, amount }) {
+async function recoveryCloud(page, { recoveryType, amount, skipSubro = false }) {
   const step = async (what, fn) => { try { await fn(); } catch (e) { throw new Error(`cloud recovery — ${what}: ${e.message.split('\n')[0]}`); } };
   const save = () => page.getByRole('button', { name: /^(Save|Update|Finish)$/ }).first().click();
   const pick = async (label, value) => {
@@ -270,7 +270,9 @@ async function recoveryCloud(page, { recoveryType, amount }) {
     await opt.first().click();
   };
 
-  await step('open subrogation (workplan chain)', () => openSubrogationCloud(page));
+  // skipSubro: the caller already answered the chain as the activities' assignee (they stay Open after Update, and a
+  // non-assignee only gets Cancel on them — stepvarg, 2026-11-05).
+  if (!skipSubro) await step('open subrogation (workplan chain)', () => openSubrogationCloud(page));
   await step('open Recovery Reserve', async () => {
     await page.getByRole('button', { name: 'deferred Actions' }).click();
     await page.getByLabel(/^Recovery Reserve/).first().click();
@@ -726,4 +728,4 @@ if (process.env.CC_E2E_POLICY_FROM_POOL === '1' && process.env.CC_E2E_LOB && pro
   } catch (e) { console.log('Claim inventory not readable (' + e.message.split('\n')[0] + ') — using the .env policy list'); }
 }
 
-module.exports = { IS_CLOUD, ALL, steps, on, existingClaim, stepOf, gate, recovery, close, pickFromInventory, receiptCloud, TEAMS, LOB_TEAM, loginIdFor, teamUserFor, cannotView };
+module.exports = { IS_CLOUD, ALL, steps, on, existingClaim, stepOf, gate, recovery, close, pickFromInventory, receiptCloud, repairCloud, validateCloud, openSubrogationCloud, TEAMS, LOB_TEAM, loginIdFor, teamUserFor, cannotView };

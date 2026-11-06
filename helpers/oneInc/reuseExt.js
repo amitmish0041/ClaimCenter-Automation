@@ -341,8 +341,8 @@ async function finishObserve(page) {
     // claim's "At least one aggregate limit … exceeded" (CONFIRMED 2026-10-21 a warnings-only page that saves on a
     // second Finish). Any other warning stops here and becomes the outcome.
     let passed = '';
-    const ignorable = (t) => /duplicate/i.test(t) || (!/Errors?s*:/i.test(t)
-      && t.replace(/^Validation Resultss*Clears*Warnings:s*/i, '').split(/(?<=.)s+/).every((x) => /aggregate limit/i.test(x)));
+    const ignorable = (t) => /duplicate/i.test(t) || (!/\bErrors?\s*:/i.test(t)
+      && t.replace(/^Validation Results\s*Clear\s*Warnings:\s*/i, '').split(/(?<=\.)\s+/).every((x) => /aggregate limit/i.test(x)));
     if (await W.inWizard(page) && ms.length && ms.every((m) => ignorable(m.t))) {
       passed = fmtMsgs(ms);
       const notDup = page.getByRole('radio', { name: 'Not a duplicate check', exact: true }).first();

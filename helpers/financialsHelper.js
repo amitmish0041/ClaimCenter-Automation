@@ -1514,16 +1514,32 @@ async function editReserveCloud(page, { reserveAmount }) {
     return 'editReserveCloud: no editable amount field after Edit';
   }
   await amount.fill(String(reserveAmount)).catch(() => {});
+  // "An Explanation is required for any reserve change of $50,000 or more" (cloud TEST, 2026-11-05, PA-PA-01-26-0749012):
+  // shown only in the page's "Errors on current page" block, so Save looked silently refused. Pick an explanation on
+  // the edited row whenever one is offered — prefer "Reserve Change - New Information - …".
+  await page.waitForTimeout(600);
+  for (const sel of await page.locator('select:visible').all()) {
+    const opts = await sel.locator('option').allTextContents().catch(() => []);
+    if (!opts.some((o) => /Reserve Change|New Loss/i.test(o))) continue;
+    const cur = await sel.evaluate((s) => (s.options[s.selectedIndex] || {}).text || '').catch(() => '');
+    if (cur && !/<none>/i.test(cur)) continue;
+    const pick = opts.find((o) => /Reserve Change - New Information - Damages/i.test(o)) || opts.find((o) => /Reserve Change/i.test(o)) || opts.find((o) => o.trim() && !/<none>/i.test(o));
+    if (pick) { await sel.selectOption({ label: pick }).catch(() => {}); console.log('editReserveCloud: Explanation for Increase/decrease = ' + pick); }
+  }
   const save = page.getByRole('button', { name: 'Save', exact: true }).first();
   await save.click().catch(() => {});
   await page.waitForTimeout(3000);
 
 
+  // Refusals show in the docked Validation Results worksheet (#gw-south-panel) OR in the page's own
+  // "Errors on current page" block above the grid — read both.
   const readValidation = () => page.evaluate(() => {
     const p = document.getElementById('gw-south-panel');
-    if (!p || !p.offsetParent) return '';
-    return (p.innerText || '').replace(/\s+/g, ' ')
-      .replace(/^\s*Validation Results\s*/i, '').replace(/^\s*Clear\s*/i, '').trim().slice(0, 300);
+    const south = p && p.offsetParent ? (p.innerText || '').replace(/\s+/g, ' ')
+      .replace(/^\s*Validation Results\s*/i, '').replace(/^\s*Clear\s*/i, '').trim() : '';
+    const body = (document.body.innerText || '').replace(/\s+/g, ' ');
+    const m = body.match(/Errors on current page:(?: Click an error to focus on the associated field, if available\.)?\s*(.+?)(?= All line items| Filtered by:|$)/);
+    return [south, m ? 'Errors: ' + m[1].trim() : ''].filter(Boolean).join(' || ').slice(0, 400);
   }).catch(() => '');
   let validation = await readValidation();
   // WARNINGS only (e.g. "At least one aggregate limit on this claim has been exceeded", BOP 2026-11-03): CC accepts the

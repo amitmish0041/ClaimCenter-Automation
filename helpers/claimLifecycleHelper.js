@@ -206,9 +206,13 @@ async function assignClaim(page, assigneeName) {
       'select[name*="SelectFromList"], select[name*="AssignmentPopup"], ' +
       '[id="AssignClaimsPopup:AssignmentPopupScreen:AssignmentPopupDV:SelectFromList"] select'
     ).first();
-    const picked = await nativeSelect.isVisible().catch(() => false)
-      ? await nativeSelect.selectOption({ label: cand.text }).then(() => true).catch(() => false)
-      : false;
+    // The "Select from list:" combobox IS that native select on cloud — try it directly first: the name/id patterns
+    // above matched nothing for the admin on HO-PA-01-26-0749031 (2026-11-05), the by-index option click selected
+    // nothing, and the claim stayed "Pending Assignment" while this logged success.
+    let picked = await listCombo.selectOption({ label: cand.text }).then(() => true).catch(() => false);
+    if (!picked && await nativeSelect.isVisible().catch(() => false)) {
+      picked = await nativeSelect.selectOption({ label: cand.text }).then(() => true).catch(() => false);
+    }
     if (picked) {
       console.log('assignClaim: selected "' + cand.text + '" via native <select>');
     } else {
@@ -253,9 +257,21 @@ async function assignClaim(page, assigneeName) {
 
     const failed = await page.getByText(/assignment\(s\) failed|does not have permission to be assigned/i)
       .first().waitFor({ state: 'visible', timeout: 3000 }).then(() => true).catch(() => false);
-    if (!failed) {
+    // No failure text is not proof: confirm the claim header left "Pending Assignment" (cloud showed no error and no
+    // assignment, 2026-11-05). Only checked once the page is back on the claim (header carries "Adj:").
+    const hdr = failed ? '' : await page.locator('body').innerText().catch(() => '');
+    const stillPending = /Adj:\s*Pending Assignment/i.test(hdr);
+    if (!failed && !stillPending) {
       console.log('Assigned to:', cand.text);
       return;
+    }
+    if (stillPending) {
+      console.log('assignClaim: Assign pressed for "' + cand.text + '" but the claim is still Pending Assignment — trying next candidate');
+      await page.locator('[id="Claim:ClaimMenuActions"], [id="Claim-ClaimMenuActions"]').first().click().catch(() => actionsByRole.click().catch(() => {}));
+      await page.waitForTimeout(400);
+      await page.getByRole('menuitem', { name: 'Assign Claim' }).click().catch(() => {});
+      await page.waitForTimeout(800);
+      continue;
     }
     console.log('assignClaim: "' + cand.text + '" cannot own this claim — trying next candidate');
   }
