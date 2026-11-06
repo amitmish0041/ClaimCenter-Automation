@@ -15,10 +15,34 @@ const { completeFNOL } = require('./fnolHelper');
 const { assignClaim, createDocumentFromTemplate } = require('./claimLifecycleHelper');
 const { repairCloud, TEAMS, loginIdFor, cannotView } = require('./e2eSteps');
 
-// The approval activity's "Assigned To" on the claim's Workplan (same read as e2eSteps.approverFor).
-async function approverFor(page) {
+// The Workplan grid is PAGED: ~15 "Check Returned Error" activities pushed the approval rows off page 1 and every
+// reader saw "no approval activity" (PA-PA-01-26-0749042, 2026-11-06). These walk the pages.
+const wpNext = (page) => page.locator('[id*="WorkplanLV"][id$="_ListPaging-next"], [id*="WorkplanLV-_ListPaging-next"]').first();
+const wpFirst = (page) => page.locator('[id*="WorkplanLV"][id$="_ListPaging-first"], [id*="WorkplanLV-_ListPaging-first"]').first();
+async function wpGoNext(page) {
+  const n = wpNext(page);
+  if (!await n.isVisible().catch(() => false) || await n.isDisabled().catch(() => true) || /disabled/.test((await n.getAttribute('class').catch(() => '')) || '')) return false;
+  const before = await page.locator('tr[role="row"]:visible').nth(1).innerText().catch(() => '');
+  await n.click().catch(() => {});
+  for (let t = 0; t < 20; t++) { await page.waitForTimeout(500); if (await page.locator('tr[role="row"]:visible').nth(1).innerText().catch(() => '') !== before) return true; }
+  return false;
+}
+// Opens the Workplan and leaves the page showing the first OPEN row whose text matches re; false when none on any page.
+async function workplanPageWith(page, re) {
   await clickMenu(page, /^Workplan$/);
   await page.locator('tr[role="row"]').nth(1).waitFor({ timeout: 15000 }).catch(() => {});
+  if (await wpFirst(page).isVisible().catch(() => false)) { await wpFirst(page).click().catch(() => {}); await page.waitForTimeout(1500); }
+  for (let p = 0; p < 15; p++) {
+    const hit = await page.locator('tr[role="row"]:visible').filter({ hasText: re }).filter({ hasText: /Open/ }).count();
+    if (hit) return true;
+    if (!await wpGoNext(page)) return false;
+  }
+  return false;
+}
+
+// The approval activity's "Assigned To" on the claim's Workplan (same read as e2eSteps.approverFor), any page.
+async function approverFor(page) {
+  await workplanPageWith(page, /approv/i);
   return page.evaluate(() => {
     const rows = [...document.querySelectorAll('tr[role="row"]')].filter((r) => r.offsetParent);
     const head = rows.find((r) => /\bAssigned To\b/.test(r.innerText));
@@ -202,7 +226,7 @@ async function approveAsAssignee(page, cn, subject = /approve/i, { action = 'App
     approver = `su (admin, for ${name} — ${id} login refused)`;
   }
   // Workplan toolbar Approve acts on the ticked rows (cloud TEST, 2026-11-05): tick the approval row, then Approve.
-  await clickMenu(page, /^Workplan$/);
+  await workplanPageWith(page, subject);
   // :visible — cloud keeps hidden copies of grid rows, and .first() landed on one (2026-11-05).
   const row = page.locator('tr[role="row"]:visible').filter({ hasText: subject }).first();
   if (!(await row.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false))) return { approver, result: `no open activity matching ${subject} for ${id}` };
@@ -362,4 +386,71 @@ async function approveAllLevels(page, cn, subject = /approve/i, max = 6, opts = 
   return chain;
 }
 
-module.exports = { clickMenu, gridRows, sharedClaim, releaseClaim, register, makeViewable, approveAllLevels, step, check, setClaim, saveResult, newRows, CLAIM_KINDS, newClaim, asAdmin, asStandard, asTeam, asReserveUser, approveAsAssignee, approverFor, pageMessages, workplanRows, hasActivity, transactionRows, note };
+// One PA claim per day ASSIGNED TO stepvarg (Stephanie Vargas, Auto claim rep) for the payment-routing cases: approval
+// routing follows the claim's owner/group, so checks entered by stepvarg on Benjamin Smith's claims went to Benjamin's
+// group (Kevin Burke, 2026-11-06) — not a test of the Auto team chain (user direction 2026-11-06).
+const SV_FILE = require('path').join(__dirname, '..', 'results', 'financialRules_stepvarg_claim.json');
+async function stepvargClaim(page, tag) {
+  const today = new Date().toLocaleDateString('en-CA');
+  let rec = {};
+  try { rec = JSON.parse(fs.readFileSync(SV_FILE, 'utf8')); } catch (_) {}
+  if (rec.date === today && rec.cn && rec.assigned) return rec.cn;
+  // Record the claim BEFORE assigning, so a failed assign never files a second claim (six were filed 2026-11-06).
+  const cn = rec.date === today && rec.cn ? rec.cn : await newClaim(page, 'PA', tag);
+  fs.mkdirSync(require('path').dirname(SV_FILE), { recursive: true });
+  fs.writeFileSync(SV_FILE, JSON.stringify({ date: today, cn }, null, 2));
+  await asAdmin(page, cn);
+  await assignToUsername(page, 'stepvarg');
+  await B.openExistingClaim(page, cn);
+  const head = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  if (!/Adj: Stephanie Vargas/i.test(head)) throw new Error(`${cn} could not be assigned to Stephanie Vargas (header: ${(head.match(/Adj: [^)]*\)/) || ['?'])[0]})`);
+  fs.writeFileSync(SV_FILE, JSON.stringify({ date: today, cn, assigned: true }, null, 2));
+  console.log(`${tag}: PA claim ${cn} assigned to Stephanie Vargas`);
+  return cn;
+}
+
+// Actions › Assign Claim › "Find a user or group" › Username search › Assign on the user's row. The "Select from list"
+// dropdown only offers a handful of users (Stephanie Vargas is not in it); the search finds her in GC Team 2
+// (parent General Casualty Mgr 1), CONFIRMED 2026-11-06.
+async function assignToUsername(page, username) {
+  const W = require('./oneInc/wizardDriver');
+  await W.openActionsMenu(page);
+  await page.getByRole('menuitem', { name: /^Assign Claim$/ }).first().click();
+  await W.settle(page, 4000);
+  await page.getByRole('radio').nth(1).click({ force: true });
+  await W.settle(page, 2500);
+  await page.locator('.gw-InputWidget').filter({ hasText: /^\s*Username/ }).locator('input').first().fill(username);
+  await page.getByRole('button', { name: 'Search', exact: true }).last().click();
+  await W.settle(page, 4000);
+  const row = page.locator('tr:visible').filter({ has: page.getByRole('button', { name: 'Assign', exact: true }) }).filter({ hasNotText: /Select from list/ }).last();
+  if (!await row.isVisible().catch(() => false)) throw new Error(`Assign Claim: username "${username}" not found`);
+  console.log(`assignToUsername: ${(await row.innerText()).replace(/\s+/g, ' ').trim()}`);
+  await row.getByRole('button', { name: 'Assign', exact: true }).first().click();
+  await W.settle(page, 4000);
+}
+
+// Assigned To of every OPEN Workplan activity whose subject matches (e.g. /approve new payment/i), in list order.
+async function openApprovalAssignees(page, subject = /approve new payment/i) {
+  await workplanPageWith(page, /$^/); // opens the Workplan on page 1 (matches nothing, so it stops on the last page)
+  if (await wpFirst(page).isVisible().catch(() => false)) { await wpFirst(page).click().catch(() => {}); await page.waitForTimeout(1500); }
+  const all = [];
+  for (let p = 0; p < 15; p++) {
+    all.push(...await readAssignees(page, subject));
+    if (!await wpGoNext(page)) break;
+  }
+  return all;
+}
+async function readAssignees(page, subject) {
+  return page.evaluate((src) => {
+    const re = new RegExp(src, 'i');
+    const rows = [...document.querySelectorAll('tr[role="row"]')].filter((r) => r.offsetParent);
+    const head = rows.find((r) => /\bAssigned To\b/.test(r.innerText));
+    if (!head) return [];
+    const cells = [...head.children].map((c) => (c.innerText || '').trim());
+    const subj = cells.findIndex((c) => /^Subject$/.test(c)), to = cells.findIndex((c) => /^Assigned To$/.test(c));
+    return rows.filter((r) => r !== head && /\bOpen\b/.test(r.innerText) && re.test((r.children[subj] || {}).innerText || ''))
+      .map((r) => ((r.children[to] || {}).innerText || '').replace(/\s+/g, ' ').trim());
+  }, subject.source);
+}
+
+module.exports = { stepvargClaim, openApprovalAssignees, clickMenu, gridRows, sharedClaim, releaseClaim, register, makeViewable, approveAllLevels, step, check, setClaim, saveResult, newRows, CLAIM_KINDS, newClaim, asAdmin, asStandard, asTeam, asReserveUser, approveAsAssignee, approverFor, pageMessages, workplanRows, hasActivity, transactionRows, note };

@@ -584,7 +584,33 @@ async function prepareLostWages(page, claim, out) {
   return done.join('; ');
 }
 
+// Loss Details › General answers on an existing claim, e.g. the Reinsurance Status pair { 'Reported to Reinsurer?': 'Yes',
+// 'Is Reinsurance being collected?': 'Yes' } (the reinsurance payment fields' precondition, 2026-11-06). A select is set by
+// option text (or the first option matching a RegExp), a Yes/No radio group by clicking the answer inside that field's widget.
+// Already-set answers are left alone.
+async function setLossDetailAnswers(page, answers) {
+  const ok = (val, v) => (v instanceof RegExp ? v.test(String(val || '')) && !/^<none>$/i.test(String(val || '')) : norm(val) === norm(v));
+  testOnly('setLossDetailAnswers');
+  await openLossDetailsGeneral(page);
+  const before = await readScreen(page);
+  const need = Object.entries(answers).filter(([label, v]) => { const f = findField(before, label); return !f || !ok(f.value, v); });
+  if (!need.length) return `already set: ${Object.entries(answers).map(([k, v]) => `${k} ${v}`).join(', ')}`;
+  await editAndSave(page, 'Loss Details answers', async () => {
+    for (const [label, v] of need) {
+      const f = findField(await readScreen(page), label);
+      if (!f) throw new W.Blocked(`Loss Details has no "${label}" field`);
+      if (f.kind === 'select') await selectByLabel(page, label, v instanceof RegExp ? new RegExp(`^(?!<none>)(?:${v.source})`, v.flags) : v);
+      else { await page.locator(`[id="${f.id}"]`).getByRole('radio', { name: v, exact: true }).first().click(); await W.settle(page, 1500); }
+    }
+  });
+  const after = await readScreen(page);
+  const miss = need.filter(([label, v]) => !ok((findField(after, label) || {}).value, v));
+  if (miss.length) throw new W.Blocked(`Loss Details answers did not stick: ${miss.map(([k]) => `${k} = "${(findField(after, k) || {}).value || ''}"`).join(', ')}`);
+  return `Loss Details: ${need.map(([k, v]) => `${k} → ${v}`).join(', ')}`;
+}
+
 module.exports = {
+  setLossDetailAnswers,
   setClaimantCountry, selectInsuredPayee, closeWizard, setAggregateLimit, openWcExposure, setIndemnityExposure, setMedicareBeneficiary, ensureLostTimeSeverity, selectLineCategory, openQuickOnLine, fixClaimantNumber, revalidate, prepareLostWages, finishOnce, editAndSave, fillRequired: fillRequiredOnEdit, selectByLabel, fillByLabel, exposureCount, openExposure, openLossDetailsGeneral,
   setExposureCoverageDenied, setClaimDenied, assignExposuresTo,
 };

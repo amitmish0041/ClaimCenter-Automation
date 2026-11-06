@@ -1,4 +1,4 @@
-/**
+﻿/**
  * tests/Financials/FinancialRules.test.js — CLOUD ClaimCenter.
  * QA workbooks "Financials - 40 cases" + "Remaining rules - V1.0", grouped into combined suites
  * (Desktop\Financial test cases\Financial_OneInc_Coverage_Review.xlsx). Cases OneInc already covers are not here.
@@ -43,6 +43,7 @@ Object.assign(META, {
   'DMTA0104': { ...RULES, name: 'DMTA0104 Changed PayTo Payment Approval', expected: 'Payment whose Pay To was changed from the payee name is held for approval; an unchanged one is not' },
   'DMTA0101': { ...RULES, name: 'DMTA0101 + DMAR0122 Insured or Secondary Insured only payments / approval routing', expected: 'Payment to the insured only is held for approval and routed; the same payment to a vendor is not' },
   'HIGH-CHECK': { ...FIN40, name: 'TC069 / TC067 approval routing on a high-dollar ($25,000) check', expected: "Each approval level goes only to the requester's supervisor, then the next leader up (Auto: mallredc → daryfili); final level rejected so the check is not released" },
+  'DMTA0106': { ...RULES, name: 'DMTA0106 TaxIds Requiring Approval', expected: 'Payment to a vendor whose Tax ID is on Administration › Tax Ids Requiring Approval is held for approval; a vendor not on the list is not' },
   'TAP05000': { ...RULES, name: 'TAP05000 Optionally Check For Duplicate Checks', expected: "Second payment to the same payee for the same amount stops on 'Possible duplicate payment found'" },
 });
 META['TR-551'].name = 'TC049_DMTA0007 + DMAR0062: Manual (RealTime) Check with Box Number = NOT APPLICABLE requires supervisor approval';
@@ -230,10 +231,19 @@ test.describe.serial('B Approvals', () => {
 // the case passes only when the control goes through and the trigger is held — then the hold is the rule's.
 // Payments: Address Book vendors by Tax ID through the OneInc wizard driver (helpers/financialPayments.js).
 const PAY_SUBJECT = /approve new payment/i;
+const TOP_APPROVER = 'keviburk';
 const MANAGERS = Object.values(E.TEAMS).map((t) => t.manager).filter(Boolean);
 // The requester's leaders from the EBT team list: level 1 must be the supervisor, the next level the manager (user
 // direction 2026-11-06: only the supervisor or the next leader up may get the approval request).
-const leadersOf = (who) => { const t = Object.values(E.TEAMS).find((x) => (x.rep || []).includes(who)) || {}; return { supervisor: t.supervisor, manager: t.manager }; };
+// ClaimCenter's own group setup wins over the EBT slide: scotshen's Team tab shows "GC Team 2: Scott Shenk
+// (Supervisor)" with Stephanie Vargas and Mallory Redcay as members (cloud TEST, 2026-11-06); the reserve chain
+// stepvarg → Scott Shenk → Mallory Redcay (2026-11-05) gives the next leader up.
+const CC_LEADERS = { stepvarg: { supervisor: 'scotshen', manager: 'mallbuoh', source: "ClaimCenter Team tab (scotshen): GC Team 2 supervisor Scott Shenk; next level Mallory Redcay" } };
+const leadersOf = (who) => {
+  if (CC_LEADERS[who]) return CC_LEADERS[who];
+  const t = Object.values(E.TEAMS).find((x) => (x.rep || []).includes(who)) || {};
+  return { supervisor: t.supervisor, manager: t.manager, source: 'EBT team list' };
+};
 const leaderRoute = (label) => (a, who) => {
   const L = leadersOf(who);
   const id = a ? E.loginIdFor(a) : '';
@@ -249,7 +259,7 @@ async function payAndRead(page, ti, cn, who, label, opts) {
     await R.step(page, ti, `As ${who}: ${label} — could not be entered: ${err}`);
     return { err };
   }
-  const row = await P.checkRow(page, res.amount);
+  const row = await P.checkRow(page, res.amount, res.payee);
   const f = res.fields;
   await R.step(page, ti, `As ${who}: ${label} — $${res.amount} to ${res.payee}; ${Object.entries(f).filter(([, v]) => v).map(([k, v]) => `${k} = ${v}`).join('; ')}${res.messages.length ? ` — ClaimCenter said: ${res.messages.join(' | ')}` : ''} → Checks/Payments: ${row ? `${row.number || '(no number)'} ${row.status}` : 'not listed'}`);
   return { res, row };
@@ -257,14 +267,61 @@ async function payAndRead(page, ti, cn, who, label, opts) {
 
 // Control + trigger + routing + approval. o: { kind, tag, admin, control: {label, opts}, trigger: {label, opts},
 // rule, expectedHold, route(assignee, who) → {description, expected, ok}, precondition(detail, res) → {expected, actual, ok} }
+// Payment routing cases: the check is entered by stepvarg (Auto claim rep) on a claim ASSIGNED to stepvarg, so the
+// approval follows the real Auto chain (user direction 2026-11-06). No fallback user: a refused login fails the case.
+const REQUESTER = 'stepvarg';
+async function asRequester(page, ti, tag) {
+  const cn = await R.stepvargClaim(page, tag);
+  await R.asTeam(page, cn, REQUESTER);
+  const head = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  await R.step(page, ti, `Logged in as ${REQUESTER} (Stephanie Vargas, Auto claim rep); claim ${cn} — ${(head.match(/Adj: [^)]*\)/) || ['adjuster not shown'])[0]}`);
+  R.setClaim(ti, cn, REQUESTER);
+  return cn;
+}
+// The approver of the approval the trigger created: open "Review and approve new payment" assignees after minus before.
+function newAssignee(before, after) {
+  const left = [...before];
+  const added = after.filter((a) => { const i = left.indexOf(a); if (i >= 0) { left.splice(i, 1); return false; } return true; });
+  return added;
+}
+
+// ClaimCenter keeps ONE open "Review and approve new payment" activity per exposure and adds each held check to it
+// (PA-PA-01-26-0749042, 2026-11-06: 7 held checks, 1 activity). So a case can only attribute an approval to its own
+// check when no other check is held: delete held checks first (and after), as setup, logged.
+async function clearHeldChecks(page, ti, cn, when) {
+  const gone = [];
+  for (let i = 0; i < 15; i++) {
+    await B.openExistingClaim(page, cn);
+    const held = (await CO.checkRows(page)).filter((r) => /^Pending approval$/i.test(r.status));
+    if (!held.length) break;
+    const h = held[held.length - 1];
+    try {
+      await CO.openCheck(page, { status: '^Pending approval$', amount: h.amount });
+      const out = await CO.deleteCheck(page);
+      gone.push(`${h.payee} ${h.amount}: ${out.replace(/^Delete outcome:\s*/, '').slice(0, 60)}`);
+      if (/NOT deleted/i.test(out)) break;
+    } catch (e) { gone.push(`${h.payee} ${h.amount}: ${e.message.split('\n')[0].slice(0, 80)}`); break; }
+  }
+  await B.openExistingClaim(page, cn);
+  const left = await R.openApprovalAssignees(page, PAY_SUBJECT);
+  await R.step(page, ti, `Setup (${when}): deleted held checks on ${cn} so the case's approval is the only one — ${gone.join('; ') || 'none held'}; open payment approvals now: ${left.join(', ') || 'none'}`);
+  return left;
+}
+
 async function paymentRuleCase(page, ti, o) {
-  const cn = await R.sharedClaim(page, o.kind || 'PA', o.tag, { reserveActions: 0 });
-  await R.step(page, ti, `Using ${o.kind || 'PA'} claim ${cn} (shared test claim)`);
+  let cn;
   let who;
-  if (o.admin) { await R.asAdmin(page, cn); who = `su (admin — ${o.admin})`; } else who = await R.asReserveUser(page, cn, o.kind || 'PA');
-  R.setClaim(ti, cn, who);
+  if (o.admin) {
+    cn = await R.sharedClaim(page, o.kind || 'PA', o.tag, { reserveActions: 0 });
+    await R.step(page, ti, `Using ${o.kind || 'PA'} claim ${cn} (shared test claim)`);
+    await R.asAdmin(page, cn); who = `su (admin — ${o.admin})`;
+    R.setClaim(ti, cn, who);
+  } else { cn = await asRequester(page, ti, o.tag); who = REQUESTER; }
+  await clearHeldChecks(page, ti, cn, 'before');
   const c = await payAndRead(page, ti, cn, who, `CONTROL — ${o.control.label}`, o.control.opts);
   await R.check(page, ti, { description: `Control: ${o.control.label} is NOT held (shows the user's authority is not what holds the trigger)`, expected: 'Check created, status not Pending approval', actual: c.row ? `${c.row.number} ${c.row.status}` : c.err || 'no check', ok: !!c.row && !/Pending approval/i.test(c.row.status) });
+  const before = await R.openApprovalAssignees(page, PAY_SUBJECT);
+  await B.openExistingClaim(page, cn);
   const t = await payAndRead(page, ti, cn, who, `TRIGGER — ${o.trigger.label}`, o.trigger.opts);
   if (!t.row) {
     await R.check(page, ti, { description: `${o.rule}: trigger payment`, expected: o.expectedHold, actual: t.err || 'trigger check not created', ok: false });
@@ -278,28 +335,50 @@ async function paymentRuleCase(page, ti, o) {
   await B.openExistingClaim(page, cn);
   const act = await P.activityDetail(page, PAY_SUBJECT);
   await R.step(page, ti, `Workplan: approval activity — ${act.slice(0, 600) || 'not found'}`);
-  await B.openExistingClaim(page, cn);
-  const assignee = await R.approverFor(page);
-  await R.step(page, ti, `Approval activity "Review and approve new payment" assigned to ${assignee || 'nobody'} (${assignee ? E.loginIdFor(assignee) : '-'})`);
+  // The approval activity can land on the Workplan a little after the check (2026-11-06: read once, none new) —
+  // re-read for up to ~60 s before concluding there is none.
+  let after = [];
+  let added = [];
+  for (let i = 0; i < 6 && !added.length; i++) {
+    if (i) await page.waitForTimeout(10000);
+    await B.openExistingClaim(page, cn);
+    after = await R.openApprovalAssignees(page, PAY_SUBJECT);
+    added = newAssignee(before, after);
+  }
+  const assignee = added.length === 1 ? added[0] : null;
+  await R.step(page, ti, `Workplan "Review and approve new payment" activities — before the trigger: ${before.join(', ') || 'none'}; after: ${after.join(', ') || 'none'} → the trigger's approval is assigned to ${assignee ? `${assignee} (${E.loginIdFor(assignee)})` : added.length ? `ambiguous (${added.join(', ')})` : 'nobody (no new approval activity)'}`);
   const r = o.route && o.route(assignee, who);
   if (r) await R.check(page, ti, { description: r.description, expected: r.expected, actual: assignee ? `${assignee} (${E.loginIdFor(assignee)})` : 'no approval activity', ok: r.ok });
   // Approve as the assignee until THIS check leaves Pending approval (other held checks on a shared claim are
   // approved on the way and logged).
   let status = t.row.status;
   const chain = [];
+  let topReached = false;
   for (let i = 0; i < 5 && /Pending approval/i.test(status); i++) {
+    await B.openExistingClaim(page, cn);
+    const cur = await R.approverFor(page);
+    // Kevin Burke (keviburk) is the LAST approver in the chain and has no TEST password: an approval assigned to him
+    // counts as the chain completed (user direction 2026-11-06).
+    if (cur && E.loginIdFor(cur) === TOP_APPROVER) { chain.push(`${cur} (${TOP_APPROVER}) — final approver reached; not logged in (no TEST password)`); topReached = true; break; }
     const a = await R.approveAsAssignee(page, cn, PAY_SUBJECT);
     chain.push(`${a.approver || '-'}: ${a.result}`);
     if (!a.approver) break;
     await B.openExistingClaim(page, cn);
-    status = ((await P.checkRow(page, t.res.amount)) || {}).status || '?';
+    status = ((await P.checkRow(page, t.res.amount, t.res.payee)) || {}).status || '?';
   }
   await R.step(page, ti, `Approval chain: ${chain.join(' → ') || 'none'}; trigger check now "${status}"`);
-  await R.check(page, ti, { description: 'Approver approves — the check is released', expected: 'Status no longer Pending approval', actual: status, ok: !/Pending approval|\?/.test(status) });
+  if (/Pending approval/i.test(status)) { if (o.admin) await R.asAdmin(page, cn); else await R.asTeam(page, cn, REQUESTER); await clearHeldChecks(page, ti, cn, `after — ${topReached ? 'left with the final approver' : 'approval could not be completed'}`); }
+  await R.check(page, ti, {
+    description: 'Approval chain completes — approved and released, or reached the final approver (Kevin Burke)',
+    expected: 'Status no longer Pending approval, or the approval assigned to Kevin Burke (keviburk)',
+    actual: topReached ? `assigned to Kevin Burke (${TOP_APPROVER}) — final approver` : status,
+    ok: topReached || !/Pending approval|\?/.test(status),
+  });
   return { cn, who, assignee };
 }
 
-const EXPENSE = { vendor: P.VENDORS.adjustment, reserveLine: 'new', exposure: /Bodily Injury/, costType: /^Adjuster Expense$/ };
+// First real exposure (the stepvarg claim has only 1st Party Vehicle exposures — no BI, 2026-11-06).
+const EXPENSE = { vendor: P.VENDORS.adjustment, reserveLine: 'new', exposure: /^\(\d+\) /, costType: /^Adjuster Expense$/ };
 
 test.describe('B Approvals - payments', () => {
   test('TR-551 [TC049 / DMTA0007 + DMAR0062]: Manual (RealTime) check with Box Number NOT APPLICABLE needs supervisor approval', async ({ page }, ti) => {
@@ -336,6 +415,18 @@ test.describe('B Approvals - payments', () => {
     });
   });
 
+  test('DMTA0106: payment to a Tax ID on the approval list needs approval', async ({ page }, ti) => {
+    ti.annotations.push({ type: 'note', description: 'Administration › Tax Ids Requiring Approval on cloud TEST lists 51-0395711 (Smith testing for approvals), 46-0962075 (Anderson Medical Supplies), 84-1451963 (Zynex Medical).' });
+    await paymentRuleCase(page, ti, {
+      tag: 'FR-0106',
+      control: { label: 'expense payment to ADJUSTMENT SERVICES INC (58-1623664, not on the list)', opts: { ...EXPENSE } },
+      trigger: { label: 'expense payment to ZYNEX MEDICAL (84-1451963, on Tax Ids Requiring Approval)', opts: { ...EXPENSE, vendor: P.VENDORS.zynex } },
+      rule: 'DMTA0106 TaxIds Requiring Approval', expectedHold: 'Pending approval',
+      precondition: (d) => ({ expected: 'Payee tax ID 84-1451963', actual: /84-1451963/.test(d.body) ? 'check shows 84-1451963' : 'tax ID not on the check', ok: /84-1451963/.test(d.body) }),
+      route: leaderRoute('DMTA0106 approval routing'),
+    });
+  });
+
   test('DMTA0104: changed Pay To needs approval', async ({ page }, ti) => {
     await paymentRuleCase(page, ti, {
       tag: 'FR-0104',
@@ -360,13 +451,13 @@ test.describe('B Approvals - payments', () => {
   // High-dollar check: the approval chain must climb the requester's own leaders only (supervisor, then manager).
   // Each level is approved as its assignee; the LAST level is Rejected so no $25,000 check is released to One Inc.
   test('HIGH-CHECK [TR-571 / TR-569 routing, high-dollar check]: approvals go only to the supervisor and the next leader up', async ({ page }, ti) => {
-    const cn = await R.sharedClaim(page, 'PA', 'FR-HIGH', { reserveActions: 0 });
-    await R.step(page, ti, `Using PA claim ${cn} (shared test claim)`);
-    const who = await R.asReserveUser(page, cn, 'PA');
-    R.setClaim(ti, cn, who);
+    const cn = await asRequester(page, ti, 'FR-HIGH');
+    const who = REQUESTER;
     const L = leadersOf(who);
     const c = await payAndRead(page, ti, cn, who, 'CONTROL — small expense check', { ...EXPENSE });
     await R.check(page, ti, { description: 'Control: a small check by the same user is not held', expected: 'not Pending approval', actual: c.row ? `${c.row.number} ${c.row.status}` : c.err || 'no check', ok: !!c.row && !/Pending approval/i.test(c.row.status) });
+    let before = await R.openApprovalAssignees(page, PAY_SUBJECT);
+    await B.openExistingClaim(page, cn);
     const t = await payAndRead(page, ti, cn, who, 'TRIGGER — $25,000 expense check (over the rep\'s authority)', { ...EXPENSE, amount: '25000.00' });
     await R.check(page, ti, { description: 'High-dollar check held for approval', expected: 'Pending approval', actual: t.row ? `${t.row.number} ${t.row.status}` : t.err || 'no check', ok: !!t.row && /Pending approval/i.test(t.row.status) });
     if (!t.row || !/Pending approval/i.test(t.row.status)) return;
@@ -374,9 +465,16 @@ test.describe('B Approvals - payments', () => {
     let floor = 0; // index in the ladder the next approver may not go below
     for (let level = 1; level <= 4; level++) {
       await B.openExistingClaim(page, cn);
-      const a = await R.approverFor(page);
+      const after = await R.openApprovalAssignees(page, PAY_SUBJECT);
+      const added = newAssignee(before, after);
+      await R.step(page, ti, `Level ${level}: open payment approvals before: ${before.join(', ') || 'none'}; now: ${after.join(', ') || 'none'}`);
+      const a = added.length === 1 ? added[0] : null;
       const id = a ? E.loginIdFor(a) : '';
-      if (!a) { await R.step(page, ti, `Level ${level}: no further approval activity`); break; }
+      if (!a) { await R.step(page, ti, `Level ${level}: ${added.length ? 'ambiguous new approvals: ' + added.join(', ') : 'no new approval activity'}`); if (added.length) await R.check(page, ti, { description: `Level ${level}: one approval request`, expected: '1 new approval activity', actual: added.join(', '), ok: false }); break; }
+      if (id === TOP_APPROVER && level > 1) {
+        await R.check(page, ti, { description: `Level ${level}: chain reaches the final approver`, expected: 'Kevin Burke (keviburk) — last person in the chain', actual: `${a} (${id})`, ok: true });
+        break;
+      }
       const pos = ladder.indexOf(id);
       await R.check(page, ti, {
         description: `Level ${level}: approval request goes only to ${who}'s ${level === 1 ? 'supervisor (or the next leader up)' : 'next leader up'}`,
@@ -387,10 +485,11 @@ test.describe('B Approvals - payments', () => {
       floor = pos >= 0 ? pos + 1 : ladder.length;
       // Peek: is there a level above this one? Approve if the ladder continues, else Reject (keeps $25K unreleased).
       const last = floor >= ladder.length && level > 1;
+      before = after.filter((x, i) => i !== after.lastIndexOf(a));
       const r = await R.approveAsAssignee(page, cn, PAY_SUBJECT, { action: last ? 'Reject' : 'Approve' });
       await R.step(page, ti, `Level ${level}: ${r.approver} pressed ${last ? 'Reject' : 'Approve'} — ${r.result}`);
       await B.openExistingClaim(page, cn);
-      const st = ((await P.checkRow(page, t.res.amount)) || {}).status || '?';
+      const st = ((await P.checkRow(page, t.res.amount, t.res.payee)) || {}).status || '?';
       await R.step(page, ti, `Check ${t.row.number} now "${st}"`);
       if (!/Pending approval/i.test(st)) {
         if (!last) {
@@ -403,10 +502,8 @@ test.describe('B Approvals - payments', () => {
   });
 
   test('TAP05000: duplicate check is flagged', async ({ page }, ti) => {
-    const cn = await R.sharedClaim(page, 'PA', 'FR-TAP05000', { reserveActions: 0 });
-    await R.step(page, ti, `Using PA claim ${cn} (shared test claim)`);
-    const who = await R.asReserveUser(page, cn, 'PA');
-    R.setClaim(ti, cn, who);
+    const cn = await asRequester(page, ti, 'FR-TAP05000');
+    const who = REQUESTER;
     const first = await payAndRead(page, ti, cn, who, 'first expense payment', { ...EXPENSE });
     await R.check(page, ti, { description: 'First payment created', expected: 'A new check', actual: first.row ? `${first.row.number} ${first.row.status}` : first.err, ok: !!first.row });
     if (!first.row) return;
@@ -415,9 +512,9 @@ test.describe('B Approvals - payments', () => {
     try { dup = await P.makePayment(page, { ...EXPENSE, amount: first.res.amount, stopOnDuplicate: true }); } catch (e) { err = e.message.split('\n')[0]; }
     const said = dup ? dup.messages.join(' | ') : err;
     await R.step(page, ti, `As ${who}: second payment, same payee ${first.res.payee}, same amount $${first.res.amount}, same line — ClaimCenter said: ${said || 'nothing'}${dup && dup.duplicatePage ? ' (stopped on the duplicate page and cancelled — no second check made)' : ''}`);
-    await R.check(page, ti, { description: 'TAP05000 Optionally Check For Duplicate Checks', expected: "'Possible duplicate payment found' on the second payment", actual: said || 'no message', ok: /duplicate/i.test(said) });
     await B.openExistingClaim(page, cn);
-    const rows = (await CO.checkRows(page)).filter((r) => P.money(r.amount) === P.money(first.res.amount));
-    await R.check(page, ti, { description: 'Only the first check exists for that payee/amount (the duplicate was not submitted)', expected: '1 check', actual: rows.map((r) => `${r.number} ${r.status}`).join(', '), ok: rows.length === 1 });
+    const rows = (await CO.checkRows(page)).filter((r) => P.money(r.amount) === P.money(first.res.amount) && /ADJUSTMENT SERVICES/i.test(r.payee || r.text));
+    await R.step(page, ti, `Checks/Payments: ${rows.length} check(s) to ADJUSTMENT SERVICES INC for $${first.res.amount}: ${rows.map((r) => `${r.number} ${r.status}`).join(', ')}`);
+    await R.check(page, ti, { description: 'TAP05000 Optionally Check For Duplicate Checks', expected: "'Possible duplicate payment found' on the second payment (and no second check)", actual: `message: ${said || 'none'}; checks for that payee/amount: ${rows.length}`, ok: /duplicate/i.test(said) && rows.length === 1 });
   });
 });

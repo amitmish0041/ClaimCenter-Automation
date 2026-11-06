@@ -45,14 +45,17 @@ const TEAMS = {
   'BI/GLPD':              { manager: 'samaclar', supervisor: 'jamicole', rep: ['janehann', 'megaschi'] },
   'Subrogation/Recovery': { manager: 'benjsmit', supervisor: 'angichev', rep: ['alliwagn', 'joefart'] },
   'Reinsurance':          { rep: ['chrinoon'] },
-  'Workers Comp':         { manager: 'vernande', supervisor: 'lorrkier', rep: ['tomdavi', 'chenrema'] },
+  'Workers Comp':         { manager: 'vernande', supervisor: 'lorrkier', rep: ['debbobri', 'chenhill'] },
   'Motor Vehicle':        { manager: 'seanhann', supervisor: 'mikechad', rep: ['marymeal', 'triclaug'] },
-  'Auto':                 { manager: 'daryfili', supervisor: 'mallredc', rep: ['stepvarg', 'natastri'] },
+  'Auto':                 { manager: 'daryfili', supervisor: 'mallbuoh', rep: ['stepvarg', 'natastri'] },
 };
 const LOB_TEAM = { CA: 'Auto', PA: 'Auto', BOP: 'Property', CP: 'Property', HO: 'Property', WC: 'Workers Comp' };
 const lobOfClaim = (claim) => ({ CA: 'CA', PA: 'PA', HO: 'HO', WC: 'WC', BOP: 'BOP', CPP: 'CP' })[String(claim || '').split('-')[0]] || null;
 const teamLoginsOn = () => process.env.CC_E2E_TEAM_LOGINS === '1' && !!process.env.CC_TEAM_PASS;
-const loginIdFor = (fullName) => { const [f, ...r] = String(fullName).toLowerCase().trim().split(/\s+/); return (f || '').replace(/[^a-z]/g, '').slice(0, 4) + r.join('').replace(/[^a-z]/g, '').slice(0, 4); };
+// Real cloud TEST login IDs where the first4+last4 pattern is wrong (user, 2026-11-06): Mallory Redcay = mallbuoh,
+// tomdavi = debbobri, chenrema = chenhill.
+const LOGIN_ALIASES = { mallredc: 'mallbuoh', tomdavi: 'debbobri', chenrema: 'chenhill' };
+const loginIdFor = (fullName) => { const [f, ...r] = String(fullName).toLowerCase().trim().split(/\s+/); const id = (f || '').replace(/[^a-z]/g, '').slice(0, 4) + r.join('').replace(/[^a-z]/g, '').slice(0, 4); return LOGIN_ALIASES[id] || id; };
 function teamUserFor(step, claimNumber) {
   if (step === 'recovery') return TEAMS['Subrogation/Recovery'].rep[0];
   if (step === 'payment') { const t = TEAMS[LOB_TEAM[lobOfClaim(claimNumber)]]; return t ? t.rep[0] : null; }

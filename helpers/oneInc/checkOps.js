@@ -422,11 +422,22 @@ async function openNav(page, id) {
   await W.settle(page, 4000);
 }
 // Workplan rows (Due Priority Status Subject …) → observation "Workplan activities".
+// The Workplan shows 15 activities a page; every page is read (an older claim's new activities land on its LAST page —
+// WC-UT-90-25-0746427 had 45, the failed-to-send ones on page 3, 2026-11-06).
 async function workplan(page) {
   await openNav(page, 'Claim-MenuLinks-Claim_ClaimWorkplan');
-  const rows = (await listRows(page)).filter((r) => !/^Due Priority/.test(r));
+  const rows = [];
+  for (let i = 0; i < 20; i++) {
+    for (const r of await listRows(page)) if (!rows.includes(r)) rows.push(r);
+    const next = page.locator('[id$="WorkplanLV-_ListPaging-next"]').first();
+    if (!await next.isVisible().catch(() => false) || await next.getAttribute('aria-disabled').catch(() => 'true') === 'true') break;
+    await next.click();
+    await W.settle(page, 2500);
+  }
+  rows.splice(0, rows.length, ...rows.filter((r) => !/^Due Priority/.test(r)));
   page.__workplan = rows;
-  return observe(page, 'Workplan activities', rows.join(' | ') || 'none');
+  // Newest first: observe() keeps 1,500 characters, and the activities a case looks for are the ones just created (last page).
+  return observe(page, 'Workplan activities', rows.slice().reverse().join(' | ') || 'none');
 }
 // Remembers the open activities now; activitiesClosedSince() reports which of them are no longer open.
 async function snapshotActivities(page) {

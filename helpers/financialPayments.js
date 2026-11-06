@@ -16,6 +16,8 @@ const VENDORS = {
   adjustment: { name: 'ADJUSTMENT SERVICES INC', search: 'ADJUSTMENT SERVICES', taxId: '58-1623664' },
   litigation: { name: 'LITIGATION SOLUTIONS LLC', search: 'LITIGATION SOLUTIONS', taxId: '25-1834107' },
   taylor: { name: 'TAYLOR REPORTING SERVICE', search: 'TAYLOR REPORTING', taxId: '58-2338930' },
+  // On Administration › Tax Ids Requiring Approval (cloud TEST, 2026-11-06) — DMTA0106.
+  zynex: { name: 'ZYNEX MEDICAL', search: 'ZYNEX', taxId: '84-1451963' },
   paFire: { name: 'PA FIRE RECOVERY SERVICE LLC', search: 'PA FIRE RECOVERY', taxId: '27-2990668' },
 };
 
@@ -47,7 +49,13 @@ const fieldValue = async (page, label) => ((findField(await readScreen(page), la
  */
 async function makePayment(page, opts = {}) {
   const { vendor, payee = 'claimant', payTo, reserveLine = 'open', costType, costCategory, adjusterNumber, boxNumber, txn = 'Partial Payment', stopOnDuplicate = false } = opts;
-  const amount = opts.amount || uniqueAmount();
+  // An amount no check on the claim already has: a random $1.xx collided with an earlier check (8200004851) and the
+  // case then read THAT check (DMTA0101 false read, 2026-11-06).
+  let amount = opts.amount;
+  if (!amount) {
+    const used = new Set((await CO.checkRows(page).catch(() => [])).map((r) => money(r.amount)));
+    for (let i = 0; i < 50 && (!amount || used.has(amount)); i++) amount = uniqueAmount(1 + Math.floor(i / 10));
+  }
   if (!page.__oneIncParties) await W.getParties(page).catch(() => {});
   if (opts.via === 'realtime') await openRealTimeCheck(page);
   else await W.openPayment(page, 'actions');
@@ -58,7 +66,16 @@ async function makePayment(page, opts = {}) {
       if (!await W.searchAddressBookVendor(page, vendor.search, vendor.taxId)) throw new W.Blocked(`vendor "${vendor.search}" (Tax ID ${vendor.taxId}) not found in the Address Book`);
       res.payee = `${vendor.name || vendor.search} (${vendor.taxId})`;
     } else res.payee = await W.selectPayee(page, payee);
-    if (payTo) await W.fill(page, 'Pay To The Order Of', payTo);
+    if (payTo) {
+      // Pay To is read-only after a payee is chosen until the step's "Edit" is pressed (DMTA0104, 2026-11-06).
+      await page.getByRole('button', { name: 'Edit', exact: true }).first().click().catch(() => {});
+      await W.settle(page, 2000);
+      const box = page.locator('.gw-InputWidget').filter({ hasText: /Pay To The Order Of/ }).locator('input, textarea').first();
+      if (!await box.isVisible().catch(() => false)) throw new W.Blocked('"Pay To The Order Of" is still read-only after Edit');
+      await box.fill(payTo);
+      await box.press('Tab').catch(() => {});
+      await W.settle(page, 1500);
+    }
     res.fields['Pay To The Order Of'] = await fieldValue(page, 'Pay To The Order Of');
     const s1 = await W.nextFillingServicePeriod(page);
     if ((await W.currentStep(page) || {}).n !== 2) throw new W.Blocked(`payee step refused Next: ${[...s1.messages, s1.south].filter(Boolean).join(' / ').slice(0, 300) || 'no message'}`);
@@ -134,9 +151,10 @@ async function openRealTimeCheck(page) {
 }
 
 // Checks/Payments row of the given amount (newest) → { number, payee, amount, status } or null.
-async function checkRow(page, amount) {
+async function checkRow(page, amount, payee) {
   const rows = await CO.checkRows(page);
-  return rows.filter((r) => money(r.amount) === money(amount)).slice(-1)[0] || null;
+  const p = String(payee || '').replace(/\s*\(.*$/, '').trim().toUpperCase();
+  return rows.filter((r) => money(r.amount) === money(amount) && (!p || String(r.payee || r.text).toUpperCase().includes(p))).slice(-1)[0] || null;
 }
 
 // Opens the newest check of `amount` and reads what a QA would look at: status, 1099 Box Number, Adjuster Number, the
