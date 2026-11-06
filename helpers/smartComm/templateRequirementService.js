@@ -149,6 +149,8 @@ function classifyDynamicShape(line) {
 function isNoiseLine(line) {
   // No letter or digit at all (a stray "\" left by the doc's markup — DIG36 R5, 2026-10-17) is never checkable wording.
   if (!/[A-Za-z0-9]/.test(String(line || ''))) return true;
+  // A fillable source form's button caption ("Reset Form", DIG34401 2026-11-05) — a control, never printed.
+  if (/^\s*(reset|clear|print|submit|save)\s+(form|all|fields)\s*$/i.test(line)) return true;
   return /^[\s.,:;!?'"()|-]+$/.test(line) && line.replace(/\s/g, '').length <= 3;
 }
 

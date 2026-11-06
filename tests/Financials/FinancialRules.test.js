@@ -557,8 +557,10 @@ async function claimLevelRecoveryReserve(page) {
   await W.settle(page, 3500);
   // A claim that already has recovery reserves lists them first; Add appends the new row LAST (2026-11-06) — always add
   // one and work on the highest row index.
-  await page.getByRole('button', { name: 'Add', exact: true }).first().click();
-  await W.settle(page, 3000);
+  // The screen may already show an empty row (as the Reserve screen does) — use it; Add only when there is none, so
+  // no second empty row is left to fail the Save (application error, 2026-11-06).
+  const hasBlank = await page.evaluate(() => [...document.querySelectorAll('select[name*="EditableRecoveryReservesLV-"][name$="-Exposure"]')].some((x) => x.offsetParent && /claim-level|none|^$/i.test(((x.options[x.selectedIndex] || {}).text || '').trim()) && !x.disabled));
+  if (!hasBlank) { await page.getByRole('button', { name: 'Add', exact: true }).first().click(); await W.settle(page, 3000); }
   const ix = await page.evaluate(() => Math.max(-1, ...[...document.querySelectorAll('[name*="EditableRecoveryReservesLV-"]')].map((e) => Number((e.name.match(/EditableRecoveryReservesLV-(\d+)-/) || [])[1])).filter((n) => !Number.isNaN(n))));
   // Plan in the page, set through Playwright: a DOM value change was not taken by CC (the default Subrogation category
   // stayed, 2026-11-06 rerun).
@@ -882,6 +884,18 @@ async function riReserveChange(page, { delta = 100, partial = true, amountToPost
     const box = riRow(page).locator('input[type=text]').first();
     seen.amountBox = await box.isVisible().catch(() => false);
     if (partial && seen.amountBox) { await box.fill(amountToPost); await box.press('Tab').catch(() => {}); await W.settle(page, 1500); }
+  }
+  // The Reserve screen opens with an EMPTY new row (Exposure / Cost Type <none>) that fails Save with "Missing required
+  // field Exposure" (+ an application error) — tick it and Remove it first (2026-11-06).
+  const blank = await page.evaluate(() => { const s = [...document.querySelectorAll('select[name*="EditableReservesLV-"][name$="-Exposure"]')].find((x) => x.offsetParent && !/\S/.test(((x.options[x.selectedIndex] || {}).text || '').replace(/<none>/i, ''))); return s ? (s.name.match(/EditableReservesLV-(\d+)-/) || [])[1] : null; });
+  if (blank !== null && blank !== undefined) {
+    const row = page.locator(`tr:has(select[name$="EditableReservesLV-${blank}-Exposure"])`).first();
+    const cell = row.locator('td').first();
+    await (await cell.locator(':visible').count() ? cell.locator(':visible').last() : cell).click({ force: true }).catch(() => {});
+    await W.settle(page, 800);
+    await page.getByRole('button', { name: 'Remove', exact: true }).first().click().catch(() => {});
+    await W.settle(page, 2500);
+    seen.removedBlank = !(await page.locator(`select[name$="EditableReservesLV-${blank}-Exposure"]`).count());
   }
   await page.getByRole('button', { name: 'Save', exact: true }).first().click();
   await W.settle(page, 4000);

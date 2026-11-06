@@ -1772,6 +1772,17 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       reason: `The typed value landed in a different field ("${first.technicalName}", ${first.id}), not this one.`,
     });
   }
+  // A template can reuse one data name for unrelated boxes (DIG34401 2026-11-06: "claimantPhone" on the injury /
+  // body-part code boxes "55", "43", "29" and a date) — a phone row whose box shows a non-phone value isn't that field.
+  for (const c of checks) {
+    if (!/phone/i.test(c.dictionaryField || '')) continue;
+    const shown = String(c.before || '').replace(/[[\]]/g, '').trim();
+    if (!shown || (shown.match(/\d/g) || []).length >= 7) continue;
+    Object.assign(c, {
+      result: 'SKIPPED', dictionaryField: null, dictionaryEditable: null, dictionaryMatchedOn: null, dictionaryAgrees: null,
+      reason: `This box shows "${shown}", not a phone number — the template reuses the data name "${c.technicalName}" here, so the "${c.technicalName}" Data Dictionary row doesn't apply.`,
+    });
+  }
   };
   await editFieldsFirstPass(fields, interactiveChecks);
   // Known-value matching: several dictionary-tracked fields render with NO preceding label at all, so no

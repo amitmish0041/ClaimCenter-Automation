@@ -687,6 +687,15 @@ function evaluateOne(req, haystack, context) {
           reason: `Same wording is present but punctuation/spacing differs from the test-data value — treated as a match.`,
         };
       }
+      // The same date printed day-first ("24/07/25" for July 24, 2025 — DIG34401 / DIG218, 2026-11-06): a real
+      // defect, but say what printed instead of "missing".
+      const dm = /^[A-Za-z]+\s+\d{1,2},?\s+\d{4}$/.test(String(expected).trim()) ? new Date(expected) : null;
+      if (dm && !isNaN(dm)) {
+        const p2 = (n) => String(n).padStart(2, '0');
+        const dayFirst = [`${p2(dm.getDate())}/${p2(dm.getMonth() + 1)}/${dm.getFullYear()}`, `${p2(dm.getDate())}/${p2(dm.getMonth() + 1)}/${String(dm.getFullYear()).slice(2)}`]
+          .find((d) => dm.getDate() > 12 && haystack.includes(d));
+        if (dayFirst) return { expected, actual: dayFirst, result: 'FAIL', reason: `The date prints day-first as "${dayFirst}" (DD/MM) instead of "${expected}" — the date format is wrong.` };
+      }
       return {
         expected, actual: 'Not Found', result: 'FAIL',
         reason: req.expectedSource.startsWith('payload.')

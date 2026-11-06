@@ -14,12 +14,26 @@ const path = require('path');
 const W = require('./wizardDriver');
 
 const CM_URL = process.env.CM_URL || 'https://cm-test-dngldev.donegal.beta5-andromeda.guidewire.net/ContactManager.do';
-const LEDGER = path.join(__dirname, '..', '..', 'results', 'oneInc', 'cm-restore.json');
+// The ledger lives on the team share next to the claim stock: a per-machine ledger left BAIKOW LEGAL's address changed
+// from a run interrupted on one PC (11/04) and every other PC saw "nothing to restore" (GCCM-1003 VBR TC-189, 2026-11-06).
+// A leftover local ledger (the old location) is merged in on first read.
+const LEDGER = path.join(require('./reportService').RESULTS_DIR, 'TestData', `cm-restore-${String(process.env.CC_TIER || 'test').toLowerCase()}.json`);
+const OLD_LEDGER = path.join(__dirname, '..', '..', 'results', 'oneInc', 'cm-restore.json');
 const FIELD = 'input[name$="ExtTINValidDate"]';
 const PHONE = 'input[name$="ABPersonVendorInputSet-Work-GlobalPhoneInputSet-NationalSubscriberNumber"]';
 const EMAIL = 'input[name$="ABPersonVendorInputSet-Primary"]';
 
-const readLedger = () => { try { return JSON.parse(fs.readFileSync(LEDGER, 'utf8')); } catch (_) { return []; } };
+function readLedger() {
+  let l = [];
+  try { l = JSON.parse(fs.readFileSync(LEDGER, 'utf8')); } catch (_) { /* none yet */ }
+  try {
+    const old = JSON.parse(fs.readFileSync(OLD_LEDGER, 'utf8'));
+    for (const e of old) if (!l.some((x) => x.kind === e.kind && x.taxId === e.taxId && x.who === e.who)) l.push(e);
+    writeLedger(l);
+    fs.unlinkSync(OLD_LEDGER);
+  } catch (_) { /* no local leftovers */ }
+  return l;
+}
 const writeLedger = (l) => { fs.mkdirSync(path.dirname(LEDGER), { recursive: true }); fs.writeFileSync(LEDGER, JSON.stringify(l, null, 2)); };
 const fmt = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
 

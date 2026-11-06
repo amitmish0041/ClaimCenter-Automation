@@ -204,3 +204,8 @@ test('a sample month/day left at the end of fixed wording is checked as a date (
   assert.ok(!fixed.some((t) => /May 03/.test(t)), `sample date not checked verbatim: ${JSON.stringify(fixed)}`);
   assert.ok(fixed.some((t) => /the loss date is$/.test(t.trim())), `the wording is still checked: ${JSON.stringify(fixed)}`);
 });
+
+test('a fillable form\'s "Reset Form" button caption is not checked as printed wording (DIG34401)', async () => {
+  const { requirements } = await requirementsFor([['Reset Form'], ['Employee name ', [0, 'John Smith']]], { 0: 'Claimant Name' });
+  assert.ok(!enabledStatics(requirements).some((t) => /reset form/i.test(t)));
+});

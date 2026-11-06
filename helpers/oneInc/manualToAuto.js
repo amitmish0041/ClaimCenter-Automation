@@ -137,6 +137,23 @@ async function prepareVinIncident(page, { year = '1987', lossCause, detailed } =
       break;
     }
   }
+  // A replaced vehicle comes with no driver: Update refused "Driver Name" / "Relation to Insured" (fillRequired does not
+  // pick contacts — PA-PA-01-26-0749064, GCCM-1003 VBR TC-167, 2026-11-06). Driver = first claim contact; Relation =
+  // Self when that is the insured, else the first real option.
+  {
+    const sc = await readScreen(page);
+    const ins = ((findField(sc, 'Insured') || {}).value || '').trim().toLowerCase();
+    for (const label of ['Driver Name', 'Relation to Insured']) {
+      const f = findField(await readScreen(page), label);
+      if (!f || f.kind !== 'select' || (f.value && !/<none>/i.test(f.value))) continue;
+      const real = (f.options || []).filter((o) => o && !/<none>|^New|^Existing|^Search|^View/i.test(o));
+      const driver = (findField(await readScreen(page), 'Driver Name') || {}).value || '';
+      const pick = label === 'Driver Name'
+        ? (real.find((o) => ins && o.toLowerCase().includes(ins)) || real[0])
+        : ((ins && driver.toLowerCase().includes(ins) && real.find((o) => /^Self$/i.test(o))) || real.find((o) => /^Self$/i.test(o)) || real[0]);
+      if (pick) { await A.selectByLabel(page, label, pick).catch(() => {}); await W.settle(page, 1500); }
+    }
+  }
   await W.settle(page, 1200);
   for (let r = 0; r < 2; r++) {
     await W.clickButton(page, 'Update');

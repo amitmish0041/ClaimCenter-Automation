@@ -462,7 +462,10 @@ async function evaluate(item, s, state, record) {
       present ? 'shown' : 'not shown', present === n.present ? 'PASS' : 'FAIL', { missing: !present && n.present }));
   }
   if (item.message) {
-    const text = [...s.messages, s.south].join(' / ');
+    // CC's "New Payment Error" page (a payment refused as it is started — VBR.002 on Quick Payment) is plain page text,
+    // not a message widget: it was read as "no message" (GCCM-1003 VBR TC-086, 2026-11-06).
+    const npe = /New Payment Error (.*?)(Return to the claim|$)/.exec(s.body || '');
+    const text = [...s.messages, s.south, npe ? `New Payment Error: ${npe[1].trim()}` : ''].filter(Boolean).join(' / ');
     const present = item.message.re.test(text);
     return record(row('message', `Validation message ${item.message.re.source}`, item.message.present ? 'message shown' : 'message not shown',
       text.trim() ? text.slice(0, 300) : 'no message', present === item.message.present ? 'PASS' : 'FAIL', { missing: !present && item.message.present }));
@@ -556,6 +559,17 @@ async function validate(page, v, res, ctx, capture, record, dirty) {
   };
   await W.clickButton(page, 'Finish');
   await settleAfterFinish();
+  // Still in the wizard after 30 s with nothing on the screen: CC was still saving, or the click landed while the page
+  // was greyed out — the next step then navigated away and the payment was lost (GCCM-1003 VBR TC-190, 2026-11-06).
+  // Wait once more, then press Finish again only if the wizard still shows no message.
+  if (await W.inWizard(page) && !msgsOf(await readScreen(page))) {
+    await page.waitForTimeout(30000);
+    if (await W.inWizard(page) && !msgsOf(await readScreen(page))) {
+      ctx.log(`[OneInc] ${res.scenarioId}: Finish showed nothing for 60 s — pressing Finish again`);
+      await W.clickButton(page, 'Finish').catch(() => {});
+      await settleAfterFinish();
+    }
+  }
   dirty();
   // CC may stop on a warnings-only page ("Possible duplicate payment found", "At least one aggregate limit on this
   // claim has been exceeded") that saves on a second Finish. W.warningsOnly reads CC's Validation Results worksheet
