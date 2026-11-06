@@ -854,32 +854,32 @@ Object.assign(META, {
   'TR-307': { story: 'Reinsurance', storyTitle: 'GCCM-497 Feature - Reinsurance', name: 'RI-014 All financial transaction types — Umbrella Legacy', expected: 'RI fields on reserve and payment transactions' },
 });
 
-const riRow = (page) => page.locator('tr:visible').filter({ hasText: /Post to Reinsurance\?/ }).first();
-const riText = async (page) => (await riRow(page).innerText().catch(() => '')).replace(/\s+/g, ' ');
+const riRow = (page, row = 0) => page.locator('tr:visible').filter({ hasText: /Post to Reinsurance\?/ }).nth(row);
+const riText = async (page, row = 0) => (await riRow(page, row).innerText().catch(() => '')).replace(/\s+/g, ' ');
 
 // Reserve screen with the RI questions. Returns what appeared at each answer and whether the save went through.
-async function riReserveChange(page, { delta = 100, partial = true, amountToPost = '50' } = {}) {
+async function riReserveChange(page, { delta = 100, partial = true, amountToPost = '50', row = 0 } = {}) {
   const seen = {};
   await W.openActionsMenu(page);
   await page.getByRole('menuitem', { name: /^Reserve$/ }).first().click();
   await W.settle(page, 4000);
   seen.question = await riText(page);
-  const amt = page.locator('input[name$="EditableReservesLV-0-NewAvailableReserves"]').first();
+  const amt = page.locator(`input[name$="EditableReservesLV-${row}-NewAvailableReserves"]`).first();
   const cur = Number(String(await amt.inputValue().catch(() => '0')).replace(/[^0-9.]/g, '')) || 0;
-  seen.row0 = (await page.locator('tr[id*="LV-0-"]').first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200);
+  seen.row0 = (await page.locator(`tr[id*="LV-${row}-"]`).first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200);
   await amt.fill(String((cur + delta).toFixed(2)));
   await amt.press('Tab').catch(() => {});
   await W.settle(page, 2000);
-  const radios = () => riRow(page).getByRole('radio');
+  const radios = () => riRow(page, row).getByRole('radio');
   await radios().nth(0).click({ force: true });
   await W.settle(page, 2500);
-  seen.afterYes = await riText(page);
+  seen.afterYes = await riText(page, row);
   if (partial !== null) {
     // The Partial radio is a styled control: a role click did not select it (checked=false in the probe, 2026-11-06).
     // Click the underlying input in the page, then confirm it is checked.
-    await page.evaluate((v) => { const i = [...document.querySelectorAll('input[type=radio]')].find((x) => /0-ExtPartialToExcess$/.test(x.name) && x.value === v); if (i) i.click(); }, partial ? 'true' : 'false');
+    await page.evaluate((vr) => { const [v, r] = vr.split('|'); const i = [...document.querySelectorAll('input[type=radio]')].find((x) => new RegExp(`-${r}-ExtPartialToExcess$`).test(x.name) && x.value === v); if (i) i.click(); }, [partial ? 'true' : 'false', row].join('|'));
     await W.settle(page, 3000);
-    seen.partialChecked = await page.evaluate((v) => !!([...document.querySelectorAll('input[type=radio]')].find((x) => /0-ExtPartialToExcess$/.test(x.name) && x.value === v) || {}).checked, partial ? 'true' : 'false');
+    seen.partialChecked = await page.evaluate((vr) => { const [v, r] = vr.split('|'); return !!([...document.querySelectorAll('input[type=radio]')].find((x) => new RegExp(`-${r}-ExtPartialToExcess$`).test(x.name) && x.value === v) || {}).checked; }, [partial ? 'true' : 'false', row].join('|'));
     seen.afterPartial = await riText(page);
     const box = riRow(page).locator('input[type=text]').first();
     seen.amountBox = await box.isVisible().catch(() => false);
@@ -887,15 +887,15 @@ async function riReserveChange(page, { delta = 100, partial = true, amountToPost
   }
   // Every reserve line carries its own REQUIRED "Post to Reinsurance?" — the unchanged lines get No, else Save says
   // "Please fill in all required fields." (WC / Auto / Umbrella claims with several lines, 2026-11-06).
-  seen.otherLinesNo = await page.evaluate(() => {
+  seen.otherLinesNo = await page.evaluate((row) => {
     let n = 0;
     for (const i of document.querySelectorAll('input[type=radio][value="false"]')) {
-      if (!/-(\d+)-ExtPostToExcess$/.test(i.name) || /-0-ExtPostToExcess$/.test(i.name)) continue;
+      if (!/-(\d+)-ExtPostToExcess$/.test(i.name) || new RegExp(`-${row}-ExtPostToExcess$`).test(i.name)) continue;
       const yes = document.querySelector(`input[type=radio][name="${i.name}"][value="true"]`);
       if (!i.checked && !(yes && yes.checked)) { i.click(); n++; }
     }
     return n;
-  });
+  }, row);
   await W.settle(page, 2500);
   // The Reserve screen opens with an EMPTY new row (Exposure / Cost Type <none>) that fails Save with "Missing required
   // field Exposure" (+ an application error) — tick it and Remove it first (2026-11-06).
@@ -972,7 +972,8 @@ test.describe('E Reinsurance - WC activity', () => {
     const before = (await R.workplanRows(page, cn)).filter((r) => actRe.test(r));
     await R.step(page, ti, `WC Legacy claim ${cn} (RE company 0035 per its existing "Reinsurance Reserve … to 0035" activity) — Reinsurance Reserve activities before: ${before.length}`);
     await B.openExistingClaim(page, cn);
-    const r = await riReserveChange(page, { delta: 100, partial: false });
+    // Second reserve line: TR-300 already changed the first line today (VTDMPL61, same line same day).
+    const r = await riReserveChange(page, { delta: 100, partial: false, row: 1 });
     await R.step(page, ti, `Reserve ${r.from.toFixed(2)} → ${r.to.toFixed(2)} on the first line, Post to Reinsurance = Yes (full) › Save — ${r.saved ? 'saved' : 'NOT saved'}${r.msgs.length ? `: ${r.msgs.join(' | ')}` : ''}`);
     await R.check(page, ti, { description: 'Reserve change saved (goes to Submitting / Notifying)', expected: 'Saved', actual: r.saved ? 'saved' : r.msgs.join(' | '), ok: r.saved });
     await page.waitForTimeout(8000);
