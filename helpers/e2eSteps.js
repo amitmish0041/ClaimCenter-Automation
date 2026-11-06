@@ -731,4 +731,4 @@ if (process.env.CC_E2E_POLICY_FROM_POOL === '1' && process.env.CC_E2E_LOB && pro
   } catch (e) { console.log('Claim inventory not readable (' + e.message.split('\n')[0] + ') — using the .env policy list'); }
 }
 
-module.exports = { IS_CLOUD, ALL, steps, on, existingClaim, stepOf, gate, recovery, close, pickFromInventory, receiptCloud, repairCloud, validateCloud, openSubrogationCloud, TEAMS, LOB_TEAM, loginIdFor, teamUserFor, cannotView };
+module.exports = { IS_CLOUD, ALL, steps, on, existingClaim, stepOf, gate, recovery, close, pickFromInventory, receiptCloud, repairCloud, validateCloud, openSubrogationCloud, completeActivitiesCloud, TEAMS, LOB_TEAM, loginIdFor, teamUserFor, cannotView };

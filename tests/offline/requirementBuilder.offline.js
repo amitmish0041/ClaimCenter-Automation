@@ -194,3 +194,13 @@ test('text typed in front of a Free Form blank is the BA\'s sample entry (DIG151
   assert.ok(!fixed.some((t) => /Workers’ Compensation/.test(t)), `sample entry not checked: ${JSON.stringify(fixed)}`);
   assert.ok(fixed.some((t) => /Thank you for reporting/.test(t)), `other wording still checked: ${JSON.stringify(fixed)}`);
 });
+
+test('a sample month/day left at the end of fixed wording is checked as a date (DIG101 ", the loss date is May 03,")', async () => {
+  const { requirements } = await requirementsFor(
+    [['Per your request regarding claim ', [0, 'PA-01-26-0000001'], '. Our insured driver is      , the loss date is May 03,', [1, '2018'], '.']],
+    { 0: 'Claim Number', 1: 'Date of Loss Year' },
+  );
+  const fixed = enabledStatics(requirements);
+  assert.ok(!fixed.some((t) => /May 03/.test(t)), `sample date not checked verbatim: ${JSON.stringify(fixed)}`);
+  assert.ok(fixed.some((t) => /the loss date is$/.test(t.trim())), `the wording is still checked: ${JSON.stringify(fixed)}`);
+});

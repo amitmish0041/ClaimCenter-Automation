@@ -302,10 +302,23 @@ async function gridRows(page) {
 
 // Workplan rows (subject, status, assigned to …) of the claim. Reopens the claim first: after a team login the left
 // nav can be off the claim, and the Desktop's activity list was read instead (HO-PA-01-26-0749008, 2026-11-05).
+// ALL pages of the Workplan, with the filter on "All activities" (open AND completed): page 1 only hid activities on
+// busy claims (2026-11-06) — "activity not created" verdicts must never come from a partial read.
 async function workplanRows(page, cn) {
   if (cn) await B.openExistingClaim(page, cn);
   await clickMenu(page, /^Workplan$/);
-  return gridRows(page);
+  const filter = page.locator('select[name$="WorkplanFilter"]').first();
+  if (await filter.isVisible().catch(() => false)) {
+    const all = await filter.locator('option').evaluateAll((os) => (os.find((o) => o.text.trim() === 'All activities') || {}).value);
+    if (all) { await filter.selectOption(all).catch(() => {}); await page.waitForTimeout(2500); }
+  }
+  if (await wpFirst(page).isVisible().catch(() => false)) { await wpFirst(page).click().catch(() => {}); await page.waitForTimeout(1500); }
+  const out = [];
+  for (let p = 0; p < 20; p++) {
+    for (const r of await gridRows(page)) if (!out.includes(r)) out.push(r);
+    if (!await wpGoNext(page)) break;
+  }
+  return out;
 }
 
 async function hasActivity(page, re, cn) {

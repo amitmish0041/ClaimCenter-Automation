@@ -57,6 +57,13 @@ async function makePayment(page, opts = {}) {
     for (let i = 0; i < 50 && (!amount || used.has(amount)); i++) amount = uniqueAmount(1 + Math.floor(i / 10));
   }
   if (!page.__oneIncParties) await W.getParties(page).catch(() => {});
+  // Cloud: "At least one document needs to be linked to checks over $1,000" (VBR.010) — put OneInc's supporting
+  // document on the claim first (as e2eSteps.close does); it is linked on step 3 below when CC asks.
+  const K = require('./oneInc/recipes/workerK');
+  if (Number(amount) > 1000) {
+    const docs = await K.documentRows(page).catch(() => []);
+    if (!docs.some((t) => t.toLowerCase().includes(K.DOC_NAME.toLowerCase()))) await K.addDocument(page).catch((e) => console.log('makePayment: add document failed — ' + e.message.split('\n')[0]));
+  }
   if (opts.via === 'realtime') await openRealTimeCheck(page);
   else await W.openPayment(page, 'actions');
   const res = { amount, finished: false, messages: [], fields: {}, payee: '' };
@@ -66,6 +73,9 @@ async function makePayment(page, opts = {}) {
       if (!await W.searchAddressBookVendor(page, vendor.search, vendor.taxId)) throw new W.Blocked(`vendor "${vendor.search}" (Tax ID ${vendor.taxId}) not found in the Address Book`);
       res.payee = `${vendor.name || vendor.search} (${vendor.taxId})`;
     } else res.payee = await W.selectPayee(page, payee);
+    // The insured is often also the BI claimant (PA claims: MIKE AANRUD); the reserve lines offered follow the payee
+    // Type, so a BI payment needs Type = Claimant (2026-11-06: Type Insured offered only the 1st Party lines).
+    if (opts.payeeType) res.fields.Type = await choose(page, 'Type', opts.payeeType);
     if (payTo) {
       // Pay To is read-only after a payee is chosen until the step's "Edit" is pressed (DMTA0104, 2026-11-06).
       await page.getByRole('button', { name: 'Edit', exact: true }).first().click().catch(() => {});
@@ -120,6 +130,15 @@ async function makePayment(page, opts = {}) {
       const m = [...s.messages, s.south].filter(Boolean);
       if (m.length) {
         res.messages.push(...m.filter((x) => !res.messages.includes(x)));
+        if (/document needs to be linked/i.test(m.join(' ')) && !res.docLinked) {
+          res.docLinked = true;
+          await K.linkDocument(page).catch((e) => res.messages.push('link document failed: ' + e.message.split('\n')[0]));
+          // The linked document row adds a required "Send Status" (2026-11-06) — fill required empties again.
+          for (let r = 0; r < 2; r++) if (!(await W.fillRequiredEmpties(page)).length) break;
+          await W.clickButton(page, 'Finish').catch(() => {});
+          await W.settle(page, 3000);
+          continue;
+        }
         if (!W.warningsOnly(s)) break;
         if (/duplicate/i.test(m.join(' ')) && stopOnDuplicate) { res.duplicatePage = true; break; }
         const notDup = page.getByRole('radio', { name: 'Not a duplicate check', exact: true }).first();

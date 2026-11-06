@@ -508,6 +508,16 @@ function classifyResidualFragment(fragment, docOrder, { sampleNames = [] } = {})
   if (SAMPLE_DATE_RE.test(line)) {
     return [{ id: 'R0', description: 'A date-shaped value must appear', type: 'dynamicShape', shape: 'date', docOrder }];
   }
+  // Fixed wording ending in a SAMPLE date's leftover month/day (", the loss date is May 03," — its year was a
+  // comment; DIG101, QA 2026-11-05): the wording stays verbatim, the sample date is checked as a date shape.
+  const trailingSample = line.match(/^(.*?[A-Za-z].*?)\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}[.,]?(?:\s*\d{4})?)$/i);
+  if (trailingSample && !isNoiseLine(trailingSample[1].trim())) {
+    // The wording goes back through this classifier, so its own blank gaps ("report #       for") still split.
+    return [
+      ...classifyResidualFragment(trailingSample[1], docOrder, { sampleNames }),
+      { id: 'R0', description: 'A date-shaped value must appear', type: 'dynamicShape', shape: 'date', docOrder },
+    ];
+  }
 
   // The mock-up's own sample VALUE for a merge field its BA comments never anchored (e.g. the signature
   // block's "DONEGAL INSURANCE GROUP" = Underwriting Company) — check the claim's real value instead.
