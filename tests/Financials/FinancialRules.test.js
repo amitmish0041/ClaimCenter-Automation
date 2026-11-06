@@ -555,15 +555,16 @@ async function claimLevelRecoveryReserve(page) {
   await W.openActionsMenu(page);
   await page.getByRole('menuitem', { name: /^Recovery Reserve$/ }).first().click();
   await W.settle(page, 3500);
-  if (!(await page.locator('[name*="EditableRecoveryReservesLV-0-"]').count())) {
-    await page.getByRole('button', { name: 'Add', exact: true }).first().click();
-    await W.settle(page, 3000);
-  }
+  // A claim that already has recovery reserves lists them first; Add appends the new row LAST (2026-11-06) — always add
+  // one and work on the highest row index.
+  await page.getByRole('button', { name: 'Add', exact: true }).first().click();
+  await W.settle(page, 3000);
+  const ix = await page.evaluate(() => Math.max(-1, ...[...document.querySelectorAll('[name*="EditableRecoveryReservesLV-"]')].map((e) => Number((e.name.match(/EditableRecoveryReservesLV-(\d+)-/) || [])[1])).filter((n) => !Number.isNaN(n))));
   // Plan in the page, set through Playwright: a DOM value change was not taken by CC (the default Subrogation category
   // stayed, 2026-11-06 rerun).
-  const plan = await page.evaluate(() => {
+  const plan = await page.evaluate((ix) => {
     const out = [];
-    for (const sel of document.querySelectorAll('[id*="EditableRecoveryReservesLV-0-"] select, select[name*="EditableRecoveryReservesLV-0-"]')) {
+    for (const sel of document.querySelectorAll(`[id*="EditableRecoveryReservesLV-${ix}-"] select, select[name*="EditableRecoveryReservesLV-${ix}-"]`)) {
       if (!sel.offsetParent || sel.disabled) continue;
       const opts = [...sel.options];
       let pick;
@@ -574,7 +575,7 @@ async function claimLevelRecoveryReserve(page) {
       if (pick) out.push({ name: sel.name, value: pick.value, text: pick.text.trim() });
     }
     return out;
-  });
+  }, ix);
   const picked = {};
   for (const p of plan) {
     await page.locator(`select[name="${p.name}"]`).first().selectOption(p.value).catch(() => {});
@@ -582,7 +583,7 @@ async function claimLevelRecoveryReserve(page) {
     picked[p.name.split('-').pop()] = p.text;
   }
   await W.settle(page, 2500);
-  await page.locator('[id*="LV-0-"] input[type="text"]:visible:not([name*="Comment" i])').last().fill('100');
+  await page.locator(`[name*="EditableRecoveryReservesLV-${ix}-"][type="text"]:visible:not([name*="Comment" i])`).last().fill('100');
   await W.settle(page, 800);
   await page.getByRole('button', { name: 'Save', exact: true }).first().click();
   await W.settle(page, 3500);
@@ -904,6 +905,7 @@ test.describe('E Reinsurance', () => {
       await R.step(page, ti, `Actions › Reserve: first line ${r.seen.row0}`);
       await R.check(page, ti, { description: "Reserve screen asks 'Post to Reinsurance?' (Yes/No)", expected: 'Post to Reinsurance? Yes No', actual: r.seen.question || '(not shown)', ok: /Post to Reinsurance\?\s*Yes\s*No/i.test(r.seen.question || '') });
       await R.check(page, ti, { description: "Yes → 'Post Partial Amount to Reinsurance?' appears", expected: 'Post Partial Amount to Reinsurance? Yes No', actual: r.seen.afterYes || '-', ok: /Post Partial Amount to Reinsurance\?/i.test(r.seen.afterYes || '') });
+      await R.check(page, ti, { description: 'Precondition: Post Partial Amount = Yes is actually selected', expected: 'radio checked', actual: String(!!r.seen.partialChecked), ok: !!r.seen.partialChecked });
       await R.check(page, ti, { description: "Partial = Yes → 'Amount to Post' is shown and required", expected: 'Amount to Post input', actual: `${r.seen.afterPartial || '-'} (input shown: ${r.seen.amountBox})`, ok: !!r.seen.amountBox && /Amount to Post/i.test(r.seen.afterPartial || '') });
       await R.step(page, ti, `Reserve ${r.from.toFixed(2)} → ${r.to.toFixed(2)}, Post to Reinsurance = Yes, Partial = Yes, Amount to Post = $50 › Save — ${r.saved ? 'saved' : 'NOT saved'}${r.msgs.length ? `: ${r.msgs.join(' | ')}` : ''}`);
       await R.check(page, ti, { description: 'Reserve change with partial RI posting saves', expected: 'Saved', actual: r.saved ? 'saved' : r.msgs.join(' | ') || 'not saved', ok: r.saved });
