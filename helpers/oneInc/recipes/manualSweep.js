@@ -88,11 +88,23 @@ async function workflowUnchanged(page) {
 // when the check leaves "Awaiting submission" (Financials Escalation batch) and then shows the outcome in that column
 // ("Not an IR document" for a NON-ImageRight document — check 8200004642). Full Check $1.0x to the claimant from an open
 // reserve line, claim document linked as "Send with Payment", Finish, escalate, poll the check (~5 min).
-async function sendCheckWithDocument(page, { amount = '1.07' } = {}) {
+// imageRight: link the claim's ImageRight document (Documents list Author "Image Right") instead of our NON-ImageRight one.
+async function sendCheckWithDocument(page, { amount = '1.07', imageRight = false } = {}) {
   const amt = amount;
   const K = require('./workerK');
+  let name = K.DOC_NAME;
+  if (imageRight) {
+    await K.openDocuments(page);
+    // First non-empty cell of the row = Document Description.
+    const ir = await page.evaluate(() => [...document.querySelectorAll('tr[id*="DocumentsLV-"]')].filter((r) => r.offsetParent && !r.querySelector('tr')
+      && /\bImage ?Right\b/i.test(r.innerText || '')).map((r) => ({ row: r.innerText.replace(/\s+/g, ' ').trim(),
+      desc: [...r.querySelectorAll('td')].map((td) => (td.innerText || '').trim()).find(Boolean) || '' }))[0]);
+    if (!ir || !ir.desc) throw new W.Blocked('no ImageRight document (Author "Image Right") on the claim');
+    name = ir.desc;
+    await C.observe(page, 'ImageRight document', ir.row.slice(0, 160));
+  }
   const docRow = () => page.evaluate((n) => [...document.querySelectorAll('tr')].filter((r) => r.offsetParent && !r.querySelector('tr')
-    && (r.innerText || '').toLowerCase().includes(n.toLowerCase())).map((r) => r.innerText.replace(/\s+/g, ' ').trim()).join(' || '), K.DOC_NAME);
+    && (r.innerText || '').toLowerCase().includes(n.toLowerCase())).map((r) => r.innerText.replace(/\s+/g, ' ').trim()).join(' || '), name);
   await W.openPayment(page, 'actions');
   await W.selectPayee(page, 'claimant');
   await W.clickButton(page, 'Next');
@@ -101,10 +113,12 @@ async function sendCheckWithDocument(page, { amount = '1.07' } = {}) {
   await W.completePaymentsStep(page, { transactionType: 'Partial Payment', amount: amt });
   await W.clickButton(page, 'Next');
   await W.settle(page, 3000);
-  await K.linkDocument(page);
+  await K.linkDocument(page, name);
   await page.locator('select[name$="TransactionSetDocumentsLV-0-SendStatus"]').first().selectOption({ label: 'Send with Payment' });
   await W.settle(page, 1500);
   await W.answerUnansweredNo(page).catch(() => {});
+  // A mailed check on some claims needs "Reason for Check" (PA-DE-01-25-0746526, 2026-11-06).
+  await W.fillRequiredEmpties(page).catch(() => {});
   for (let i = 0; i < 3; i++) {
     const fin = page.getByRole('button', { name: 'Finish', exact: true }).first();
     if (!await fin.isVisible().catch(() => false)) break;
@@ -124,7 +138,8 @@ async function sendCheckWithDocument(page, { amount = '1.07' } = {}) {
     if (/Sent Successfully|Not an IR|Failed|Over Size/i.test(row)) break;
     await page.waitForTimeout(30000);
   }
-  const m = /Other\s+(.*?)\s+\S+ \S+ \d{2}\/\d{2}\/\d{4}/.exec(row);
+  const m = /\s(Sent Successfully|Not an IR document|Failed to Send|Failed Retrieval from IR|Over Size Limit)\s/i.exec(row)
+    || /Other\s+(.*?)\s+\S+ \S+ \d{2}\/\d{2}\/\d{4}/.exec(row);
   await C.observe(page, 'Document Send Status', (m ? m[1] : row || 'document not listed on the check').slice(0, 200));
   return `${esc}; document row: ${row.slice(0, 200)}`;
 }
@@ -204,5 +219,8 @@ module.exports = (api) => {
   add('GCCM-1013/INT/TC-108', 'MS_PA_PD', [{ call: ['recipes/manualSweep.sendCheckWithDocument'] }],
     [V('Document Send Status', { value: /^Not an IR document$/i })],
     'Full Check $1.07 to the claimant with the claim document "OneInc automation - supporting document" (a NON-ImageRight document) linked as "Send with Payment"; the Financials Escalation batch is run (as the admin user) so CC sends the check, then the check\'s document Send Status is read. ' + SUBMITS);
+  add('GCCM-1013/INT/TC-109', 'MS_DE_IRDOC', [{ call: ['recipes/manualSweep.sendCheckWithDocument', { amount: '1.09', imageRight: true }] }],
+    [V('Document Send Status', { value: /^Sent Successfully$/i })],
+    'Existing claim with an ImageRight document (Documents list Author "Image Right" — profile MS_DE_IRDOC); Full Check $1.09 to the claimant with that document linked as "Send with Payment"; the Financials Escalation batch is run (as the admin user), then the check\'s document Send Status is read. CONFIRMED 2026-11-06 on PA-DE-01-25-0746526: "Sent Successfully" (the check itself held for approval: the policy was cancelled before the loss date). ' + SUBMITS);
 };
 Object.assign(module.exports, { openNewCheck, workflowHistory, workflowUnchanged, sendCheckWithDocument, openSentCheckAPD });

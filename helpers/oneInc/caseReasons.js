@@ -11,7 +11,7 @@
 const NO_ONEINC = 'OneInc does not report back on TEST (every OneInc check stays "Requesting": no External Identifier, One Inc Status or feedback)';
 const WEBHOOK = `Needs OneInc to return a status for the check (Stopped / Issued / Success / Cancelled / Error / Stop Pending) — ${NO_ONEINC}, and the suite cannot send the webhook itself`;
 const PAYLOAD = 'Checks the payload ClaimCenter sends to OneInc (field cleansing / mapping) — needs integration-log or OneInc-side access, not visible in the ClaimCenter UI';
-const DOC_SEND = 'Outcome of sending a linked document to OneInc / retrieving it from ImageRight — integration-side; the document flow does not run on TEST';
+const DOC_SEND = 'Needs a linked document whose send to OneInc FAILS (Failed to Send / Failed Retrieval from IR / Over Size Limit). The document flow runs on TEST (CONFIRMED 2026-11-06): a NON-ImageRight document or a SmartCOMM letter gives "Not an IR document", an ImageRight document "Sent Successfully" (TC-108 / TC-109 automated) — no failing document is known yet (e.g. an ImageRight document over the OneInc size limit, or one missing from ImageRight)';
 const ALLIANCE = 'Needs an Alliance Glass claim (ExtAllianceGlassClaim = TRUE). The flag is on no ClaimCenter screen — Loss Details (view and edit) has no Alliance / glass field (CONFIRMED 2026-10-27) — it is set only when the claim comes in through the Alliance Glass FNOL intake, which UI automation cannot create';
 
 const M = (why) => ({ automation: 'MANUAL', reason: why });
@@ -57,7 +57,6 @@ const REASONS = {
   'GCCM-1013/INT/TC-105': M('HiMarley case id sent in the OneInc payload (PM_CaseID) — ' + PAYLOAD),
   'GCCM-1013/INT/TC-106': M(DOC_SEND),
   'GCCM-1013/INT/TC-107': M(DOC_SEND),
-  'GCCM-1013/INT/TC-109': M(DOC_SEND),
   'GCCM-1013/INT/TC-110': M(DOC_SEND),
   'GCCM-1013/INT/TC-111': M(DOC_SEND),
   'GCCM-1013/INT/TC-112': M(DOC_SEND),

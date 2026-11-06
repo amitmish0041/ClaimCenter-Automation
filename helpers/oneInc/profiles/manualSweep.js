@@ -15,7 +15,14 @@ const base = (label) => ({ label, lob: 'AUTO', state: 'PA', prefix: /^PA-PA-/, p
 module.exports = {
   MS_PA_PD: base('PA personal auto + reserved Property Damage Other Than Vehicle Damage exposure + claim document (VBR.008)'),
   MS_PA_BIG: base('PA personal auto, Vehicle line reserved to $151,000 + claim document (VBR.008 / VBR.011)'),
+  // Pool only — an EXISTING claim with an ImageRight document (INT.011 "Sent Successfully"), added 2026-11-06 with
+  //   node scripts/provisionOneIncClaims.js --add MS_DE_IRDOC=PA-DE-01-25-0746526
+  // ("Surcharge Worksheet", Author Image Right). Its policy was cancelled before the loss date, so checks hold for approval.
+  MS_DE_IRDOC: { label: 'Existing DE personal auto claim with an ImageRight document (INT.011)', lob: 'AUTO', state: 'DE', prefix: /^PA-DE-/, poolOnly: true,
+    // fnol only so provisionOneIncClaims.js --add accepts the profile; never FNOL-created.
+    fnol: { policyType: 'Personal Auto', state: 'DE', lossCauseCode: 'LC57', lossDescription: 'not used (pool-only existing claim)', incidents: [], exposures: [] } },
 };
+Object.defineProperty(module.exports.MS_DE_IRDOC, 'data', data((D) => [D.irDocument()]));
 Object.defineProperty(module.exports.MS_PA_PD, 'data', data((D) => [
   D.pdExposure(),
   D.reserve({ exposure: /Other Than Vehicle/i, amount: 6000, min: 3001 }),

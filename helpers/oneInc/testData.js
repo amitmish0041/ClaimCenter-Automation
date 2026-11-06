@@ -343,6 +343,20 @@ const D = {
     build: (page) => K().addDocument(page, { name, type }),
   }),
 
+  // A document that lives in ImageRight (Documents list Author "Image Right"). CC cannot create one on TEST: New Document
+  // offers only a NON-ImageRight record or a template, and a SmartCOMM letter linked to a check is "Not an IR document"
+  // (CONFIRMED 2026-11-06, DIG126 on PA-PA-01-26-0748992). Existing claims carry them (PA-DE-01-25-0746526 "Surcharge
+  // Worksheet" — sent with a check → "Sent Successfully", 2026-11-06).
+  irDocument: () => ({
+    id: 'document:ImageRight',
+    label: 'An ImageRight document on the claim (Documents list Author "Image Right")',
+    check: async (page) => {
+      const rows = await K().documentRows(page);
+      return rows.some((t) => /\bImage ?Right\b/i.test(t)) ? '' : `no ImageRight document on the claim (${rows.length} document(s))`;
+    },
+    build: () => { throw new W.Blocked('an ImageRight document cannot be created from ClaimCenter — use a claim that already has one (e.g. PA-DE-01-25-0746526)'); },
+  }),
+
   // Wraps an existing profile prepare hook ('<module>.<fn>') as an item (its note is the record).
   hook: (ref, label) => ({
     id: `hook:${ref}`,
