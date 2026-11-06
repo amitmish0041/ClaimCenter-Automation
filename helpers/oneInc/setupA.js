@@ -254,8 +254,29 @@ async function revalidate(page) {
 // "Claim denied in part…") stays on the screen for a `message` check. The core validate step presses Finish a second
 // time on warnings-only pages (duplicate check), which would submit the payment and hide the warning. If no warning or
 // error appears the payment IS submitted (ONEINC_ALLOW_FINISH=1 required, TEST only).
-async function finishOnce(page) {
+// pastWarnings: a warnings-only page that is not what the case looks for is pressed through once more, as a user would —
+// the HO missing-payee cases stopped on "Loss payee/additional insured must appear on check…" and never reached the
+// Missing Payee worksheet (GCCM-1013 VBR TC-085, 2026-11-06). `until` = the text the case is after (stop when shown).
+async function finishOnce(page, { pastWarnings = false, until = null } = {}) {
   testOnly('finishOnce');
+  const first = await finishOnceInner(page);
+  if (!pastWarnings || !/^Finish answered/.test(first)) return first;
+  const s = await readScreen(page);
+  const txt = [...s.messages, s.south, s.body].join(' ');
+  if ((until && new RegExp(until, 'i').test(txt)) || !W.warningsOnly(s)) return first;
+  if (!await page.getByRole('button', { name: 'Finish', exact: true }).first().isVisible().catch(() => false)) return first;
+  await W.clickButton(page, 'Finish');
+  for (let t = 0; t < 30; t++) {
+    if (!await W.inWizard(page)) return `${first} — pressed Finish again: wizard closed (payment submitted)`;
+    const s2 = await readScreen(page);
+    if ((until && new RegExp(until, 'i').test(s2.body || '')) || ((s2.messages.length || s2.south) && [...s2.messages, s2.south].join(' ') !== [...s.messages, s.south].join(' '))) {
+      return `${first} — pressed Finish again: ${[...s2.messages, s2.south].join(' / ').slice(0, 200)}`;
+    }
+    await page.waitForTimeout(1000);
+  }
+  return `${first} — pressed Finish again: no change`;
+}
+async function finishOnceInner(page) {
   if (process.env.ONEINC_ALLOW_FINISH !== '1') throw new W.Blocked('pressing Finish submits the payment — enable ONEINC_ALLOW_FINISH=1 (TEST only)');
   for (let i = 0; i < 3; i++) {
     const st = await W.currentStep(page);
@@ -609,7 +630,26 @@ async function setLossDetailAnswers(page, answers) {
   return `Loss Details: ${need.map(([k, v]) => `${k} → ${v}`).join(', ')}`;
 }
 
+// Parties Involved › the contact whose Roles include "Secondary Named Insured", kept on the page for the wizard's
+// payee 'sni' (it used to rely on CC typing the payee itself, which it does not on Cloud — GCCM-1013 VBR TC-052/087
+// BLOCKED "no contact typed SNI" while David Thomas carries the role, 2026-11-06).
+async function noteSni(page) {
+  await W.navigate(page, 'parties');
+  await W.settle(page, 2000);
+  const name = await page.evaluate(() => {
+    for (const r of document.querySelectorAll('tr')) {
+      const cells = [...r.querySelectorAll('td')].map((c) => (c.innerText || '').replace(/\s+/g, ' ').trim());
+      if (cells.some((c) => /(^|, )Secondary Named Insured(,|$)/i.test(c))) return cells.find((c) => c && !/Roles|Secondary Named Insured|^(Yes|No)$/i.test(c)) || '';
+    }
+    return '';
+  }).catch(() => '');
+  if (!name) throw new W.Blocked('no contact on this claim has the role "Secondary Named Insured" (Parties Involved)');
+  page.__oneIncSni = name;
+  return `Secondary Named Insured: ${name}`;
+}
+
 module.exports = {
+  noteSni,
   setLossDetailAnswers,
   setClaimantCountry, selectInsuredPayee, closeWizard, setAggregateLimit, openWcExposure, setIndemnityExposure, setMedicareBeneficiary, ensureLostTimeSeverity, selectLineCategory, openQuickOnLine, fixClaimantNumber, revalidate, prepareLostWages, finishOnce, editAndSave, fillRequired: fillRequiredOnEdit, selectByLabel, fillByLabel, exposureCount, openExposure, openLossDetailsGeneral,
   setExposureCoverageDenied, setClaimDenied, assignExposuresTo,

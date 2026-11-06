@@ -465,7 +465,7 @@ async function evaluate(item, s, state, record) {
     // CC's "New Payment Error" page (a payment refused as it is started — VBR.002 on Quick Payment) is plain page text,
     // not a message widget: it was read as "no message" (GCCM-1003 VBR TC-086, 2026-11-06).
     const npe = /New Payment Error (.*?)(Return to the claim|$)/.exec(s.body || '');
-    const text = [...s.messages, s.south, npe ? `New Payment Error: ${npe[1].trim()}` : ''].filter(Boolean).join(' / ');
+    const text = [...s.messages, s.south, ...(s.alerts || []), npe ? `New Payment Error: ${npe[1].trim()}` : ''].filter(Boolean).join(' / ');
     const present = item.message.re.test(text);
     return record(row('message', `Validation message ${item.message.re.source}`, item.message.present ? 'message shown' : 'message not shown',
       text.trim() ? text.slice(0, 300) : 'no message', present === item.message.present ? 'PASS' : 'FAIL', { missing: !present && item.message.present }));

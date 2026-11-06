@@ -65,7 +65,7 @@ module.exports = (api) => {
   // ── Wizard fields (AUTO_PA) ───────────────────────────────────────────────────────────────────────────────────
   add('GCCM-1013/UIF/TC-001', 'AUTO_PA', FULL_INSTRUCTIONS('claimant'), [H('Memo/Claim Number'), H('Memo')]);
   add('GCCM-1013/UIF/TC-003', 'AUTO_PA', [...FULL_PAYMENTS('claimant', 'open'), { step2: {} }],
-    [V('Date of Service'), { next: true }, { expectStep: 3 }, H('Date of Service')], 'Step 2 (Enter payment information) must show Date of Service; Step 3 (instructions) must not.');
+    [{ next: true }, { expectStep: 3 }, H('Date of Service')], 'Step 3 (Set Check Instructions) must not show Date of Service. (The old extra check that Step 2 shows it is not part of the case — Cloud Step 2 has Service Period Start/End instead; removed 2026-11-06.)');
   add('GCCM-1013/UIF/TC-010', 'AUTO_PA', FULL_INSTRUCTIONS('claimant'), [H('Is this a Claim Payment to a Business?')], 'Payee = an individual claimant.');
   add('GCCM-1013/UIF/TC-021', 'AUTO_PA', FULL_PAYEES('claimant'), [H('Report Type'), { text: { re: /Tax Reporting/i, present: false } }]);
   add('GCCM-1013/UIF/TC-031', 'AUTO_PA', VAL([op('ensureOpenReserve'), ...FULL_INSTRUCTIONS('claimant')], null), [{ text: { re: /Make This Payment Faster/i, present: false } }, { button: { name: 'Make This Payment Faster', present: false } }],
@@ -128,7 +128,7 @@ module.exports = (api) => {
   // ── HO claim: Insured + Secondary Named Insured (PROP_PA) ─────────────────────────────────────────────────────
   const HO = 'New HO claim (this run) on a policy with an Insured and a Secondary Named Insured (from the policy).';
   const INS1 = [{ open: 'full' }, { payee: 'insured' }, { select: ['Type', 'Insured'] }];
-  const SNI1 = [{ open: 'full' }, { payee: 'sni' }, { select: ['Type', 'Secondary Named Insured'] }];
+  const SNI1 = [sa('noteSni'), { open: 'full' }, { payee: 'sni' }, { select: ['Type', 'Secondary Named Insured'] }];
   const TO3 = [{ next: true }, { reserve: 'open' }, { step2: {} }, { next: true }, { expectStep: 3 }];
   const WARN_SNI = /Please select 'Secondary Named Insured' '[^']+' if applicable for this Insured payment/i;
   const WARN_INS = /Please select 'Insured' '[^']+' if applicable for this Insured payment/i;
@@ -143,12 +143,12 @@ module.exports = (api) => {
   // check made by the case is deleted afterwards so the claim does not pile up pending approvals.
   const CLEAN = op('deletePendingIfAny', '.');
   const WS = HO + ' Finish pressed once (setupA.finishOnce); if CC holds the payment for approval instead of showing the worksheet, the held check is deleted afterwards.';
-  add('GCCM-1013/VBR/TC-085', 'HO_SNI', [...INS1, ...TO3, sa('finishOnce')], [MISSING, { text: { re: /Please add 'Secondary Named Insured' '[^']+'/i, present: true } }, QUESTION, CLEAN], WS);
-  add('GCCM-1013/VBR/TC-086', 'HO_SNI', [...INS1, ...TO3, sa('finishOnce')], [MISSING, QUESTION, CLEAN], WS + ' The Yes → "Payee Must Be Added" error half needs the worksheet first.');
-  add('GCCM-1013/VBR/TC-087', 'HO_SNI', [...SNI1, ...TO3, sa('finishOnce')], [MISSING, { text: { re: WARN_INS, present: true } }, QUESTION, CLEAN], WS);
-  add('GCCM-1013/VBR/TC-089', 'HO_SNI', [...INS1, ...TO3, sa('finishOnce')], [MISSING, { button: { name: 'Refresh', present: true } }, CLEAN], WS + ' The Refresh half needs the worksheet first.');
-  add('GCCM-1013/UIF/TC-033', 'HO_SNI', [...INS1, ...TO3, sa('finishOnce')], [MISSING, QUESTION, CLEAN], WS + ' Later steps (hard stop on Yes, escalation on No) are covered by VBR TC-086 / TC-088.');
-  add('GCCM-1013/UIF/TC-034', 'HO_SNI', [...INS1, ...TO3, sa('finishOnce')], [MISSING, QUESTION, CLEAN], WS);
+  add('GCCM-1013/VBR/TC-085', 'HO_SNI', [...INS1, ...TO3, sa('finishOnce', { pastWarnings: true, until: 'Missing Payee' })], [MISSING, { text: { re: /Please add 'Secondary Named Insured' '[^']+'/i, present: true } }, QUESTION, CLEAN], WS);
+  add('GCCM-1013/VBR/TC-086', 'HO_SNI', [...INS1, ...TO3, sa('finishOnce', { pastWarnings: true, until: 'Missing Payee' })], [MISSING, QUESTION, CLEAN], WS + ' The Yes → "Payee Must Be Added" error half needs the worksheet first.');
+  add('GCCM-1013/VBR/TC-087', 'HO_SNI', [...SNI1, ...TO3, sa('finishOnce', { pastWarnings: true, until: 'Missing Payee' })], [MISSING, { text: { re: WARN_INS, present: true } }, QUESTION, CLEAN], WS);
+  add('GCCM-1013/VBR/TC-089', 'HO_SNI', [...INS1, ...TO3, sa('finishOnce', { pastWarnings: true, until: 'Missing Payee' })], [MISSING, { button: { name: 'Refresh', present: true } }, CLEAN], WS + ' The Refresh half needs the worksheet first.');
+  add('GCCM-1013/UIF/TC-033', 'HO_SNI', [...INS1, ...TO3, sa('finishOnce', { pastWarnings: true, until: 'Missing Payee' })], [MISSING, QUESTION, CLEAN], WS + ' Later steps (hard stop on Yes, escalation on No) are covered by VBR TC-086 / TC-088.');
+  add('GCCM-1013/UIF/TC-034', 'HO_SNI', [...INS1, ...TO3, sa('finishOnce', { pastWarnings: true, until: 'Missing Payee' })], [MISSING, QUESTION, CLEAN], WS);
   // VBR.071 / VBR.073 — the payment is escalated with a supervisor approval activity (Finish pressed through the warning)
   add('GCCM-1013/VBR/TC-088', 'HO_SNI', VAL([...INS1, ...TO3], null), [op('openCheck', { status: '^Pending approval$', payee: '@insured' }), op('approvalHistory'),
     V('Approval History', { value: /Secondary Named Insured'? '[^']+'? not selected/i }), op('workplan'), V('Workplan activities', { value: /Review and approve new payment/i }),
@@ -171,7 +171,7 @@ module.exports = (api) => {
   'Submits a $1.37 payment (Finish), then opens its Additional Payment Details: the Workflow History table must have entries.');
   add('GCCM-1013/INT/TC-102', 'AUTO_PA', VAL([{ open: 'full' }, { payee: 'vendor' }, { next: true }, { reserve: 'new' }, { select: ['Cost Type', 'Adjuster Expense'] },
     { step2: { transactionType: 'First and Final', amount: '1.37' } }, { select: ['1099 Box Number', /^06/] }, { next: true }, { expectStep: 3 }], null),
-  [op('escalateChecks', '1.37'), op('workplan'), V('Workplan activities', { value: /Document is required for Payment/i })],
+  [op('escalateChecks', '1.37'), op('workplan'), V('Workplan activities', { value: /Document is required for (Medical )?Payments?/i })],
   'Vendor expense payment with 1099 Box 06 (Medical Payments to Providers) and no linked document, submitted ($1.37, Finish); the Workplan must then carry the digital_payment_send_doc activity. Sending the document to OneInc (second half) is integration-side.');
 
   // ── VBR.039 / VBR.040 — activities after a Supplemental payment (AUTO_PA line with $0 remaining = closed reserve) ──

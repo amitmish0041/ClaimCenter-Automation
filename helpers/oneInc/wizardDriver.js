@@ -778,6 +778,9 @@ async function selectPayee(page, who = 'claimant') {
   if (!names.length) throw new Blocked('payee Name list is empty');
   // 'sni': the contact CC itself types "Secondary Named Insured" (from the policy) — try candidates until one comes back so.
   if (who === 'sni') {
+    // Named from Parties Involved by setupA.noteSni (the recipe's first step), when it ran.
+    const known = page.__oneIncSni && names.find((t) => norm(t) === norm(page.__oneIncSni));
+    if (known) { await select(page, 'Name', known); await settle(page, 1500); return known; }
     const parties = page.__oneIncParties || { insured: '' };
     for (const cand of names.filter((t) => norm(t) !== norm(parties.insured) && !/donegal|insurance|agency|bank|garage|body|services|\binc\b|\bllc\b/i.test(t))) {
       await select(page, 'Name', cand);

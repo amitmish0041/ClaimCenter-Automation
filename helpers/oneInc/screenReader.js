@@ -53,11 +53,15 @@ async function readScreen(page) {
       .map((b) => (b.getAttribute('aria-label') || txt(b))).filter(Boolean))];
     const messages = [...new Set([...document.querySelectorAll('.gw-message, .gw-WebMessage, [class*="gw-message-type"]')]
       .filter(vis).map(txt).filter(Boolean))].slice(0, 40);
+    // Page alert banners (gw-AlertBarWidget): kept apart from messages — some are always shown ("Check document upload is
+    // enabled", "Identify your check/payment type") and must not read as a stopped wizard. Rule warnings shown as a banner
+    // (VBR.045 pay-to-the-order-of Edit, GCCM-1013 TC-054) are checked from here.
+    const alerts = [...new Set([...document.querySelectorAll('.gw-AlertBarWidget')].filter(vis).map(txt).filter(Boolean))].slice(0, 20);
     const south = document.getElementById('gw-south-panel');
     const title = txt(document.querySelector('.gw-TitleBar--title, .gw-Wizard--Title, [class*="TitleBar"] [class*="title"]'));
     const nav = [...document.querySelectorAll('[id^="Claim-MenuLinks-"]')].map((e) => ({ id: e.id, label: txt(e.querySelector('.gw-label') || e) }));
     return {
-      url: location.href, title, fields, headers, buttons, messages,
+      url: location.href, title, fields, headers, buttons, messages, alerts,
       south: vis(south) ? txt(south).slice(0, 2000) : '',
       nav,
       body: txt(document.body).slice(0, 20000),
