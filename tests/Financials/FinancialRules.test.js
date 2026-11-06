@@ -885,6 +885,18 @@ async function riReserveChange(page, { delta = 100, partial = true, amountToPost
     seen.amountBox = await box.isVisible().catch(() => false);
     if (partial && seen.amountBox) { await box.fill(amountToPost); await box.press('Tab').catch(() => {}); await W.settle(page, 1500); }
   }
+  // Every reserve line carries its own REQUIRED "Post to Reinsurance?" — the unchanged lines get No, else Save says
+  // "Please fill in all required fields." (WC / Auto / Umbrella claims with several lines, 2026-11-06).
+  seen.otherLinesNo = await page.evaluate(() => {
+    let n = 0;
+    for (const i of document.querySelectorAll('input[type=radio][value="false"]')) {
+      if (!/-(\d+)-ExtPostToExcess$/.test(i.name) || /-0-ExtPostToExcess$/.test(i.name)) continue;
+      const yes = document.querySelector(`input[type=radio][name="${i.name}"][value="true"]`);
+      if (!i.checked && !(yes && yes.checked)) { i.click(); n++; }
+    }
+    return n;
+  });
+  await W.settle(page, 2500);
   // The Reserve screen opens with an EMPTY new row (Exposure / Cost Type <none>) that fails Save with "Missing required
   // field Exposure" (+ an application error) — tick it and Remove it first (2026-11-06).
   const blank = await page.evaluate(() => { const s = [...document.querySelectorAll('select[name*="EditableReservesLV-"][name$="-Exposure"]')].find((x) => x.offsetParent && !/\S/.test(((x.options[x.selectedIndex] || {}).text || '').replace(/<none>/i, ''))); return s ? (s.name.match(/EditableReservesLV-(\d+)-/) || [])[1] : null; });
