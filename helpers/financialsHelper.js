@@ -2136,6 +2136,14 @@ async function createPaymentCloud(page, {
   await selectByLabelOrFirst(page, 'Box Number', boxNumber);
   await selectByLabelOrFirst(page, 'Memo Phrase', memoPhrase);
   await totalAmount.fill(String(checkAmount));
+  // Filling Total Amount refreshes the step and clears "1099 Box Number" (OneInc GCCM-800 note; check 8200004678 was
+  // saved with a blank box although NOT APPLICABLE was asked for, 2026-11-05). Set the asked-for box LAST.
+  if (boxNumber) {
+    await page.locator('#gw-click-overlay').click().catch(() => {});
+    await page.waitForTimeout(1500);
+    const picked = await selectByLabelOrFirst(page, '1099 Box Number', boxNumber);
+    console.log('createPaymentCloud: 1099 Box Number = ' + (picked || '(not set)'));
+  }
   // Service Period dates last, by field container: the role-name lookup above missed them and they still held "2"
   // (WC medical line, 2026-11-03).
   {

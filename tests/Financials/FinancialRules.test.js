@@ -220,6 +220,9 @@ test.describe('B Approvals - payments', () => {
     // tax id from the Address Book (PA-PA-01-26-0748998, 2026-11-05).
     const txRows = await R.transactionRows(page, cn);
     const claimant = ((txRows.find((r) => /Bodily Injury Liability - /.test(r)) || '').match(/Bodily Injury Liability - (.+?) Liability -/) || [])[1] || '';
+    // A reused claim may no longer pass Ability to pay (then no payee offers a reserve line — 0748998, 2026-11-05):
+    // repair it first, as the LOB e2e specs do before any money step.
+    await E.repairCloud(page, cn).catch((e) => R.note(ti, 'repair', e.message.split('\n')[0]));
     await B.openExistingClaim(page, cn);
     let err = '';
     await createPayment(page, { payeeName: claimant || undefined, reserveLine: 'Bodily Injury', checkAmount: 250, boxNumber: 'NOT APPLICABLE', transactionType: 'Partial' }).catch((e) => { err = e.message.split('\n')[0]; });
@@ -230,7 +233,18 @@ test.describe('B Approvals - payments', () => {
     await R.clickMenu(page, /^Checks\/Payments$|^Checks$/);
     const checks = await R.gridRows(page);
     await R.step(page, ti, 'Opened Financials > Checks/Payments');
-    const chk = checks.find((r) => /250\.00/.test(r)) || '';
+    const chk = checks.filter((r) => /250\.00/.test(r)).pop() || '';
+    // Precondition: the check really carries Box Number = NOT APPLICABLE (a blank box once passed unnoticed — 8200004678).
+    const checkNo = (chk.match(/\b(8\d{9}|1\d{7}|7\d{5})\b/) || [])[1];
+    let box = '';
+    if (checkNo) {
+      await page.getByText(checkNo, { exact: true }).first().click().catch(() => {});
+      await page.waitForTimeout(2500);
+      const t = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+      box = ((t.match(/1099 Box Number (.*?) Memo Phrase/) || [])[1] || '').trim();
+      await R.step(page, ti, `Opened check ${checkNo}: 1099 Box Number = "${box || '(blank)'}"`);
+    }
+    await R.check(page, ti, { description: 'Precondition: the check carries 1099 Box Number = NOT APPLICABLE', expected: 'NOT APPLICABLE', actual: box || '(blank / check not found)', ok: /not applicable/i.test(box) });
     await R.check(page, ti, { description: 'DMTA0007 Not App Box Number Approval', expected: "'…supervisor must approve' / check Pending approval", actual: `${chk || 'no $250 check'} || ${msgs.join(' | ')}`, ok: /Pending approval/i.test(chk) || /supervisor must approve/i.test(msgs.join(' ')) });
     const assignee = await R.approverFor(page);
     await R.step(page, ti, `Claim Workplan: approval activity assigned to ${assignee || 'nobody'}`);
