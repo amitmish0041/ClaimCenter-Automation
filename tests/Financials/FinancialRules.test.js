@@ -1034,3 +1034,75 @@ test.describe('C Payments - compliance letters', () => {
     ti.annotations.push({ type: 'manual', description: 'Step 7 (no duplicate when the activity already exists) is shown by the before/after counts on claims that already had one; a deliberate second payment was not made.' });
   });
 });
+// ── R Recovery: TR-538 void a recovery in Requesting (Financials Escalation batch run as admin) ──────────────────────
+Object.assign(META, { 'TR-538': { ...FIN40, name: 'TC036_Void a recovery when recovery status = Requesting', expected: 'Recovery Requesting → Void → Pending Void → (batch) → Voided; history event; recovery reserve adjusted' } });
+async function recoveryRows(page, cn) { return (await R.transactionRows(page, cn)).filter((r) => /^Recovery\s/.test(r)); }
+async function openRecovery(page, cn, amountText) {
+  await B.openExistingClaim(page, cn);
+  await R.clickMenu(page, /^Financials$/);
+  await R.clickMenu(page, /^Transactions$/);
+  await W.settle(page, 2000);
+  // The amount is a "…TransactionAmountViewDetail" link whose text sits in a nested node, and the visible-row filter
+  // missed the row (2026-11-06) — click it from the page: last visible innermost row starting "Recovery " with the amount.
+  const id = await page.evaluate((amt) => {
+    const rows = [...document.querySelectorAll('tr')].filter((r) => r.offsetParent && !r.querySelector('tr') && /^\s*Recovery\s/.test(r.innerText) && r.innerText.includes(amt));
+    const a = rows.length ? rows[rows.length - 1].querySelector('[id$="TransactionAmountViewDetail"]') : null;
+    return a ? a.id : '';
+  }, amountText);
+  if (!id) throw new Error(`no Recovery row for ${amountText} on Transactions`);
+  await page.locator(`[id="${id}"]`).click({ force: true });
+  await W.settle(page, 3500);
+}
+test.describe('R Recovery - void', () => {
+  test('TR-538 [TC036]: void a recovery in Requesting; batch takes it to Voided', async ({ page }, ti) => {
+    ti.annotations.push({ type: 'note', description: 'Run on PA-PA-01-26-0749033 (open subrogation + a $10,000 recovery from TR-623 on 2026-11-05), not a new CA MI claim: a recovery needs a recovery reserve, and only one recovery reserve change is allowed per claim per day (DMTV0039).' });
+    const cn = 'PA-PA-01-26-0749033';
+    await R.asAdmin(page, cn);
+    R.setClaim(ti, cn, 'su (admin)');
+    let rec = (await recoveryRows(page, cn)).slice(-1)[0] || '';
+    await R.step(page, ti, `Recovery on ${cn}: ${rec || 'none'}`);
+    await R.check(page, ti, { description: 'Precondition: a recovery exists on the claim', expected: 'a Recovery transaction', actual: rec || 'none', ok: !!rec });
+    const amt = (rec.match(/\$[\d,]+\.\d\d/) || [])[0];
+    if (/Pending approval/i.test(rec)) {
+      const chain = await R.approveAllLevels(page, cn, /recover|approv/i);
+      await R.step(page, ti, 'Recovery approval: ' + chain.map((c) => `${c.approver || '-'} — ${c.result}`).join(' → '));
+      rec = (await recoveryRows(page, cn)).slice(-1)[0] || '';
+      await R.step(page, ti, `Recovery now: ${rec}`);
+    }
+    // The Transactions list shows the TRANSACTION status (Submitted); Requesting / Pending void / Voided are the
+    // RECOVERY's own status, on its detail screen (2026-11-06).
+    const recStatus = async () => {
+      await openRecovery(page, cn, amt);
+      const s = await require('../../helpers/oneInc/screenReader').readScreen(page);
+      return ((s.fields.find((f) => /^Status$/i.test(f.label)) || {}).value || (String(s.body).match(/Status\s+(Requesting|Requested|Pending void|Voided|Submitted|Pending approval|Issued|Cleared)/i) || [])[1] || '?').trim();
+    };
+    let st = await recStatus();
+    await R.step(page, ti, `Opened the ${amt} recovery — status ${st}`);
+    if (!/Requesting/i.test(st)) {
+      const b1 = await CO.runFinancialsEscalation(page).catch((e) => 'batch ERR ' + e.message.split('\n')[0]);
+      st = await recStatus();
+      await R.step(page, ti, `${b1}; recovery status now ${st}`);
+    }
+    await R.check(page, ti, { description: 'Recovery status = Requesting', expected: 'Requesting', actual: st, ok: /Requesting/i.test(st) });
+    await CO.historyMark(page).catch(() => '');
+    await openRecovery(page, cn, amt);
+    const voidBtn = page.getByRole('button', { name: 'Void', exact: true }).first();
+    const can = await voidBtn.isVisible().catch(() => false) && !(await voidBtn.isDisabled().catch(() => true));
+    await R.check(page, ti, { description: 'Void available on the Requesting recovery', expected: 'Void enabled', actual: can ? 'enabled' : 'not available', ok: can });
+    if (!can) return;
+    page.once('dialog', (d) => d.accept().catch(() => {}));
+    await voidBtn.click();
+    await W.settle(page, 3500);
+    for (const b of ['Void', 'Void Recovery', 'Update', 'OK']) { const x = page.getByRole('button', { name: b, exact: true }).first(); if (await x.isVisible().catch(() => false)) { page.once('dialog', (d) => d.accept().catch(() => {})); await x.click().catch(() => {}); await W.settle(page, 3500); break; } }
+    st = await recStatus();
+    await R.step(page, ti, `Pressed Void — recovery status ${st}`);
+    await R.check(page, ti, { description: 'Recovery status = Pending Void', expected: 'Pending void', actual: st, ok: /Pending void/i.test(st) });
+    const b2 = await CO.runFinancialsEscalation(page).catch((e) => 'batch ERR ' + e.message.split('\n')[0]);
+    st = await recStatus();
+    await R.step(page, ti, `${b2}; recovery status now ${st}`);
+    await R.check(page, ti, { description: 'After the batch: recovery Voided', expected: 'Voided', actual: st, ok: /Voided/i.test(st) });
+    const hist = await CO.historySince(page).catch((e) => 'ERR ' + e.message);
+    await R.step(page, ti, `History since the void — ${hist}`);
+    const rr = (await R.transactionRows(page, cn)).filter((r) => /Recovery/i.test(r));
+    await R.step(page, ti, `Recovery / recovery reserve transactions now: ${rr.join(' | ')}`);  });
+});

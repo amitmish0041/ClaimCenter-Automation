@@ -51,4 +51,18 @@ async function searchClaims(page, criteria = {}) {
     .filter((r) => r.claim));
 }
 
-module.exports = { searchClaims, openAdvancedSearch };
+// Opens a claim from Advanced Search › Claim # — the quick search did not find CLOSED claims (WC-PA-01-08-0053142,
+// 2026-11-06); Advanced Search lists them and opens them.
+async function openClaimViaSearch(page, cn) {
+  await openAdvancedSearch(page);
+  await page.locator('.gw-InputWidget').filter({ hasText: /^\s*Claim #/ }).locator('input').first().fill(cn);
+  await page.getByRole('button', { name: 'Search', exact: true }).last().click();
+  await W.settle(page, 5000);
+  await page.locator('tr:visible').getByText(cn, { exact: true }).first().click();
+  await W.settle(page, 5000);
+  const head = (await page.locator('body').innerText()).replace(/\s+/g, ' ');
+  if (!head.includes(`Claim: ${cn}`)) throw new Error(`Advanced Search: claim ${cn} did not open`);
+  return (head.match(/St: (\w+)/) || [])[1] || '';
+}
+
+module.exports = { searchClaims, openAdvancedSearch, openClaimViaSearch };
