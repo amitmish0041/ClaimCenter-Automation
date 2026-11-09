@@ -135,8 +135,48 @@ function loadTemplateCatalog({ refresh = false } = {}) {
       notes: o['Notes'],
       sourceFile: file,
     };
-  }).sort((a, b) => compareDigNumbers(a.digNumber, b.digNumber));
+  });
+  cachedCatalog = cachedCatalog.concat(templatesMissingFromIndex(cachedCatalog, file))
+    .sort((a, b) => compareDigNumbers(a.digNumber, b.digNumber));
   return cachedCatalog;
+}
+
+const US_STATES = new Set(['AL', 'DE', 'GA', 'IN', 'MD', 'MI', 'NC', 'NY', 'OH', 'PA', 'SC', 'TN', 'VA', 'WV']);
+
+// A template's Word file can land in Templates/ClaimCenter before the BA adds its row to the index
+// (CONFIRMED 2026-11-09: DIG190-196 were in CC and the folder but not the index). List those anyway,
+// built from the filename alone — state = any standalone upper-case state token, everything else
+// unknown (LOB ALL, Interactive). An index row for the same DIG always wins, so this goes quiet once
+// the BA catches up. The letterhead and worksheets are not creatable templates.
+function templatesMissingFromIndex(catalog, indexFile) {
+  const dir = path.join(DATA_DIR, 'Templates', 'ClaimCenter');
+  if (!fs.existsSync(dir)) return [];
+  const known = new Set(catalog.map(t => t.digNumber));
+  const extra = [];
+  for (const f of fs.readdirSync(dir)) {
+    const m = f.match(/^(DIG\s*-?\s*\d+[A-Za-z]*)[_\s-]+(.+?)\.(docx?|dotx?)$/i);
+    if (!m || f.startsWith('~$')) continue;
+    const digNumber = normalizeDig(m[1]);
+    const stem = m[2].replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (digNumber === 'DIG0' || /letterhead|worksheet/i.test(stem) || known.has(digNumber)) continue;
+    known.add(digNumber);
+    const states = stem.split(' ').filter(w => US_STATES.has(w));
+    extra.push({
+      digNumber,
+      documentName: stem,
+      searchName: `${digNumber} ${stem}`,
+      searchNameAlt: undefined,
+      states: states.length ? [...new Set(states)] : ['ALL'],
+      lob: ['ALL'],
+      formType: undefined,
+      overlay: undefined,
+      interactiveOrOnDemand: 'Interactive',
+      templateMappingDoc: path.join(dir, f),
+      notes: 'Not in Claims_Documents_Index — derived from the template filename',
+      sourceFile: indexFile,
+    });
+  }
+  return extra;
 }
 
 function getTemplate(digNumber) {
