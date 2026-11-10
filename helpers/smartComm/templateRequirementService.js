@@ -264,6 +264,17 @@ function makeDynamicRequirement(n, fieldName, value, { conditional = false, cond
       description: `One of "${eitherOr[1].trim()}" / "${eitherOr[2].trim()}" must appear (for "${fieldName}")`,
     });
   }
+  // "Print Address from Medical Letterhead" (DIG51, QA 2026-11-10) is the BA's instruction for that spot, not a data field:
+  // the address shown under it in the mapping doc is what must print - in any letter case, however its lines are split.
+  const printFrom = !field && !eitherOr && /^\s*print\b.*\bfrom\b.*\bletterhead\b/i.test(fieldName) && String(value || '').trim();
+  if (printFrom) {
+    const words = printFrom.split(/[\s,.]+/).filter(Boolean).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const shown = printFrom.replace(/\s+/g, ' ');
+    Object.assign(req, {
+      type: 'regexMatch', pattern: words.join('[\\s,.]*'), flags: 'i', expectedDisplay: shown,
+      description: `"${shown}" must appear (mapping doc: "${fieldName}")`,
+    });
+  }
   if (conditional) {
     req.enabled = false;
     req.disabledReason = conditionReason;

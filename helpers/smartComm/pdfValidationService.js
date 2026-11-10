@@ -704,10 +704,10 @@ function evaluateOne(req, haystack, context) {
       };
     }
     case 'regexMatch': {
-      const m = haystack.match(new RegExp(req.pattern));
+      const m = haystack.match(new RegExp(req.pattern, req.flags || ''));
       return {
-        expected: req.pattern, actual: m ? m[0] : 'Not Found', result: m ? 'PASS' : 'FAIL',
-        reason: m ? undefined : `No text matching pattern /${req.pattern}/ found anywhere in the generated document.`,
+        expected: req.expectedDisplay || req.pattern, actual: m ? m[0] : 'Not Found', result: m ? 'PASS' : 'FAIL',
+        reason: m ? undefined : req.expectedDisplay ? `"${req.expectedDisplay}" was not found anywhere in the generated document.` : `No text matching pattern /${req.pattern}/ found anywhere in the generated document.`,
       };
     }
     // DIG26's exposure financials table (see templateRequirementService's exposure-table rule): every exposure in the
