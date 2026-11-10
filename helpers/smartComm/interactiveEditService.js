@@ -535,7 +535,7 @@ async function readMergeFields(frame) {
 // ── 4. Double-click a field to open its inline editor; read its real technical name; optionally edit ──
 // Always resolves (never throws) — every outcome (including "not a recognized editor UI") is reported in
 // the return value, since a BLOCKED classification for one odd field shouldn't abort the whole scenario.
-async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue, log = console.log } = {}) {
+async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue, typedValue, log = console.log } = {}) {
   const before = field.text;
   try {
     // CONFIRMED live 2026-09-29 (DIG166, a 26-field template — DIG15/DIG7's much shorter templates never hit
@@ -644,6 +644,15 @@ async function inspectAndMaybeEdit(frame, page, field, { newValue, fallbackValue
   const CHECKBOX_NAME = /^(c(heck)?b(ox)?|chk|check|opt(ion)?)\d*$|check\s*box|^chk|(cb|chk|box)\d*$/i;
   const GENERIC_NAME = /^(editable|field|text|value|input)\w*?\d*$/i;
   if (newValue !== undefined && /^check\s*box/i.test(technicalName || '')) newValue = 'X';
+  // The field's real name is only known now (editor open), so the Data Dictionary row - and its data type (column D:
+  // Date / Money / Number / Time) - is looked up again with it; a typed row decides what is typed (user direction 2026-11-10).
+  const typed = newValue !== undefined && typedValue && technicalName && !CHECKBOX_NAME.test(technicalName) ? typedValue(technicalName) : null;
+  if (typed) {
+    if (typed.value !== newValue) {
+      log(`[Interactive] "${technicalName}" is ${typed.dataType} in the Data Dictionary (${typed.attributeName}) - typing "${typed.value}" instead of "${newValue}".`);
+      newValue = typed.value;
+    }
+  }
   // The reverse: an EMPTY text field also shows as "[ ]", so it was given an "X" too — DIG15S claimantDOB /
   // claimantAddress, DIG1043 insuredName (2026-10-30: "no span with the new value", FAIL). A real name that isn't a
   // checkbox gets a normal text marker (a date for a date-named field).

@@ -1401,15 +1401,48 @@ function buildTimeValue(sampleValue, n) {
 // doesn't resolve to a dictionary row at all, or resolves to "Text"/blank, keeps the exact prior behavior
 // (dollar heuristic, else the bracketed marker) — this only changes behavior for fields the dictionary
 // positively identifies as Date/Money/Number/Time.
+// The value to type for a Data Dictionary row whose data type (column D) is Date / Money / Number / Time; null for Text,
+// Array, blank or no row - those keep the text rules of buildEditValue.
+function typedValueForRow(row, n) {
+  const dataType = row && row.dataType;
+  if (dataType === 'Date') return buildDateValue(row.sampleValue, n);
+  if (dataType === 'Money') return String(900 + n);
+  if (dataType === 'Number') return buildNumberValue(row, n);
+  if (dataType === 'Time') return buildTimeValue(row.sampleValue, n);
+  return null;
+}
+
+// A Number row's value in the shape its name calls for, still distinct per field: a phone/fax number, the last four
+// digits of an SSN, a year, a day of the month, a percentage - any other number is 900 + n.
+function buildNumberValue(row, n) {
+  const name = String(row.attributeName || '');
+  const two = String(n % 100).padStart(2, '0');
+  if (/phone|fax/i.test(name)) return `717-555-01${two}`;
+  if (/ssn/i.test(name)) return String(4000 + (n % 1000));
+  if (/year/i.test(name)) return String(2090 + (n % 100));
+  if (/\bday\b/i.test(name)) return String((n % 28) + 1);
+  if (/percent/i.test(name)) return `${(n % 90) + 5}%`;
+  return String(900 + n);
+}
+
+// For inspectAndMaybeEdit: once the editor shows the field's technical name, the dictionary row found with it (label +
+// name - the same lookup the report uses) gives the data type (an empty field is planned as a checkbox "X" before its name is known).
+function typedValueLookup(field, n, digNumber) {
+  return (technicalName) => {
+    if (!digNumber) return null;
+    const match = dataDictionaryService.matchAttributeForField(digNumber, { labelContext: field.labelContext, technicalName });
+    const value = match && typedValueForRow(match.row, n);
+    return value ? { value, dataType: match.row.dataType, attributeName: match.row.attributeName } : null;
+  };
+}
+
 function buildEditValue(field, n, digNumber, editableValues = []) {
   // An empty checkbox ("[ ]" / "☐") gets an "X" (user direction 2026-10-17); inspectAndMaybeEdit also switches
   // to "X" for any field whose technical name turns out to be checkBoxN.
   if (/^\[\s*\]$|^[☐□]$/.test(String(field.text || '').trim())) return 'X';
   const match = digNumber && dataDictionaryService.matchAttributeForField(digNumber, { labelContext: field.labelContext });
-  const dataType = match && match.row && match.row.dataType;
-  if (dataType === 'Date') return buildDateValue(match.row.sampleValue, n);
-  if (dataType === 'Money' || dataType === 'Number') return String(900 + n);
-  if (dataType === 'Time') return buildTimeValue(match.row.sampleValue, n);
+  const typed = match && typedValueForRow(match.row, n);
+  if (typed) return typed;
   if (/\$\s*\[?\s*$/.test(field.labelContext || '')) return String(900 + n);
   // A year-only field ("[2026]", DIG27's Year of the Date of Loss) takes a number only: "2026-edited" was reverted to
   // "2026" by the editor and the edit came out BLOCKED (2026-10-27). A distinct far-future year stays a valid, unique
@@ -1760,7 +1793,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     }, 15000);
     const outcome = await interactiveEditService.inspectAndMaybeEdit(frame, page, field, {
       newValue: field.editable ? buildEditValue(field, n, template.digNumber, editableValues) : undefined,
-      fallbackValue: `QA-EDIT-${n}`, log,
+      fallbackValue: `QA-EDIT-${n}`, typedValue: typedValueLookup(field, n, template.digNumber), log,
     }).finally(() => clearTimeout(watchdog));
     // A locked field's "identify only" double-click (newValue left undefined, see inspectAndMaybeEdit) returns
     // changed:null — not false — whenever the double-click unexpectedly opens SOME editor popup anyway (a
@@ -1952,7 +1985,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       // A time field ("timeBeganWork", DIG201) rejects text too — it gets a time.
       const looksTime = /time(?!s)/i.test(`${prior.technicalName || ''} ${prior.dictionaryField || ''}`);
       const retryValue = rejectedText && looksTime ? buildTimeValue(null, n2) : rejectedText && looksNumeric ? String(1000 + n2).slice(-4) : buildEditValue(field, n2, template.digNumber, editableValues);
-      const outcome = await interactiveEditService.inspectAndMaybeEdit(frame, page, field, { newValue: retryValue, fallbackValue: `QA-EDIT-${n2}`, log });
+      const outcome = await interactiveEditService.inspectAndMaybeEdit(frame, page, field, { newValue: retryValue, fallbackValue: `QA-EDIT-${n2}`, typedValue: rejectedText && (looksTime || looksNumeric) ? undefined : typedValueLookup(field, n2, template.digNumber), log });
       const existing = target.c; // same object reference as interactiveChecks[target.i]
       if (outcome.attempted && outcome.changed) {
         existing.result = 'PASS';
