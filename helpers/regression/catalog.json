@@ -1,0 +1,2915 @@
+[
+ {
+  "id": "TC001",
+  "num": 1,
+  "feature": "Policy Search",
+  "name": "TC001_Verify that the user is able to successfully perform a search using the Claim Number",
+  "priority": "Medium",
+  "steps": 5,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Search.regression.test.js",
+  "grep": "RG-TC001\\b",
+  "reuses": [
+   "claimCenterBase.openExistingClaim (search flow)",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "REG_CLAIM_PA (optional - else a shared PA claim from the financialRules registry)"
+  ],
+  "manualSteps": [],
+  "limitation": "Legacy/Mainframe claim variant needs REG_CLAIM_PA_LEGACY; skipped if not set.",
+  "requires": [
+   "REG_CLAIM_PA|POLICY_PA_AUTO"
+  ],
+  "optional": [
+   "REG_CLAIM_PA_LEGACY"
+  ]
+ },
+ {
+  "id": "TC002",
+  "num": 2,
+  "feature": "Policy Search",
+  "name": "TC002_Verify that a user is able to successfully perform a search using the Policy Number",
+  "priority": "Medium",
+  "steps": 3,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Search.regression.test.js",
+  "grep": "RG-TC002\\b",
+  "reuses": [
+   "oneInc/screenReader.readScreen",
+   "oneInc/wizardDriver.fill"
+  ],
+  "data": [
+   "REG_POLICY_HO (optional - else POLICY_HO_PA rotation)",
+   "REG_POLICY_HO_LEGACY (optional)"
+  ],
+  "manualSteps": [],
+  "limitation": "Legacy variant runs only when REG_POLICY_HO_LEGACY is set.",
+  "requires": [
+   "REG_POLICY_HO|POLICY_HO_PA"
+  ],
+  "optional": [
+   "REG_POLICY_HO_LEGACY"
+  ]
+ },
+ {
+  "id": "TC003",
+  "num": 3,
+  "feature": "Policy Search & Retrieve",
+  "name": "TC003_Validate user has the ability to search for  policy integrated with GWPC and create a claim successfully",
+  "priority": "Medium",
+  "steps": 12,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Search.regression.test.js",
+  "grep": "RG-TC003\\b",
+  "reuses": [
+   "fnolHelper.searchPolicy/fillBasicInfo (step 9 negative)",
+   "fnolHelper.completeFNOL"
+  ],
+  "data": [
+   "POLICY_PA_AUTO"
+  ],
+  "manualSteps": [
+   9
+  ],
+  "limitation": "All 9 steps automated; the Step 3 hard stop drives fnolHelper's own step functions and Finish with Step 3 blank.",
+  "requires": [
+   "POLICY_PA_AUTO"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC004",
+  "num": 4,
+  "feature": "Policy Search & Retrieve",
+  "name": "TC004_Validate user has the ability to search for Legacy policy",
+  "priority": "Medium",
+  "steps": 14,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Search.regression.test.js",
+  "grep": "RG-TC004\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL + new page._fnolBeforeNext hook (Converted = Yes, legacy numbers)"
+  ],
+  "data": [
+   "REG_LEGACY_CLAIM_NO",
+   "REG_LEGACY_POLICY_NO"
+  ],
+  "manualSteps": [
+   9,
+   10,
+   11,
+   12,
+   13,
+   14
+  ],
+  "limitation": "Full converted FNOL through the new opt-in Find Policy hook; not yet live-verified.",
+  "requires": [
+   "REG_LEGACY_CLAIM_NO",
+   "REG_LEGACY_POLICY_NO"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC005",
+  "num": 5,
+  "feature": "Contact Manager",
+  "name": "TC005_Verify that system auto-populates Insured, Agent, Underwriter, and Driver contacts with correct roles, phone format, and PolicyCenter data match during FNOL Auto claim creation",
+  "priority": "Medium",
+  "steps": 11,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Contacts.regression.test.js",
+  "grep": "RG-TC005\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "regression/policyCenter.policyParties"
+  ],
+  "data": [
+   "POLICY_PA_AUTO",
+   "REG_PC_INSURED / REG_PC_AGENT / REG_PC_UNDERWRITER / REG_PC_DRIVER (optional expected names)"
+  ],
+  "manualSteps": [
+   8,
+   9,
+   10,
+   11
+  ],
+  "limitation": "Roles + phone format in CC; PolicyCenter checks run when REG_PC_USER / REG_PC_PASS are set (helpers/regression/policyCenter.js, read-only; PC screens after login not yet live-verified).",
+  "requires": [
+   "POLICY_PA_AUTO"
+  ],
+  "optional": [
+   "REG_PC_INSURED",
+   "REG_PC_AGENT",
+   "REG_PC_UNDERWRITER",
+   "REG_PC_DRIVER",
+   "REG_PC_USER",
+   "REG_PC_PASS"
+  ]
+ },
+ {
+  "id": "TC006",
+  "num": 6,
+  "feature": "Contact Manager",
+  "name": "TC006_Verify phone number formatting and extension field validation for Person contacts",
+  "priority": "Medium",
+  "steps": 10,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Contacts.regression.test.js",
+  "grep": "RG-TC006\\b",
+  "reuses": [
+   "oneInc/wizardDriver.fill/clickButton",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "REG_CLAIM_PA (optional)"
+  ],
+  "manualSteps": [],
+  "limitation": "New-contact form field labels (Work Phone / Extension) not yet live-verified on cloud; the contact is cancelled, not saved, unless REG_SAVE_CONTACTS=1.",
+  "requires": [
+   "REG_CLAIM_PA|POLICY_PA_AUTO"
+  ],
+  "optional": [
+   "REG_SAVE_CONTACTS"
+  ]
+ },
+ {
+  "id": "TC007",
+  "num": 7,
+  "feature": "Intake FNOL",
+  "name": "TC007_Validate FNOL for OH Personal Auto PC, Transportation Expense. Verifies Ohio branch routing (DMGA0060), DMIR0004 reserve ($200).",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/IntakeFNOL.regression.test.js",
+  "grep": "RG-TC007\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL (+ new assignmentType/lossCause pass-through)",
+   "financialRules.hasActivity/transactionRows"
+  ],
+  "data": [
+   "POLICY_PA_AUTO_OH"
+  ],
+  "manualSteps": [
+   7
+  ],
+  "limitation": "On-prem vs cloud screen-by-screen comparison is out of scope for this spec - run the existing Migration Reconciliation tab (cc-migration-reconciliation) on the claim this test files.",
+  "requires": [
+   "POLICY_PA_AUTO_OH"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC008",
+  "num": 8,
+  "feature": "Intake FNOL",
+  "name": "TC008_Validate FNOL for DE Commercial Auto policy, Silver Series or MicPak coverage. Verifies claim routing, workplan activities, initial reserve.",
+  "priority": "Medium",
+  "steps": 15,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/IntakeFNOL.regression.test.js",
+  "grep": "RG-TC008\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "financialRules.hasActivity"
+  ],
+  "data": [
+   "POLICY_CAU_DE"
+  ],
+  "manualSteps": [
+   13,
+   14,
+   15
+  ],
+  "limitation": "DMCW0106/0110 (excluded operator) only when the policy has one; DMCP0006 ExtPolCompany is not shown on a screen. On-prem vs cloud screen-by-screen comparison is out of scope for this spec - run the existing Migration Reconciliation tab (cc-migration-reconciliation) on the claim this test files.",
+  "requires": [
+   "POLICY_CAU_DE"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC009",
+  "num": 9,
+  "feature": "Intake FNOL",
+  "name": "TC009_Validate FNOL for Michigan (Legacy) Workers Comp policy. Verifies MI WC routing (DMGA0100 \u2192 Michigan Workers' Compensation group), MI WC approval routing (DMAR0074).",
+  "priority": "Medium",
+  "steps": 6,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/IntakeFNOL.regression.test.js",
+  "grep": "RG-TC009\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "financialRules.hasActivity",
+   "financialPayments.makePayment",
+   "financialRules.approverFor"
+  ],
+  "data": [
+   "POLICY_WC_MI"
+  ],
+  "manualSteps": [
+   6
+  ],
+  "limitation": "DMAR0074 is checked by making a payment and reading who the approval is routed to. On-prem vs cloud screen-by-screen comparison is out of scope for this spec - run the existing Migration Reconciliation tab (cc-migration-reconciliation) on the claim this test files.",
+  "requires": [
+   "POLICY_WC_MI",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC010",
+  "num": 10,
+  "feature": "Intake FNOL",
+  "name": "TC010_Validate FNOL for PA Personal Excess Liability Legacy policy. Verifies claim routing, workplan activities, coverage verification.",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/IntakeFNOL.regression.test.js",
+  "grep": "RG-TC010\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "financialRules.hasActivity"
+  ],
+  "data": [
+   "POLICY_PEL_PA (legacy)"
+  ],
+  "manualSteps": [
+   7
+  ],
+  "limitation": "On-prem vs cloud screen-by-screen comparison is out of scope for this spec - run the existing Migration Reconciliation tab (cc-migration-reconciliation) on the claim this test files.",
+  "requires": [
+   "POLICY_PEL_PA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC011",
+  "num": 11,
+  "feature": "Intake FNOL",
+  "name": "TC011_Validate FNOL for PA Inland Marine Legacy policy, 'Inland Marine All Other' coverage (top coverage by volume). Verifies claim routing (DMGA0007 Property First Party \u2192 Property Clerical group or DMGA0009 Third Party \u2192 General Casualty Unit), workplan activities.",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/IntakeFNOL.regression.test.js",
+  "grep": "RG-TC011\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "financialRules.hasActivity"
+  ],
+  "data": [
+   "POLICY_IM_PA (legacy)"
+  ],
+  "manualSteps": [
+   7
+  ],
+  "limitation": "On-prem vs cloud screen-by-screen comparison is out of scope for this spec - run the existing Migration Reconciliation tab (cc-migration-reconciliation) on the claim this test files.",
+  "requires": [
+   "POLICY_IM_PA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC012",
+  "num": 12,
+  "feature": "Intake FNOL",
+  "name": "TC012_Validate FNOL for General Liability policy with Bodily Injury coverage. Verifies: GL assignment (DMGA0062 GL Group), workplan Contact Insured (DMCW0006)",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/IntakeFNOL.regression.test.js",
+  "grep": "RG-TC012\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "financialRules.hasActivity"
+  ],
+  "data": [
+   "POLICY_GL_IA"
+  ],
+  "manualSteps": [
+   7
+  ],
+  "limitation": "GL has very low production volume - a GL policy must exist on the tier. On-prem vs cloud screen-by-screen comparison is out of scope for this spec - run the existing Migration Reconciliation tab (cc-migration-reconciliation) on the claim this test files.",
+  "requires": [
+   "POLICY_GL_IA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC013",
+  "num": 13,
+  "feature": "Intake FNOL",
+  "name": "TC013_Validate FNOL for PA Farmowners Legacy policy, Farmowners Building coverage (rank #1 by volume). Verifies: First Party property routing (DMGA0007 \u2192 Property Clerical), Property workplan activities (DMCW0082, DMCW0005)",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/IntakeFNOL.regression.test.js",
+  "grep": "RG-TC013\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "financialRules.hasActivity"
+  ],
+  "data": [
+   "POLICY_FARM_PA (legacy)"
+  ],
+  "manualSteps": [
+   7
+  ],
+  "limitation": "On-prem vs cloud screen-by-screen comparison is out of scope for this spec - run the existing Migration Reconciliation tab (cc-migration-reconciliation) on the claim this test files.",
+  "requires": [
+   "POLICY_FARM_PA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC014",
+  "num": 14,
+  "feature": "Intake FNOL",
+  "name": "TC014_Validate FNOL for MI Boat Owners Legacy policy, Inland Marine All Other coverage (rank #1). Verifies Michigan Property routing (DMGA0104 \u2192 Michigan Property group), Property workplan.",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/IntakeFNOL.regression.test.js",
+  "grep": "RG-TC014\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "financialRules.hasActivity"
+  ],
+  "data": [
+   "POLICY_BOAT_MI (legacy)"
+  ],
+  "manualSteps": [
+   7
+  ],
+  "limitation": "On-prem vs cloud screen-by-screen comparison is out of scope for this spec - run the existing Migration Reconciliation tab (cc-migration-reconciliation) on the claim this test files.",
+  "requires": [
+   "POLICY_BOAT_MI"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC015",
+  "num": 15,
+  "feature": "Intake FNOL",
+  "name": "TC015_Validate FNOL for PA Commercial Package PC policy, Premises/Operations coverage.",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/IntakeFNOL.regression.test.js",
+  "grep": "RG-TC015\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "financialRules.hasActivity"
+  ],
+  "data": [
+   "POLICY_CP_PA"
+  ],
+  "manualSteps": [
+   7
+  ],
+  "limitation": "On-prem vs cloud screen-by-screen comparison is out of scope for this spec - run the existing Migration Reconciliation tab (cc-migration-reconciliation) on the claim this test files.",
+  "requires": [
+   "POLICY_CP_PA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC016",
+  "num": 16,
+  "feature": "Intake FNOL",
+  "name": "TC016_Validate FNOL for PA BOP PC policy, Business Liability coverage.",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/IntakeFNOL.regression.test.js",
+  "grep": "RG-TC016\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "financialRules.hasActivity"
+  ],
+  "data": [
+   "POLICY_BOP_PA"
+  ],
+  "manualSteps": [
+   7
+  ],
+  "limitation": "On-prem vs cloud screen-by-screen comparison is out of scope for this spec - run the existing Migration Reconciliation tab (cc-migration-reconciliation) on the claim this test files.",
+  "requires": [
+   "POLICY_BOP_PA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC017",
+  "num": 17,
+  "feature": "Intake FNOL",
+  "name": "TC017_Validate FNOL for PA Homeowners PC policy, Coverage A Dwelling coverage. Verifies routing (Property Clerical (DMGA0007)), workplan (DMGA0007, DMCW0001, DMCW0005, DMCW0082, DMCW0324, DMEW0050).",
+  "priority": "Medium",
+  "steps": 8,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/IntakeFNOL.regression.test.js",
+  "grep": "RG-TC017\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "financialRules.hasActivity"
+  ],
+  "data": [
+   "POLICY_HO_PA"
+  ],
+  "manualSteps": [
+   8
+  ],
+  "limitation": "On-prem vs cloud screen-by-screen comparison is out of scope for this spec - run the existing Migration Reconciliation tab (cc-migration-reconciliation) on the claim this test files.",
+  "requires": [
+   "POLICY_HO_PA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC018",
+  "num": 18,
+  "feature": "Intake FNOL",
+  "name": "TC018_Validate FNOL for PA Dwelling Fire PC policy, Coverage A Dwelling.",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/IntakeFNOL.regression.test.js",
+  "grep": "RG-TC018\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "financialRules.hasActivity"
+  ],
+  "data": [
+   "POLICY_DF_PA"
+  ],
+  "manualSteps": [
+   7
+  ],
+  "limitation": "On-prem vs cloud screen-by-screen comparison is out of scope for this spec - run the existing Migration Reconciliation tab (cc-migration-reconciliation) on the claim this test files.",
+  "requires": [
+   "POLICY_DF_PA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC019",
+  "num": 19,
+  "feature": "Intake FNOL",
+  "name": "TC019_Validate FNOL for PA Commercial Excess Liability Legacy policy.",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/IntakeFNOL.regression.test.js",
+  "grep": "RG-TC019\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "financialRules.hasActivity"
+  ],
+  "data": [
+   "POLICY_CEL_PA (legacy)"
+  ],
+  "manualSteps": [
+   7
+  ],
+  "limitation": "On-prem vs cloud screen-by-screen comparison is out of scope for this spec - run the existing Migration Reconciliation tab (cc-migration-reconciliation) on the claim this test files.",
+  "requires": [
+   "POLICY_CEL_PA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC020",
+  "num": 20,
+  "feature": "FNOL Sources",
+  "name": "TC020_Validate FNOL for Homeowners PC policy through Donegal website",
+  "priority": "Medium",
+  "steps": 9,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/ExternalIntake.regression.test.js",
+  "grep": "RG-TC020\\b",
+  "reuses": [
+   "regressionSteps.validateIntakeClaim"
+  ],
+  "data": [],
+  "manualSteps": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7
+  ],
+  "limitation": "Submitting on the Donegal website is outside ClaimCenter. Automated: the claim it creates (REG_WEB_CLAIM) is found and carries policy, assignment, loss details, contacts, workplan, exposures, documents.",
+  "requires": [
+   "REG_WEB_CLAIM"
+  ],
+  "optional": [
+   "REG_WEB_POLICY"
+  ]
+ },
+ {
+  "id": "TC021",
+  "num": 21,
+  "feature": "FNOL Sources",
+  "name": "TC021_Validate FNOL for PA Legacy policy through Mobile App",
+  "priority": "Medium",
+  "steps": 11,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/ExternalIntake.regression.test.js",
+  "grep": "RG-TC021\\b",
+  "reuses": [
+   "regressionSteps.validateIntakeClaim"
+  ],
+  "data": [],
+  "manualSteps": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9
+  ],
+  "limitation": "Mobile app submission needs a device. Automated: the resulting claim (REG_MOBILE_CLAIM) gets the intake validations + vehicle and driver from the app.",
+  "requires": [
+   "REG_MOBILE_CLAIM"
+  ],
+  "optional": [
+   "REG_MOBILE_POLICY"
+  ]
+ },
+ {
+  "id": "TC022",
+  "num": 22,
+  "feature": "Intersuite CC - CM",
+  "name": "TC022_Confirm edits on PC insured Contacts are blocked",
+  "priority": "Medium",
+  "steps": 1,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Contacts.regression.test.js",
+  "grep": "RG-TC022\\b",
+  "reuses": [
+   "oneInc/wizardDriver.getParties/clickButton",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "REG_CLAIM_PA (PC policy claim, optional)"
+  ],
+  "manualSteps": [],
+  "limitation": "Edit is attempted and then cancelled - nothing is saved.",
+  "requires": [
+   "REG_CLAIM_PA|POLICY_PA_AUTO"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC023",
+  "num": 23,
+  "feature": "Intersuite CC - CM",
+  "name": "TC023_Confirm edits on Covered Party Contacts are blocked",
+  "priority": "Medium",
+  "steps": 1,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Contacts.regression.test.js",
+  "grep": "RG-TC023\\b",
+  "reuses": [
+   "oneInc/wizardDriver.getParties/clickButton"
+  ],
+  "data": [
+   "REG_CLAIM_COVERED_PARTY (PC claim with a Covered Party contact)"
+  ],
+  "manualSteps": [],
+  "limitation": "Needs a PC claim that has a Covered Party contact; BLOCKED when none is on the claim.",
+  "requires": [
+   "REG_CLAIM_COVERED_PARTY"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC024",
+  "num": 24,
+  "feature": "Claim Handling",
+  "name": "TC024_Validate users can create a vehicle incident at Post FNOL with all required vehicle details captured.",
+  "priority": "Medium",
+  "steps": 4,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/ClaimHandling.regression.test.js",
+  "grep": "RG-TC024\\b",
+  "reuses": [
+   "oneInc/wizardDriver.navigate/fill/select/clickButton"
+  ],
+  "data": [
+   "REG_CLAIM_PA (optional)"
+  ],
+  "manualSteps": [],
+  "limitation": "Vehicle incident screen labels not yet live-verified on cloud; VIN uses a valid check-digit test VIN.",
+  "requires": [
+   "REG_CLAIM_PA|POLICY_PA_AUTO"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC025",
+  "num": 25,
+  "feature": "Claim Handling",
+  "name": "TC025_Validate Loss Details screen: loss location, loss cause, and incident creation for DWF",
+  "priority": "Medium",
+  "steps": 4,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/ClaimHandling.regression.test.js",
+  "grep": "RG-TC025\\b",
+  "reuses": [
+   "oneInc/wizardDriver.navigate",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "REG_CLAIM_DF (optional - else files a DF claim)"
+  ],
+  "manualSteps": [],
+  "limitation": "Read-only.",
+  "requires": [
+   "REG_CLAIM_DF|POLICY_DF_PA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC026",
+  "num": 26,
+  "feature": "Claim Handling",
+  "name": "TC026_Validate note creation at FNOL and Post FNOL (CPP)",
+  "priority": "Medium",
+  "steps": 5,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/ClaimHandling.regression.test.js",
+  "grep": "RG-TC026\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "oneInc/wizardDriver.openActionsMenu/fill/clickButton"
+  ],
+  "data": [
+   "POLICY_CP_PA"
+  ],
+  "manualSteps": [
+   1
+  ],
+  "limitation": "A note inside the FNOL wizard is not driven (completeFNOL has no note step); the first note is added right after Finish, the second after re-opening the claim.",
+  "requires": [
+   "POLICY_CP_PA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC027",
+  "num": 27,
+  "feature": "Metro",
+  "name": "TC027_Request a policy report",
+  "priority": "Medium",
+  "steps": 6,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Integrations.regression.test.js",
+  "grep": "RG-TC027\\b",
+  "reuses": [
+   "oneInc/wizardDriver.openActionsMenu/select/fill"
+  ],
+  "data": [
+   "REG_CLAIM_PA",
+   "REG_ALLOW_EXTERNAL=1 (submits to the Metro vendor)"
+  ],
+  "manualSteps": [
+   6
+  ],
+  "limitation": "Submits a real request to the Metro vendor, so it only runs with REG_ALLOW_EXTERNAL=1. \"Received\" status arrives from the vendor later - verify by hand.",
+  "requires": [
+   "REG_ALLOW_EXTERNAL",
+   "REG_CLAIM_PA|POLICY_PA_AUTO"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC028",
+  "num": 28,
+  "feature": "Catastrophe",
+  "name": "TC028_When a CAT code is selected during FNOL, verify the CAT event is available only when the loss date is within the CAT begin/end date range and the selected exposure Cause of Loss matches the Cat Cause of Loss codes configured by the Cat Admin. Verify CAT displays on Loss Details and Summary.",
+  "priority": "Medium",
+  "steps": 9,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Integrations.regression.test.js",
+  "grep": "RG-TC028\\b",
+  "reuses": [
+   "oneInc/wizardDriver.navigate",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "REG_CAT_CLAIM (claim filed with an active CAT event)"
+  ],
+  "manualSteps": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7
+  ],
+  "limitation": "The CAT picker in FNOL Step 3 is a modal that completeFNOL deliberately skips, and an active Donegal CAT event with matching perils/dates must be configured by the Cat Admin. Automated: CAT display on Loss Details and Summary for a claim that has one.",
+  "requires": [
+   "REG_CAT_CLAIM"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC029",
+  "num": 29,
+  "feature": "Intersuite CC - PC",
+  "name": "TC029_Verify claim status update synchronization",
+  "priority": "Medium",
+  "steps": 5,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Intersuite.regression.test.js",
+  "grep": "RG-TC029\\b",
+  "reuses": [
+   "e2eSteps.close (drain, activities, exposures, claim)",
+   "regression/policyCenter.policyClaims"
+  ],
+  "data": [
+   "REG_CLAIM_PROPERTY_OPEN"
+  ],
+  "manualSteps": [
+   3,
+   4,
+   5
+  ],
+  "limitation": "Closes its own HO claim (never a shared one). PolicyCenter checks run when REG_PC_USER / REG_PC_PASS are set (helpers/regression/policyCenter.js, read-only; PC screens after login not yet live-verified).",
+  "requires": [
+   "REG_CLAIM_PROPERTY_OPEN|POLICY_HO_PA",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "REG_PC_USER",
+   "REG_PC_PASS"
+  ]
+ },
+ {
+  "id": "TC030",
+  "num": 30,
+  "feature": "Intersuite CC - PC",
+  "name": "TC030_View newly created ClaimCenter claim in PolicyCenter",
+  "priority": "Medium",
+  "steps": 5,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Intersuite.regression.test.js",
+  "grep": "RG-TC030\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "regression/policyCenter.policyClaims"
+  ],
+  "data": [
+   "POLICY_DF_PA"
+  ],
+  "manualSteps": [
+   3,
+   4,
+   5
+  ],
+  "limitation": "CC claim creation; PolicyCenter checks run when REG_PC_USER / REG_PC_PASS are set (helpers/regression/policyCenter.js, read-only; PC screens after login not yet live-verified).",
+  "requires": [
+   "POLICY_DF_PA"
+  ],
+  "optional": [
+   "REG_PC_USER",
+   "REG_PC_PASS"
+  ]
+ },
+ {
+  "id": "TC031",
+  "num": 31,
+  "feature": "Intersuite CM-PC",
+  "name": "TC031_Verify that updated person contact name in Contact Manager Cloud is synchronized and visible in PolicyCenter on-premises.",
+  "priority": "Medium",
+  "steps": 6,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Intersuite.regression.test.js",
+  "grep": "RG-TC031\\b",
+  "reuses": [
+   "oneInc/contactManager.withCM",
+   "regression/policyCenter.findContact"
+  ],
+  "data": [
+   "REG_CM_PERSON (existing CM person contact)",
+   "REG_ALLOW_CM_WRITES=1"
+  ],
+  "manualSteps": [
+   4,
+   5,
+   6
+  ],
+  "limitation": "Renames a real CM contact - opt-in REG_ALLOW_CM_WRITES=1; rename it back afterwards. PolicyCenter checks run when REG_PC_USER / REG_PC_PASS are set (helpers/regression/policyCenter.js, read-only; PC screens after login not yet live-verified).",
+  "requires": [
+   "REG_CM_PERSON",
+   "REG_ALLOW_CM_WRITES"
+  ],
+  "optional": [
+   "REG_PC_USER",
+   "REG_PC_PASS"
+  ]
+ },
+ {
+  "id": "TC032",
+  "num": 32,
+  "feature": "Intersuite CM-PC",
+  "name": "TC032_Verify inactive contact status is synchronized from Contact Manager to PolicyCenter.",
+  "priority": "Medium",
+  "steps": 4,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Intersuite.regression.test.js",
+  "grep": "RG-TC032\\b",
+  "reuses": [
+   "oneInc/contactManager.withCM",
+   "regression/policyCenter.findContact"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Inactivates a real CM contact - opt-in REG_ALLOW_CM_WRITES=1 and a contact reserved for this (REG_CM_INACTIVATE_PERSON); re-activate it afterwards. PolicyCenter checks run when REG_PC_USER / REG_PC_PASS are set (helpers/regression/policyCenter.js, read-only; PC screens after login not yet live-verified).",
+  "requires": [
+   "REG_CM_INACTIVATE_PERSON",
+   "REG_ALLOW_CM_WRITES"
+  ],
+  "optional": [
+   "REG_PC_USER",
+   "REG_PC_PASS"
+  ]
+ },
+ {
+  "id": "TC033",
+  "num": 33,
+  "feature": "VindicateRecallListAPI",
+  "name": "TC033_Validate Vehicle Recall action is available on vehicle exposure types",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/ClaimHandling.regression.test.js",
+  "grep": "RG-TC033\\b",
+  "reuses": [
+   "oneInc/screenReader.readScreen",
+   "regressionSteps.closeExposure (e2eSteps.completeActivitiesCloud + closeCloud pattern)"
+  ],
+  "data": [
+   "REG_CLAIM_PA (vehicle exposure)"
+  ],
+  "manualSteps": [
+   6,
+   7
+  ],
+  "limitation": "Files its own PA claim (the exposure is closed). Vindicate data comes from the external API.",
+  "requires": [
+   "REG_CLAIM_PA_RECALL|POLICY_PA_AUTO"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC034",
+  "num": 34,
+  "feature": "FNOL Sources",
+  "name": "TC034_Validate DMEP0001 - Close Alliance Exposure activity: fires during Exposure Postsetup for Alliance Glass claims (ExtAllianceGlassClaim=true) and completes any open 'alliance_exposure' activity on the claim",
+  "priority": "Medium",
+  "steps": 6,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/ExternalIntake.regression.test.js",
+  "grep": "RG-TC034\\b",
+  "reuses": [
+   "regressionSteps.validateIntakeClaim",
+   "financialRules.hasActivity/sharedClaim"
+  ],
+  "data": [],
+  "manualSteps": [
+   1
+  ],
+  "limitation": "The Alliance Glass FNOL comes from Alliance (ExtAllianceGlassClaim=true) - put it in REG_ALLIANCE_CLAIM. Activity created + auto-completed and the non-glass negative are automated.",
+  "requires": [
+   "REG_ALLIANCE_CLAIM",
+   "POLICY_PA_AUTO"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC035",
+  "num": 35,
+  "feature": "FNOL Sources",
+  "name": "TC035_Validate that the FNOL intake batch process successfully processes the record when a valid policy number is provided.",
+  "priority": "Medium",
+  "steps": 4,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/ExternalIntake.regression.test.js",
+  "grep": "RG-TC035\\b",
+  "reuses": [
+   "regressionSteps.runBatchProcess/inboundFiles/s3Keys/validateIntakeClaim"
+  ],
+  "data": [],
+  "manualSteps": [
+   1
+  ],
+  "limitation": "Placing the FNOL XML in S3 is manual (S3 admin service lists/downloads only). Batch, Inbound Files status, new claim + intake validations automated; batches need REG_ALLOW_BATCHES=1.",
+  "requires": [
+   "REG_FNOL_XML_POLICY",
+   "REG_ALLOW_BATCHES",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "REG_FNOL_XML_S3_PREFIX",
+   "REG_BATCH_FNOL_INTAKE"
+  ]
+ },
+ {
+  "id": "TC036",
+  "num": 36,
+  "feature": "Hi Marley",
+  "name": "TC036_Singe Sign On",
+  "priority": "Medium",
+  "steps": 1,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Integrations.regression.test.js",
+  "grep": "RG-TC036\\b",
+  "reuses": [
+   "Playwright page (external site)"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "External Hi Marley UAT - REG_ALLOW_EXTERNAL=1. BLOCKED (not failed) if SSO asks for a password/MFA.",
+  "requires": [
+   "REG_ALLOW_EXTERNAL",
+   "REG_HIMARLEY_EMAIL"
+  ],
+  "optional": [
+   "REG_HIMARLEY_URL"
+  ]
+ },
+ {
+  "id": "TC037",
+  "num": 37,
+  "feature": "Hi Marley",
+  "name": "TC037_Texting from ClaimCenter",
+  "priority": "Medium",
+  "steps": 4,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Integrations.regression.test.js",
+  "grep": "RG-TC037\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "oneInc/wizardDriver.addClaimPersonContact",
+   "oneInc/setupA.editAndSave"
+  ],
+  "data": [],
+  "manualSteps": [
+   3,
+   4
+  ],
+  "limitation": "Texts a real phone - REG_ALLOW_EXTERNAL=1. Replying YES and receiving the text are human steps; the case waits 5 minutes for Opt In.",
+  "requires": [
+   "REG_ALLOW_EXTERNAL",
+   "REG_HIMARLEY_MOBILE",
+   "POLICY_PA_AUTO"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC038",
+  "num": 38,
+  "feature": "MSP Navigator - Medicare",
+  "name": "TC038_Medicare tab present on Exposure screen",
+  "priority": "Medium",
+  "steps": 6,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Medicare.regression.test.js",
+  "grep": "RG-TC038\\b",
+  "reuses": [
+   "financialRules.sharedClaim (WC/PA)",
+   "oneInc/needsData._openExposureMatching",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "POLICY_WC_PA",
+   "POLICY_PA_AUTO with PIP coverage"
+  ],
+  "manualSteps": [],
+  "limitation": "The PIP half is BLOCKED when the PA policy has no PIP coverage.",
+  "requires": [
+   "REG_CLAIM_WC|POLICY_WC_PA"
+  ],
+  "optional": [
+   "REG_CLAIM_PA_PIP"
+  ]
+ },
+ {
+  "id": "TC039",
+  "num": 39,
+  "feature": "MSP Navigator - Medicare",
+  "name": "TC039_Added fields to Medicare tab",
+  "priority": "Medium",
+  "steps": 3,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Medicare.regression.test.js",
+  "grep": "RG-TC039\\b",
+  "reuses": [
+   "oneInc/needsData._openExposureMatching",
+   "oneInc/wizardDriver.fill/clickButton"
+  ],
+  "data": [
+   "POLICY_WC_PA"
+  ],
+  "manualSteps": [],
+  "limitation": "Writes a test SSN (900-xx range) and DOB to the claimant contact of an automation claim.",
+  "requires": [
+   "REG_CLAIM_WC|POLICY_WC_PA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC040",
+  "num": 40,
+  "feature": "MSP Navigator - Medicare",
+  "name": "TC040_ICD Code Missing activity",
+  "priority": null,
+  "steps": 3,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Medicare.regression.test.js",
+  "grep": "RG-TC040\\b",
+  "reuses": [
+   "oneInc/needsData.setExposureMedicare",
+   "financialPayments.makePayment",
+   "regressionSteps.runBatchProcess"
+  ],
+  "data": [],
+  "manualSteps": [
+   3
+  ],
+  "limitation": "Cost > $0 / cost $0 activity generation automated (batch needs REG_ALLOW_BATCHES=1; name via REG_BATCH_ICD_MISSING). Step 3 needs a script-parameter change and 2 days.",
+  "requires": [
+   "POLICY_WC_PA",
+   "REG_ALLOW_BATCHES",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "REG_BATCH_ICD_MISSING"
+  ]
+ },
+ {
+  "id": "TC041",
+  "num": 41,
+  "feature": "CCC",
+  "name": "TC041_Appraisal tab is available on the Vehicle incident screen on existing claims only.  Point of Impact is always required - Existing Claim",
+  "priority": "Medium",
+  "steps": 3,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/ClaimHandling.regression.test.js",
+  "grep": "RG-TC041\\b",
+  "reuses": [
+   "oneInc/wizardDriver.navigate/clickButton",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "REG_CLAIM_PA (existing PA claim with a vehicle incident)"
+  ],
+  "manualSteps": [],
+  "limitation": "Read + required-field check; Update is not pressed.",
+  "requires": [
+   "REG_CLAIM_PA|POLICY_PA_AUTO"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC042",
+  "num": 42,
+  "feature": "CCC",
+  "name": "TC042_Single Sign On",
+  "priority": "Medium",
+  "steps": 4,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/ClaimHandling.regression.test.js",
+  "grep": "RG-TC042\\b",
+  "reuses": [
+   "oneInc/wizardDriver.navigate",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "REG_CLAIM_PA"
+  ],
+  "manualSteps": [
+   4
+  ],
+  "limitation": "The CCC Claim View button is checked and clicked; the CCC site behind SSO (external) is verified by hand.",
+  "requires": [
+   "REG_CLAIM_PA|POLICY_PA_AUTO"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC043",
+  "num": 43,
+  "feature": "Reinsurance",
+  "name": "TC043_Validate Legacy Reinsurance fields visible on Legacy claims and hidden on PC claims",
+  "priority": "Medium",
+  "steps": 6,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Reinsurance.regression.test.js",
+  "grep": "RG-TC043\\b",
+  "reuses": [
+   "claimCenterBase.openExistingClaim",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "REG_RI_LEGACY_WC",
+   "REG_RI_LEGACY_CA",
+   "REG_RI_LEGACY_CP",
+   "REG_RI_LEGACY_UMB",
+   "REG_CLAIM_PA (PC claim)"
+  ],
+  "manualSteps": [],
+  "limitation": "Read-only. Needs legacy claim numbers with RI data per LOB (a LOB without one is reported BLOCKED). DMTP0001 is internal; its effect (field visibility) is what is checked.",
+  "requires": [
+   "REG_CLAIM_PA|POLICY_PA_AUTO",
+   "REG_RI_LEGACY_WC|REG_RI_LEGACY_CA|REG_RI_LEGACY_CP|REG_RI_LEGACY_UMB"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC044",
+  "num": 44,
+  "feature": "Reinsurance",
+  "name": "TC044_Validate High Risk Indicator and required RI fields on 'Reported to Reinsurer = Yes' and 'Is RI being collected = Yes'",
+  "priority": "Medium",
+  "steps": 8,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Reinsurance.regression.test.js",
+  "grep": "RG-TC044\\b",
+  "reuses": [
+   "oneInc/wizardDriver.answer/fill/select/clickButton",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "REG_RI_LEGACY_EDIT (legacy RI claim the tests may change)"
+  ],
+  "manualSteps": [],
+  "limitation": "Changes RI answers on the claim - use a dedicated legacy test claim. Updated RI company list is shown, not compared (no reference list attached).",
+  "requires": [
+   "REG_RI_LEGACY_EDIT"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC045",
+  "num": 45,
+  "feature": "Special Investigations",
+  "name": "TC045_Validate DMEPU0016 (Auto fire COL) and DMEPU0017 (Property fire COL) create SIU_file_review activity; DMDA0101/DMDA0100/DMGA0407 route it; DMTP010065 fires on approved Property payment with fire COL",
+  "priority": "Medium",
+  "steps": 10,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/SIU.regression.test.js",
+  "grep": "RG-TC045\\b",
+  "reuses": [
+   "financialRules.sharedClaim/hasActivity",
+   "oneInc/wizardDriver.select/clickButton",
+   "financialPayments.makePayment",
+   "financialRules.approveAllLevels"
+  ],
+  "data": [
+   "POLICY_PA_AUTO",
+   "POLICY_HO_PA",
+   "CC_TEAM_PASS (approval as the assignee)"
+  ],
+  "manualSteps": [
+   8
+  ],
+  "limitation": "Jewelry branch (step 8) depends on configuration; not driven. Rule internals (isFieldChanged) are verified through the resulting activity/assignment.",
+  "requires": [
+   "REG_CLAIM_PA|POLICY_PA_AUTO",
+   "REG_CLAIM_HO|POLICY_HO_PA",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "REG_CLAIM_PA_NEG",
+   "CC_TEAM_PASS"
+  ]
+ },
+ {
+  "id": "TC046",
+  "num": 46,
+  "feature": "Special Investigations",
+  "name": "TC046_Validate DMDA0102 routes SIU Referral ('fraud_review') with null AssignedUser to SIU Supervisor of Special Investigation Division",
+  "priority": "Medium",
+  "steps": 6,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/SIU.regression.test.js",
+  "grep": "RG-TC046\\b",
+  "reuses": [
+   "financialRules.sharedClaim/workplanRows",
+   "oneInc/wizardDriver.select/fill/clickButton",
+   "oneInc/checkOps.history"
+  ],
+  "data": [
+   "POLICY_PA_AUTO"
+  ],
+  "manualSteps": [],
+  "limitation": "New Activity form on cloud is not yet live-verified (claimLifecycleHelper.createManualActivity is on-prem shaped, so the cloud form is driven by label).",
+  "requires": [
+   "REG_CLAIM_PA|POLICY_PA_AUTO"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC047",
+  "num": 47,
+  "feature": "System Administration",
+  "name": "TC047_Verify the user names mentioned in ADL spreadsheet",
+  "priority": "Medium",
+  "steps": 4,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Admin.regression.test.js",
+  "grep": "RG-TC047\\b",
+  "reuses": [
+   "claimCenterBase.loginAsAdmin",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "CC_ADMIN_USER/CC_ADMIN_PASS",
+   "REG_ADL_USERS (optional comma list; default = names in the TC)"
+  ],
+  "manualSteps": [],
+  "limitation": "The full ADL spreadsheet was not attached - the 19 user names in the TC are checked; set REG_ADL_USERS for the complete list.",
+  "requires": [
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "REG_ADL_USERS"
+  ]
+ },
+ {
+  "id": "TC048",
+  "num": 48,
+  "feature": "System Administration",
+  "name": "TC048_Verify the group names mentioned in ADL spreadsheet",
+  "priority": "Medium",
+  "steps": 4,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Admin.regression.test.js",
+  "grep": "RG-TC048\\b",
+  "reuses": [
+   "claimCenterBase.loginAsAdmin",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "CC_ADMIN_USER/CC_ADMIN_PASS",
+   "REG_ADL_GROUPS (optional)"
+  ],
+  "manualSteps": [],
+  "limitation": "TC lists 7 complete group names (8th is truncated) - set REG_ADL_GROUPS for the full ADL list.",
+  "requires": [
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "REG_ADL_GROUPS"
+  ]
+ },
+ {
+  "id": "TC049",
+  "num": 49,
+  "feature": "Review & Team Metrics",
+  "name": "TC049_Validate that when a User is Group Supervisor or Manager in the group, he/ she can monitor and manage a group\u2019s workload",
+  "priority": "Medium",
+  "steps": 4,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Admin.regression.test.js",
+  "grep": "RG-TC049\\b",
+  "reuses": [
+   "claimCenterBase.loginToClaimCenter",
+   "e2eSteps.TEAMS"
+  ],
+  "data": [
+   "CC_TEAM_PASS"
+  ],
+  "manualSteps": [
+   4
+  ],
+  "limitation": "Logs in as an EBT supervisor (e2eSteps.TEAMS). On-prem vs cloud dropdown/column comparison (step 4) is manual.",
+  "requires": [
+   "CC_TEAM_PASS"
+  ],
+  "optional": [
+   "REG_TEAM_SUPERVISOR"
+  ]
+ },
+ {
+  "id": "TC050",
+  "num": 50,
+  "feature": "Additional Rules",
+  "name": "TC050_Verify \"REASSIGNED CLAIM\" activity routing for User Assignment followed by Group Reassignment (DMGA350 & DMDA0130)",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Rules.regression.test.js",
+  "grep": "RG-TC050\\b",
+  "reuses": [
+   "claimLifecycleHelper.assignClaim",
+   "financialRules.workplanRows"
+  ],
+  "data": [
+   "POLICY_PA_AUTO"
+  ],
+  "manualSteps": [],
+  "limitation": "Group assignment drives the cloud Assign screen by label (not yet live-verified).",
+  "requires": [
+   "POLICY_PA_AUTO",
+   "REG_REASSIGN_GROUP"
+  ],
+  "optional": [
+   "REG_REASSIGN_USER"
+  ]
+ },
+ {
+  "id": "TC051",
+  "num": 51,
+  "feature": "Additional Rules",
+  "name": "TC051_Verify \"Warning Loss Cause was changed after 120 days\" activity assignment to Group Supervisor (DMDA0135)",
+  "priority": "Medium",
+  "steps": 5,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Rules.regression.test.js",
+  "grep": "RG-TC051\\b",
+  "reuses": [
+   "oneInc/wizardDriver.navigate/select/clickButton",
+   "financialRules.workplanRows"
+  ],
+  "data": [
+   "REG_CLAIM_OLD120 (open claim older than 120 days)"
+  ],
+  "manualSteps": [],
+  "limitation": "Changes the loss cause on an existing old claim - use a claim reserved for regression.",
+  "requires": [
+   "REG_CLAIM_OLD120"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC052",
+  "num": 52,
+  "feature": "CAA",
+  "name": "TC052_Open a claim without permission",
+  "priority": "Medium",
+  "steps": 5,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Rules.regression.test.js",
+  "grep": "RG-TC052\\b",
+  "reuses": [
+   "e2eSteps.cannotView",
+   "claimCenterBase.loginAsAdmin",
+   "oneInc/checkOps.history"
+  ],
+  "data": [
+   "REG_CLAIM_RESTRICTED (claim the standard user cannot view; HO-PA claims usually are)"
+  ],
+  "manualSteps": [],
+  "limitation": "Relies on the standard user being denied; BLOCKED if the standard user can see the claim.",
+  "requires": [
+   "REG_CLAIM_RESTRICTED",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC053",
+  "num": 53,
+  "feature": "BOAFileIntakeBatchProcess",
+  "name": "TC053_Legacy claim_ Personal Auto _  with Final check payment_ Requested status_Paper check",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/ExternalIntake.regression.test.js",
+  "grep": "RG-TC053\\b",
+  "reuses": [
+   "regressionSteps.runBatchProcess/inboundFiles/s3Keys",
+   "oneInc/wizardDriver.navigate(checks)"
+  ],
+  "data": [],
+  "manualSteps": [
+   1,
+   6
+  ],
+  "limitation": "Placing the BOA file in S3 and the payee mailbox are manual. Batches, Inbound Files Loaded/Processed, check status change automated (REG_ALLOW_BATCHES=1).",
+  "requires": [
+   "REG_BOA_CLAIM_PA",
+   "REG_BOA_CHECK_PA",
+   "REG_ALLOW_BATCHES",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "REG_BOA_S3_PREFIX",
+   "REG_BATCH_BOA_INTAKE",
+   "REG_BATCH_INBOUND_CHUNK"
+  ]
+ },
+ {
+  "id": "TC054",
+  "num": 54,
+  "feature": "BOAFileIntakeBatchProcess",
+  "name": "TC054_Legacy claim_ Homeowners _ with partial check payment_Issued status_Paper check",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/ExternalIntake.regression.test.js",
+  "grep": "RG-TC054\\b",
+  "reuses": [
+   "regressionSteps.runBatchProcess/inboundFiles/s3Keys",
+   "oneInc/wizardDriver.navigate(checks)"
+  ],
+  "data": [],
+  "manualSteps": [
+   1,
+   6
+  ],
+  "limitation": "As TC053 (Homeowners partial check).",
+  "requires": [
+   "REG_BOA_CLAIM_HO",
+   "REG_BOA_CHECK_HO",
+   "REG_ALLOW_BATCHES",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "REG_BOA_S3_PREFIX",
+   "REG_BATCH_BOA_INTAKE",
+   "REG_BATCH_INBOUND_CHUNK"
+  ]
+ },
+ {
+  "id": "TC055",
+  "num": 55,
+  "feature": "Email Integration",
+  "name": "TC055_Any claim -  FNOL XML upload - Email generation",
+  "priority": "Medium",
+  "steps": 4,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/ExternalIntake.regression.test.js",
+  "grep": "RG-TC055\\b",
+  "reuses": [
+   "regressionSteps.runBatchProcess/inboundFiles/validateIntakeClaim"
+  ],
+  "data": [],
+  "manualSteps": [
+   1,
+   4
+  ],
+  "limitation": "As TC035 plus Inbound Chunk; the email to added users is checked by hand.",
+  "requires": [
+   "REG_FNOL_XML_POLICY",
+   "REG_ALLOW_BATCHES",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "REG_FNOL_XML_S3_PREFIX",
+   "REG_BATCH_FNOL_INTAKE",
+   "REG_BATCH_INBOUND_CHUNK"
+  ]
+ },
+ {
+  "id": "TC056",
+  "num": 56,
+  "feature": "ISO - The Insurance Services Office",
+  "name": "TC056_BOP Claim",
+  "priority": "Medium",
+  "steps": 4,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Integrations.regression.test.js",
+  "grep": "RG-TC056\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "POLICY_BOP_PA"
+  ],
+  "manualSteps": [
+   4
+  ],
+  "limitation": "ISO response is asynchronous; the spec polls the claim ISO details up to 10 minutes. ISO ClaimSearch side is external.",
+  "requires": [
+   "POLICY_BOP_PA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC057",
+  "num": 57,
+  "feature": "ISO - The Insurance Services Office",
+  "name": "TC057_Personal Auto -  Total Loss Yes",
+  "priority": "Medium",
+  "steps": 4,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Integrations.regression.test.js",
+  "grep": "RG-TC057\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "oneInc/checkOps.createFullCheck/submitVoid",
+   "financialsHelper.createReserve"
+  ],
+  "data": [
+   "POLICY_PA_AUTO"
+  ],
+  "manualSteps": [
+   4
+  ],
+  "limitation": "CC side automated: initial ISO send, payment + void re-sent to ISO. The Total Loss indicator inside ISO ClaimSearch and salvage are external.",
+  "requires": [
+   "POLICY_PA_AUTO",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC058",
+  "num": 58,
+  "feature": "Subrogation",
+  "name": "TC058_Validate DMCW0032 creates Subrogation Potential activity at FNOL; DMGA0085 routes Subrogation Referral to Recovery Claim Division; DMDA0013 assigns it to queue; DMCCV005 blocks claim closure when Subro Potential = Yes and not referred'",
+  "priority": "Medium",
+  "steps": 9,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Subrogation.regression.test.js",
+  "grep": "RG-TC058\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "financialRules.hasActivity/approverFor",
+   "e2eSteps.openSubrogationCloud",
+   "claimLifecycleHelper.closeClaim"
+  ],
+  "data": [
+   "POLICY_PA_AUTO_WI",
+   "CC_TEAM_PASS (supervisor step)"
+  ],
+  "manualSteps": [
+   3,
+   6
+  ],
+  "limitation": "DMCW0032 exclusions (company/paper/glass) are data facts, not on screen. DMDA0013 queue placement is checked through Assigned To = queue on the activity, not through the queue view.",
+  "requires": [
+   "POLICY_PA_AUTO_WI"
+  ],
+  "optional": [
+   "CC_TEAM_PASS"
+  ]
+ },
+ {
+  "id": "TC059",
+  "num": 59,
+  "feature": "Subrogation",
+  "name": "TC059_Validate enabling Subrogation via Loss Details: CPU10800 creates SubrogationSummary; CPU32010 triggers Subrogation Reassignment; DMGA0086 routes 'Review Claim for Subrogation' to group supervisor; DMGA0360 for REASSIGNMENT",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Subrogation.regression.test.js",
+  "grep": "RG-TC059\\b",
+  "reuses": [
+   "oneInc/wizardDriver.navigate/answer/select/clickButton",
+   "financialRules.workplanRows"
+  ],
+  "data": [
+   "POLICY_PA_AUTO_WI or REG_CLAIM_WI_AUTO"
+  ],
+  "manualSteps": [],
+  "limitation": "Subro Adjuster must be configured on the tier.",
+  "requires": [
+   "REG_CLAIM_WI_AUTO|POLICY_PA_AUTO_WI"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC060",
+  "num": 60,
+  "feature": "AutomatedRenewalAPI",
+  "name": "TC060_PC claim_ Personal Auto _ Retrieve single claim data",
+  "priority": "Medium",
+  "steps": 3,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Api.regression.test.js",
+  "grep": "RG-TC060\\b",
+  "reuses": [
+   "regression/soapClient.call (WSDL-driven)",
+   "financialRules.transactionRows",
+   "regression/policyCenter.policyClaims"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Needs REG_API_RENEWAL_URL (+ REG_API_USER/PASS). Response cross-checked with CC; PolicyCenter checks run when REG_PC_USER / REG_PC_PASS are set (helpers/regression/policyCenter.js, read-only; PC screens after login not yet live-verified).",
+  "requires": [
+   "REG_API_RENEWAL_URL",
+   "REG_API_POLICY_PA"
+  ],
+  "optional": [
+   "REG_API_USER",
+   "REG_API_PASS",
+   "REG_PC_USER",
+   "REG_PC_PASS"
+  ]
+ },
+ {
+  "id": "TC061",
+  "num": 61,
+  "feature": "AutomatedRenewalAPI",
+  "name": "TC061_Legacy claim_ Personal Auto _ Retrieve single claim data",
+  "priority": "Medium",
+  "steps": 3,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Api.regression.test.js",
+  "grep": "RG-TC061\\b",
+  "reuses": [
+   "regression/soapClient.call",
+   "regression/policyCenter.policyClaims"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "As TC060 for a legacy policy.",
+  "requires": [
+   "REG_API_RENEWAL_URL",
+   "REG_API_POLICY_PA_LEGACY"
+  ],
+  "optional": [
+   "REG_API_USER",
+   "REG_API_PASS",
+   "REG_PC_USER",
+   "REG_PC_PASS"
+  ]
+ },
+ {
+  "id": "TC062",
+  "num": 62,
+  "feature": "ClaimSurveyReminderAPI",
+  "name": "TC062_PC claim_ Personal Auto _ Claimant with Final payment",
+  "priority": "Medium",
+  "steps": 5,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Api.regression.test.js",
+  "grep": "RG-TC062\\b",
+  "reuses": [
+   "financialPayments.makePayment (Final)",
+   "regressionSteps.messageQueue/runBatchProcess",
+   "regression/soapClient.postJson"
+  ],
+  "data": [],
+  "manualSteps": [
+   5
+  ],
+  "limitation": "Suspends the shared Claim Survey queue (REG_ALLOW_QUEUE_SUSPEND=1, always resumed). Payload read from Message Queues is not yet live-verified (BLOCKED if not readable). Survey link receipt by email/SMS is manual.",
+  "requires": [
+   "REG_SURVEY_CLAIM_PC",
+   "REG_API_CLAIM_SURVEY_URL",
+   "REG_ALLOW_QUEUE_SUSPEND",
+   "REG_ALLOW_BATCHES",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "REG_API_USER",
+   "REG_API_PASS",
+   "REG_BATCH_CLAIM_SURVEY"
+  ]
+ },
+ {
+  "id": "TC063",
+  "num": 63,
+  "feature": "ClaimSurveyReminderAPI",
+  "name": "TC063_Legacy claim_ Personal Auto _ Claimant with Final payment",
+  "priority": "Medium",
+  "steps": 5,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Api.regression.test.js",
+  "grep": "RG-TC063\\b",
+  "reuses": [
+   "financialPayments.makePayment (Final)",
+   "regressionSteps.messageQueue/runBatchProcess",
+   "regression/soapClient.postJson"
+  ],
+  "data": [],
+  "manualSteps": [
+   5
+  ],
+  "limitation": "As TC062 for a legacy claim.",
+  "requires": [
+   "REG_SURVEY_CLAIM_LEGACY",
+   "REG_API_CLAIM_SURVEY_URL",
+   "REG_ALLOW_QUEUE_SUSPEND",
+   "REG_ALLOW_BATCHES",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "REG_API_USER",
+   "REG_API_PASS",
+   "REG_BATCH_CLAIM_SURVEY"
+  ]
+ },
+ {
+  "id": "TC064",
+  "num": 64,
+  "feature": "Claim Evaluation & Negotiation",
+  "name": "TC064_Create Evaluation \u2014 Related to Claim (Auto)",
+  "priority": "Medium",
+  "steps": 3,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/PlanOfAction.regression.test.js",
+  "grep": "RG-TC064\\b",
+  "reuses": [
+   "claimCenterBase.openExistingClaim",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "REG_CLAIM_PA (optional)"
+  ],
+  "manualSteps": [],
+  "limitation": "Read-only (absence of Plan of Action > Evaluations for the adjuster login).",
+  "requires": [
+   "REG_CLAIM_PA|POLICY_PA_AUTO"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC065",
+  "num": 65,
+  "feature": "Claim Evaluation & Negotiation",
+  "name": "TC065_Create Negotiation \u2014 Related to Exposure (Workers' Comp LOB)",
+  "priority": "Medium",
+  "steps": 16,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/PlanOfAction.regression.test.js",
+  "grep": "RG-TC065\\b",
+  "reuses": [
+   "financialRules.sharedClaim (WC)",
+   "oneInc/wizardDriver.select/fill/clickButton"
+  ],
+  "data": [
+   "POLICY_WC_PA"
+  ],
+  "manualSteps": [],
+  "limitation": "Needs a WC claim with an Indemnity exposure; negotiation line grid not yet live-verified on cloud.",
+  "requires": [
+   "REG_CLAIM_WC|POLICY_WC_PA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC066",
+  "num": 66,
+  "feature": "Symbility",
+  "name": "TC066_Claim appears in Symbility",
+  "priority": "Medium",
+  "steps": 15,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Integrations.regression.test.js",
+  "grep": "RG-TC066\\b",
+  "reuses": [
+   "fnolHelper.completeFNOL",
+   "oneInc/wizardDriver.navigate/answer/clickButton"
+  ],
+  "data": [
+   "POLICY_HO_PA",
+   "REG_ALLOW_EXTERNAL=1"
+  ],
+  "manualSteps": [
+   12,
+   14,
+   15
+  ],
+  "limitation": "Sends the claim to Symbility (external) - only with REG_ALLOW_EXTERNAL=1; Symbility-side checks are manual.",
+  "requires": [
+   "POLICY_HO_PA",
+   "REG_ALLOW_EXTERNAL"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC067",
+  "num": 67,
+  "feature": "Financials",
+  "name": "TC067_Validate check approval is auto-completed when amount is within user's authority limit",
+  "priority": "Medium",
+  "steps": 9,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Financials.regression.test.js",
+  "grep": "RG-TC067\\b",
+  "reuses": [
+   "financialRules.sharedClaim/asReserveUser",
+   "financialPayments.makePayment",
+   "financialRules.transactionRows"
+  ],
+  "data": [
+   "POLICY_PA_AUTO",
+   "CC_TEAM_PASS (so the check is made under a real authority limit)"
+  ],
+  "manualSteps": [],
+  "limitation": "EMDMCH01/02 event messages are not visible on a screen (step 8 noted, not asserted).",
+  "requires": [
+   "POLICY_PA_AUTO",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "CC_TEAM_PASS"
+  ]
+ },
+ {
+  "id": "TC068",
+  "num": 68,
+  "feature": "Financials",
+  "name": "TC068_Validate escalation rules triggered when check amount exceeds user's authority limit",
+  "priority": "Medium",
+  "steps": 13,
+  "status": "AUTOMATED",
+  "spec": "tests/Financials/FinancialRules.test.js",
+  "grep": "HIGH-CHECK",
+  "reuses": [
+   "EXISTING TEST: FinancialRules HIGH-CHECK (TR-571/TR-569 routing on a $25,000 check)"
+  ],
+  "data": [
+   "POLICY_PA_AUTO",
+   "CC_TEAM_PASS"
+  ],
+  "manualSteps": [],
+  "limitation": "Runs the existing HIGH-CHECK case unchanged. DMTA0012 aggregate (step 9) applies only when the 5-day aggregate is exceeded.",
+  "requires": [
+   "POLICY_PA_AUTO",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "CC_TEAM_PASS"
+  ]
+ },
+ {
+  "id": "TC069",
+  "num": 69,
+  "feature": "Financials",
+  "name": "TC069_Validate DMEC0002 blocks exposure closure when open reserve > $0 for Commercial Auto",
+  "priority": "Medium",
+  "steps": 10,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Financials.regression.test.js",
+  "grep": "RG-TC069\\b",
+  "reuses": [
+   "regressionSteps.closeExposure",
+   "financialsHelper.findFirstPositiveReserveLine/createPayment"
+  ],
+  "data": [
+   "POLICY_CAU_PA"
+  ],
+  "manualSteps": [
+   9,
+   10
+  ],
+  "limitation": "On cloud DMEC0002 is a warning that needs a second click; the case checks it stops the first close, then drains with a Final Payment and closes.",
+  "requires": [
+   "POLICY_CAU_PA",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC070",
+  "num": 70,
+  "feature": "Financials",
+  "name": "TC070_Validate payment exceeding exposure coverage limit triggers DMAR0001 supervisor approval for Auto",
+  "priority": "Medium",
+  "steps": 11,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Financials.regression.test.js",
+  "grep": "RG-TC070\\b",
+  "reuses": [
+   "financialRules.sharedClaim/approveAllLevels",
+   "financialPayments.makePayment"
+  ],
+  "data": [
+   "POLICY_PA_AUTO",
+   "CC_TEAM_PASS"
+  ],
+  "manualSteps": [],
+  "limitation": "Coverage limit is read from the exposure; when the policy limit is above the payment authority the routing is reported as observed.",
+  "requires": [
+   "POLICY_PA_AUTO",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "CC_TEAM_PASS"
+  ]
+ },
+ {
+  "id": "TC071",
+  "num": 71,
+  "feature": "Financials",
+  "name": "TC071_Validate user can add joint payees to a HO check using Add Joint Payees",
+  "priority": "Medium",
+  "steps": 7,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Financials.regression.test.js",
+  "grep": "RG-TC071\\b",
+  "reuses": [
+   "financialRules.sharedClaim (HO)",
+   "oneInc/checkOps.createFullCheck({joint})",
+   "oneInc/wizardDriver.addJointPayees"
+  ],
+  "data": [
+   "POLICY_HO_PA"
+  ],
+  "manualSteps": [],
+  "limitation": "Needs a second person contact on the claim to add as joint payee (added automatically when missing).",
+  "requires": [
+   "POLICY_HO_PA"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC072",
+  "num": 72,
+  "feature": "Financials",
+  "name": "TC072_Validate user can create a recovery reserve for Auto policies (EMDMRR03)",
+  "priority": "Medium",
+  "steps": 9,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Financials.regression.test.js",
+  "grep": "RG-TC072\\b",
+  "reuses": [
+   "financialRules.sharedClaim",
+   "e2eSteps.recovery (recoveryCloud)",
+   "financialRules.transactionRows"
+  ],
+  "data": [
+   "POLICY_PA_AUTO"
+  ],
+  "manualSteps": [],
+  "limitation": "EMDMRR03 event message is not visible on a screen (step 7 noted, not asserted).",
+  "requires": [
+   "POLICY_PA_AUTO",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC073",
+  "num": 73,
+  "feature": "Financials",
+  "name": "TC073_Validate TXV11000 blocks payment when check amount exceeds available reserves on exposure (Auto PA)",
+  "priority": "Medium",
+  "steps": 5,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Financials.regression.test.js",
+  "grep": "RG-TC073\\b",
+  "reuses": [
+   "financialRules.sharedClaim",
+   "financialsHelper.createReserve",
+   "financialPayments.makePayment"
+  ],
+  "data": [
+   "POLICY_PA_AUTO"
+  ],
+  "manualSteps": [],
+  "limitation": "Uses relative amounts on a shared claim (reserve to $600 above what is paid, then $100 over).",
+  "requires": [
+   "POLICY_PA_AUTO",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [
+   "CC_TEAM_PASS"
+  ]
+ },
+ {
+  "id": "TC074",
+  "num": 74,
+  "feature": "Financials",
+  "name": "TC074_Validate user can Void a Bulk Invoice in Requesting/Submitting status for Auto",
+  "priority": "Medium",
+  "steps": 14,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Financials.regression.test.js",
+  "grep": "RG-TC074\\b",
+  "reuses": [
+   "financialRules.sharedClaim",
+   "oneInc/wizardDriver.select/fill/clickButton",
+   "regressionSteps.runBatchProcess (generalised from checkOps.runFinancialsEscalation)"
+  ],
+  "data": [
+   "POLICY_PA_AUTO",
+   "CC_ADMIN_USER/CC_ADMIN_PASS"
+  ],
+  "manualSteps": [],
+  "limitation": "financialsHelper.createBulkInvoice is on-prem shaped, so the cloud Desktop > Bulk Invoices screen is driven by label (not yet live-verified). Batch runs via Server Tools as admin.",
+  "requires": [
+   "POLICY_PA_AUTO",
+   "REG_ALLOW_BATCHES",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC075",
+  "num": 75,
+  "feature": "Claim Purge",
+  "name": "TC075_Verify the purge claim ISO folders message queue is removed",
+  "priority": "Medium",
+  "steps": 3,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Admin.regression.test.js",
+  "grep": "RG-TC075\\b",
+  "reuses": [
+   "claimCenterBase.loginAsAdmin",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [
+   "CC_ADMIN_USER/CC_ADMIN_PASS"
+  ],
+  "manualSteps": [],
+  "limitation": "Read-only.",
+  "requires": [
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC076",
+  "num": 76,
+  "feature": "ClaimDataAPI",
+  "name": "TC076_Legacy claim_ Personal Auto _ Retrieve claim data",
+  "priority": "Medium",
+  "steps": 2,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Api.regression.test.js",
+  "grep": "RG-TC076\\b",
+  "reuses": [
+   "regression/soapClient.call",
+   "financialRules.transactionRows"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Needs REG_API_CLAIM_DATA_URL. Litigation fields are reported (a claim without a matter returns none).",
+  "requires": [
+   "REG_API_CLAIM_DATA_URL",
+   "REG_API_CLAIM_PA_LEGACY"
+  ],
+  "optional": [
+   "REG_API_USER",
+   "REG_API_PASS"
+  ]
+ },
+ {
+  "id": "TC077",
+  "num": 77,
+  "feature": "ClaimDataAPI",
+  "name": "TC077_PC claim_ Commercial package Property _ Retrieve claim data",
+  "priority": "Medium",
+  "steps": 2,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Api.regression.test.js",
+  "grep": "RG-TC077\\b",
+  "reuses": [
+   "regression/soapClient.call",
+   "financialRules.transactionRows"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "As TC076 for a PC Commercial Package claim.",
+  "requires": [
+   "REG_API_CLAIM_DATA_URL",
+   "REG_API_CLAIM_CPP"
+  ],
+  "optional": [
+   "REG_API_USER",
+   "REG_API_PASS"
+  ]
+ },
+ {
+  "id": "TC078",
+  "num": 78,
+  "feature": "AgentAccessClaimDataAPI",
+  "name": "TC078_Legacy claim_ Personal Auto _ Retrieve claim data",
+  "priority": "Medium",
+  "steps": 3,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Api.regression.test.js",
+  "grep": "RG-TC078\\b",
+  "reuses": [
+   "regression/soapClient.call",
+   "oneInc/wizardDriver.navigate(parties)"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Needs REG_API_AGENT_ACCESS_URL. Agent + loss date compared with ClaimCenter.",
+  "requires": [
+   "REG_API_AGENT_ACCESS_URL",
+   "REG_API_CLAIM_AGENT"
+  ],
+  "optional": [
+   "REG_API_USER",
+   "REG_API_PASS"
+  ]
+ },
+ {
+  "id": "TC079",
+  "num": 79,
+  "feature": "AgentAccessClaimDataAPI",
+  "name": "TC079_PC claim_ Personal Auto _ Retrieve invalid claim data - Negative",
+  "priority": "Medium",
+  "steps": 2,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Api.regression.test.js",
+  "grep": "RG-TC079\\b",
+  "reuses": [
+   "regression/soapClient.call"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Negative case; claim number from REG_API_CLAIM_INVALID or a never-issued number.",
+  "requires": [
+   "REG_API_AGENT_ACCESS_URL"
+  ],
+  "optional": [
+   "REG_API_USER",
+   "REG_API_PASS",
+   "REG_API_CLAIM_INVALID"
+  ]
+ },
+ {
+  "id": "TC080",
+  "num": 80,
+  "feature": "WSAP Integration",
+  "name": "TC080_Verify ClaimSurvey through the WSAP Integration page",
+  "priority": "Medium",
+  "steps": 3,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Admin.regression.test.js",
+  "grep": "RG-TC080\\b",
+  "reuses": [
+   "claimCenterBase.loginAsAdmin",
+   "oneInc/wizardDriver.fill/clickButton"
+  ],
+  "data": [
+   "REG_WSAP_PROC_ID",
+   "REG_WSAP_PROC_PARAM",
+   "REG_WSAP_INPUT"
+  ],
+  "manualSteps": [],
+  "limitation": "PROC ID / parameters are not in the TC - BLOCKED until they are set.",
+  "requires": [
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS",
+   "REG_WSAP_PROC_ID",
+   "REG_WSAP_PROC_PARAM",
+   "REG_WSAP_INPUT"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC081",
+  "num": 81,
+  "feature": "WSAP Integration",
+  "name": "TC081_Verify claim creation through a non-FNOL source",
+  "priority": "Medium",
+  "steps": 3,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/ExternalIntake.regression.test.js",
+  "grep": "RG-TC081\\b",
+  "reuses": [
+   "regressionSteps.s3Keys/validateIntakeClaim"
+  ],
+  "data": [],
+  "manualSteps": [
+   1,
+   2
+  ],
+  "limitation": "Website submission and the UAC scheduler are outside ClaimCenter; the created claim (REG_UAC_CLAIM) gets the intake validations.",
+  "requires": [
+   "REG_UAC_CLAIM"
+  ],
+  "optional": [
+   "REG_UAC_S3_PREFIX",
+   "REG_UAC_POLICY"
+  ]
+ },
+ {
+  "id": "TC082",
+  "num": 82,
+  "feature": "Mainframe-PUOF",
+  "name": "TC082_Class Code",
+  "priority": "Medium",
+  "steps": 2,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Mainframe.regression.test.js",
+  "grep": "RG-TC082\\b",
+  "reuses": [
+   "financialRules.sharedClaim",
+   "financialsHelper.createReserve",
+   "oneInc/wizardDriver.navigate/select/clickButton"
+  ],
+  "data": [
+   "POLICY_PA_AUTO"
+  ],
+  "manualSteps": [],
+  "limitation": "Two-day test: Day 1 files the claim and records it in results/regression/mainframe.json; Day 2 runs only on a later date. The mainframe (PUOF) feed itself is verified by hand.",
+  "requires": [
+   "POLICY_PA_AUTO",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC083",
+  "num": 83,
+  "feature": "Mainframe-PUOF",
+  "name": "TC083_Risk Unit",
+  "priority": "Medium",
+  "steps": 2,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Mainframe.regression.test.js",
+  "grep": "RG-TC083\\b",
+  "reuses": [
+   "financialRules.sharedClaim",
+   "financialsHelper.createReserve",
+   "oneInc/needsData._openExposureMatching"
+  ],
+  "data": [
+   "POLICY_PA_AUTO"
+  ],
+  "manualSteps": [],
+  "limitation": "As TC082 (risk unit = vehicle on the exposure).",
+  "requires": [
+   "POLICY_PA_AUTO",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC084",
+  "num": 84,
+  "feature": "Reporting Microservice CC DB Integrations",
+  "name": "TC084_Verify individual transaction email notifications are disabled",
+  "priority": "Medium",
+  "steps": 3,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Admin.regression.test.js",
+  "grep": "RG-TC084\\b",
+  "reuses": [
+   "financialPayments.makePayment",
+   "oneInc/checkOps.historyMark/historySince"
+  ],
+  "data": [],
+  "manualSteps": [
+   2,
+   3
+  ],
+  "limitation": "CC side automated: no per-transaction email in History / Documents, email destinations listed. Mailbox, mail log and the consolidated report are manual.",
+  "requires": [
+   "POLICY_PA_AUTO"
+  ],
+  "optional": []
+ },
+ {
+  "id": "TC085",
+  "num": 85,
+  "feature": "Reporting Microservice CC DB Integrations",
+  "name": "TC085_Verify sensitive claims are accessible only to users with the required role",
+  "priority": "Medium",
+  "steps": 8,
+  "status": "PARTIAL",
+  "spec": "tests/Regression/Rules.regression.test.js",
+  "grep": "RG-TC085\\b",
+  "reuses": [
+   "claimCenterBase.loginToClaimCenter/openExistingClaim",
+   "e2eSteps.cannotView"
+  ],
+  "data": [
+   "REG_SENSITIVE_CLAIM",
+   "REG_SENSITIVE_USER/REG_SENSITIVE_PASS (role holder)",
+   "standard CC_USER (no role)"
+  ],
+  "manualSteps": [
+   2,
+   3,
+   5,
+   7,
+   8
+  ],
+  "limitation": "The reporting-microservice report and its hyperlinks are outside CC; direct claim access for authorised vs unauthorised users is automated.",
+  "requires": [
+   "REG_SENSITIVE_CLAIM",
+   "REG_SENSITIVE_USER",
+   "REG_SENSITIVE_PASS"
+  ],
+  "optional": []
+ },
+ {
+  "id": "RX001",
+  "num": 101,
+  "feature": "Financials - LOB variants",
+  "name": "RX001_HO reserve, payment within reserves, TXV11000 above reserves",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX001\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "financialsHelper.createReserve",
+   "financialPayments.makePayment"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_HO_PA",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX002",
+  "num": 102,
+  "feature": "Financials - LOB variants",
+  "name": "RX002_WC reserve, payment within reserves, TXV11000 above reserves",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX002\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "financialsHelper.createReserve",
+   "financialPayments.makePayment"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_WC_PA",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX003",
+  "num": 103,
+  "feature": "Financials - LOB variants",
+  "name": "RX003_Commercial Auto reserve, payment, TXV11000",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX003\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "financialsHelper.createReserve",
+   "financialPayments.makePayment"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_CAU_PA",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX004",
+  "num": 104,
+  "feature": "Financials - LOB variants",
+  "name": "RX004_BOP reserve, payment, TXV11000",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX004\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "financialsHelper.createReserve",
+   "financialPayments.makePayment"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_BOP_PA",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX005",
+  "num": 105,
+  "feature": "Financials - LOB variants",
+  "name": "RX005_Commercial Package reserve, payment, TXV11000",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX005\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "financialsHelper.createReserve",
+   "financialPayments.makePayment"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_CP_PA",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX006",
+  "num": 106,
+  "feature": "Claim Lifecycle - LOB variants",
+  "name": "RX006_Personal Auto drain + close exposures + close claim",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX006\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "e2eSteps.close"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Files and closes its own claim.",
+  "requires": [
+   "POLICY_PA_AUTO",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX007",
+  "num": 107,
+  "feature": "Claim Lifecycle - LOB variants",
+  "name": "RX007_Homeowners drain + close",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX007\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "e2eSteps.close"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Files and closes its own claim.",
+  "requires": [
+   "POLICY_HO_PA",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX008",
+  "num": 108,
+  "feature": "Claim Lifecycle - LOB variants",
+  "name": "RX008_Workers' Comp drain + close",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX008\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "e2eSteps.close"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Files and closes its own claim.",
+  "requires": [
+   "POLICY_WC_PA",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX009",
+  "num": 109,
+  "feature": "Claim Lifecycle - LOB variants",
+  "name": "RX009_Commercial Auto drain + close",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX009\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "e2eSteps.close"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Files and closes its own claim.",
+  "requires": [
+   "POLICY_CAU_PA",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX010",
+  "num": 110,
+  "feature": "MSP Navigator - LOB variants",
+  "name": "RX010_Commercial Auto BI exposure: Medicare beneficiary + ICD",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX010\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "oneInc/needsData.setExposureMedicare"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_CAU_PA"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX011",
+  "num": 111,
+  "feature": "MSP Navigator - LOB variants",
+  "name": "RX011_General Liability BI exposure: Medicare beneficiary + ICD",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX011\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "oneInc/needsData.setExposureMedicare"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_GL_IA"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX012",
+  "num": 112,
+  "feature": "MSP Navigator - LOB variants",
+  "name": "RX012_BOP BI exposure: Medicare beneficiary + ICD",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX012\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "oneInc/needsData.setExposureMedicare"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_BOP_PA"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX013",
+  "num": 113,
+  "feature": "Subrogation - LOB variants",
+  "name": "RX013_Homeowners: Referred to Subro \u2192 Subrogation Open + routing",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX013\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "oneInc/setupA.editAndSave"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_HO_PA"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX014",
+  "num": 114,
+  "feature": "Subrogation - LOB variants",
+  "name": "RX014_Commercial Auto: Referred to Subro \u2192 Subrogation Open + routing",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX014\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "oneInc/setupA.editAndSave"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_CAU_PA"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX015",
+  "num": 115,
+  "feature": "Special Investigations - LOB variants",
+  "name": "RX015_BOP fire cause of loss \u2192 SIU file review",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX015\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "oneInc/setupA.editAndSave",
+   "financialRules.hasActivity"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_BOP_PA"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX016",
+  "num": 116,
+  "feature": "Special Investigations - LOB variants",
+  "name": "RX016_Commercial Package fire cause of loss \u2192 SIU file review",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX016\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "oneInc/setupA.editAndSave",
+   "financialRules.hasActivity"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_CP_PA"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX017",
+  "num": 117,
+  "feature": "ISO - LOB variants",
+  "name": "RX017_Homeowners claim sent to ISO",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX017\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_HO_PA"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX018",
+  "num": 118,
+  "feature": "ISO - LOB variants",
+  "name": "RX018_Workers' Comp claim sent to ISO",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX018\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_WC_PA"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX019",
+  "num": 119,
+  "feature": "ISO - LOB variants",
+  "name": "RX019_Commercial Auto claim sent to ISO",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX019\\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "oneInc/screenReader.readScreen"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_CAU_PA"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX020",
+  "num": 120,
+  "feature": "SmartCOMM - integration",
+  "name": "RX020_Document generated from a template lands on the claim",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX020\\b",
+  "reuses": [
+   "smartComm/documentService (openCreateFromTemplate, selectTemplate, generateOnDemand)"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Template from REG_SMARTCOMM_TEMPLATE (default \"Donegal Base Template\"); S3 delivery is covered by the SmartCOMM Validator tab.",
+  "requires": [
+   "POLICY_PA_AUTO"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX021",
+  "num": 121,
+  "feature": "OneInc - integration",
+  "name": "RX021_Homeowners check issued then voided",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX021\\b",
+  "reuses": [
+   "oneInc/checkOps.createFullCheck/openNewestCheck/submitVoid"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_HO_PA"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX022",
+  "num": 122,
+  "feature": "Contact Manager - integration",
+  "name": "RX022_New claim contact saved to Contact Manager",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX022\\b",
+  "reuses": [
+   "oneInc/wizardDriver.addClaimPersonContact",
+   "oneInc/contactManager.withCM"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Waits up to ~2 minutes for the CM sync.",
+  "requires": [
+   "POLICY_PA_AUTO"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX023",
+  "num": 123,
+  "feature": "Recovery - integration",
+  "name": "RX023_Homeowners subrogation recovery reserve + receipt",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Extended.regression.test.js",
+  "grep": "RG-RX023\\b",
+  "reuses": [
+   "e2eSteps.recovery (recoveryCloud)"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. ",
+  "requires": [
+   "POLICY_HO_PA",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ }
+]

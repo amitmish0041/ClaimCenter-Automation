@@ -59,6 +59,16 @@ module.exports = defineConfig({
     // the regression set - needs CC_EXISTING_CLAIM.
     { name: 'Dev - Cloud Workflow',     testMatch: '**/cloud/CloudWorkflow.dev.test.js', use: { ...chrome } },
 
+    // Regression Test Design V1.0 (85 cases, helpers/regression/catalog.json) — cloud only. One spec per card group
+    // under tests/Regression; cases that an EXISTING spec already covers are run from that spec unchanged (catalog
+    // "grep", e.g. TC068 → FinancialRules HIGH-CHECK), so FinancialRules.test.js is matched here too. The Runner's
+    // Regression tab builds the selection from the ticked cases.
+    // The selection comes in REG_GREP (an env var, not --grep: the Runner spawns with shell:true and a "|" on the command
+    // line would be a pipe). Unset → every regression case, but never the other FinancialRules cases.
+    // Run one feature: REG_GREP="RG-TC0(0[7-9]|1[0-9])\\b" npx playwright test --project "Regression" --workers=1
+    { name: 'Regression', testMatch: ['**/Regression/**/*.regression.test.js', '**/Financials/FinancialRules.test.js'],
+      grep: new RegExp(process.env.REG_GREP || 'RG-(TC|RX)\\d{3}\\b|HIGH-CHECK'), use: { ...chrome } },
+
     // SmartCOMM Template Validator — cloud only (see helpers/smartComm/).
     // Run a single template: SMARTCOMM_TEMPLATE_ID=DIG47 npm run smartcomm:dev
     { name: 'SmartCOMM Validator',      testMatch: '**/smartComm/**/*.spec.js', use: { ...chrome } },

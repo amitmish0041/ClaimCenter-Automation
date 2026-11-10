@@ -2551,6 +2551,15 @@ async function searchPolicy(page, policyNumber, lossDate, policyType) {
       }
     }
 
+    // Opt-in hook (regression suite, 2026-11-07): a caller that must change something on Find Policy AFTER the questions
+    // above were defaulted — e.g. TC004's "Is this claim being converted…? = Yes" + legacy claim/policy numbers — sets
+    // page._fnolBeforeNext = async (page) => {…}. One-shot (cleared before it runs); unset → nothing changes.
+    if (typeof page._fnolBeforeNext === 'function') {
+      const hook = page._fnolBeforeNext;
+      page._fnolBeforeNext = null;
+      await hook(page);
+    }
+
     // Click Next after search results — no row selection needed
     await clickCloudAction(page, '#FNOLWizard-Next [role="button"]', 'Find Policy → Next');
     await page.waitForLoadState('domcontentloaded');
@@ -3980,9 +3989,34 @@ async function fillEmptyLossAddressCloud(page, lossState = 'PA') {
   console.log('fillLossDetailsCloud: empty loss address filled for ' + lossState + ' — ' + filled.join(', '));
 }
 
+// Regression suite (tests/Regression, 2026-11-06): the Intake FNOL cases route on a SPECIFIC Assignment Type / Loss Cause
+// (TC_FIRSTPARTY → DMGA0007, TC_MI_FIRST → DMGA0104, LC03 → BI Section …), but Step 3 always took the first option.
+// Picks the option whose text or value contains `want` (case-insensitive: 'First Party', 'TC_FIRSTPARTY', 'LC01',
+// 'Fire'); no `want`, or no such option → the old first-option behaviour, logged. Opt-in through NEW lossDetails fields
+// (assignmentType, lossCause) — lossCauseCode is deliberately NOT honoured here, because every existing cloud caller
+// already passes one and would silently start picking a different cause than the first-option runs they were tuned on.
+async function selectOptionMatching(page, selector, want, waitMs = 5000) {
+  if (!want) return selectFirstOption(page, selector, waitMs);
+  const el = page.locator(selector).first();
+  if (!(await el.waitFor({ state: 'visible', timeout: waitMs }).then(() => true).catch(() => false))) return;
+  const opts = await el.locator('option').evaluateAll((os) => os.map((o) => ({ v: o.value, t: (o.textContent || '').trim() })));
+  const w = String(want).toLowerCase().replace(/^tc_/, '');
+  const hit = opts.find((o) => o.v && o.v.toLowerCase() === w)
+    || opts.find((o) => o.v && (o.v.toLowerCase().includes(w) || o.t.toLowerCase().includes(w)));
+  if (!hit) {
+    console.log(`${selector}: no option matching "${want}" (options: ${opts.map((o) => o.t).filter(Boolean).join(' | ')}) — first option used`);
+    return selectFirstOption(page, selector, waitMs);
+  }
+  await el.selectOption(hit.v);
+  console.log(selector + ' => ' + hit.v + ' (' + hit.t + ', asked for "' + want + '")');
+  await page.waitForTimeout(300);
+}
+
 async function fillLossDetailsCloud(page, {
   lossState = 'PA',
   lossCauseCode = '',
+  assignmentType = '',
+  lossCause = '',
   whatHappened = 'Automated FNOL test submission.',
   incidents,
 } = {}) {
@@ -4091,10 +4125,10 @@ async function fillLossDetailsCloud(page, {
   await selectFirstOption(page, '[name*="Policy_OccurNum"],[name*="OccurNum"],[name*="occurrenceNum"]');
 
   // Assignment Type
-  await selectFirstOption(page, '[name*="Claim_AssignmentTypeCode"],[name*="AssignmentTypeCode"],[name*="assignmentType"]');
+  await selectOptionMatching(page, '[name*="Claim_AssignmentTypeCode"],[name*="AssignmentTypeCode"],[name*="assignmentType"]', assignmentType);
 
   // Loss Cause
-  await selectFirstOption(page, '[name*="LossCause"],[name*="lossCause"]');
+  await selectOptionMatching(page, '[name*="LossCause"],[name*="lossCause"]', lossCause);
 
   // Detailed Loss Cause (optional — may not exist for all LOBs)
   await selectFirstOption(page, '[name*="detailedLossCause"],[name*="DetailedLossCause"]', 2000);
@@ -6887,6 +6921,8 @@ async function completeFNOL(page, {
     await fillLossDetailsCloud(page, {
       lossState: lossDetails.lossState || 'PA',
       lossCauseCode: lossDetails.lossCauseCode || '',
+      assignmentType: lossDetails.assignmentType || '', // opt-in, regression suite
+      lossCause: lossDetails.lossCause || '',           // opt-in, regression suite
       whatHappened: lossDetails.lossDescription || 'Automation FNOL test',
       // Same rule as on-prem (skipInjuryIncident for non-WC): HO's Step 3 "Add Injury" never saved — "Name : Missing
       // required field" with no fillable Name control (2026-11-03) — so unless the caller chose, add an injury only
