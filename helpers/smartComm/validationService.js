@@ -2026,6 +2026,15 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
     log(`Document Map: ${docPages.length} pages — ${docPages.join(' | ')}`);
     for (let p = 1; p < docPages.length; p++) {
       const encl = { no: p + 1, title: docPages[p] };
+      // The same document listed again under the same title is another copy of it (one per recipient plus one more -
+      // seen from 2026-11-10 ~3 PM on every template: DIG21 2 entries, DIG51 / DIG121B 3). The completed PDF this test
+      // downloads is the first copy, so edits typed into the others can never be found in it (14-18 false FAILs per
+      // DIG51 scenario) - those copies are left as they are and noted.
+      if (String(encl.title).trim() === String(docPages[0]).trim()) {
+        log(`Document Map: entry ${encl.no} "${encl.title}" is another copy of the first page's document — not edited.`);
+        interactiveChecks.push({ id: `INT${encl.no}`, idx: -1, documentPage: encl.title, label: `[${encl.title}] copy ${encl.no}`, expectedEditable: null, result: 'SKIPPED', reason: `The editor lists this document ${docPages.filter((t) => String(t).trim() === String(docPages[0]).trim()).length} times; copy ${encl.no} is not edited or checked — the completed PDF this test downloads is the first copy.` });
+        continue;
+      }
       if (!await interactiveEditService.openDocumentMapEntry(frame, page, p)) {
         log(`Document Map: page ${encl.no} "${encl.title}" never finished loading — its fields are not edited.`);
         interactiveChecks.push({ id: `INT${encl.no}`, idx: -1, documentPage: encl.title, label: `[${encl.title}] page`, expectedEditable: null, result: 'BLOCKED', reason: `Page ${encl.no} of the document ("${encl.title}") didn't finish loading from the Document Map, so its fields couldn't be edited.` });
