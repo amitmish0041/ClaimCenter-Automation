@@ -919,6 +919,8 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
       }
     }
 
+    // when the document was created (print test sheet) - local time of this PC
+    if (base.printTest) { const n = new Date(); const z = (v) => String(v).padStart(2, '0'); base.printTest.createdAt = `${n.getFullYear()}-${z(n.getMonth() + 1)}-${z(n.getDate())} ${z(n.getHours())}:${z(n.getMinutes())}:${z(n.getSeconds())}`; }
     const text = await pdfValidationService.extractPdfText(pdfPath);
     if (interactiveChecks) verifyInteractiveEditsInPdf(interactiveChecks, text, (m) => console.log(`[SmartComm] ${scenario.scenarioId}: ${m}`));
     // recipient.{name,address} is who/where documentService actually

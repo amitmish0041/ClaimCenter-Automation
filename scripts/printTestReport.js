@@ -30,7 +30,7 @@ for (const t of results) {
     'Certified mail': yn(p.certifiedMail !== undefined ? p.certifiedMail : v.certifiedMail),
     'Return envelope': yn(p.returnEnvelope !== undefined ? p.returnEnvelope : v.returnEnvelope),
     'Document type': p.documentType || v.documentType || '', 'Document status': p.status || v.status || '', 'Security type': p.securityType || v.securityType || '',
-    'Identifier ID': p.identifier || '',
+    'Identifier ID': p.identifier || '', 'Document created (local time)': p.createdAt || '',
     'Tool result': sc.status, 'Checks failed': failed, 'Notes': sc.reason ? String(sc.reason).split('\n')[0] : (sc.claimFallbackNote || ''),
     'Printed OK (fill in)': '', 'Print remarks (fill in)': '',
   });
