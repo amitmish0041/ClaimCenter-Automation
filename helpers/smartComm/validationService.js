@@ -30,7 +30,8 @@ const s3AdminService = require('../s3Download/s3AdminService');
 const { createS3SessionManager } = require('../s3Download/s3SessionManager');
 const { loginAsAdmin, loginAsUser, openExistingClaim } = require('../claimCenterBase');
 
-async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOverride, interactive, singleScenario, s3Session } = {}) {
+// printPlan (print test): { secondary, returnEnvelope, certifiedMail } - the Recipients-tab choices for this template's ONE scenario.
+async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOverride, interactive, singleScenario, s3Session, printPlan } = {}) {
   const dig = catalogService.normalizeDig(digNumber);
   const template = catalogService.getTemplate(dig);
   if (!template) {
@@ -99,7 +100,7 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
   // which replaces it with one ad-hoc claim), just caps the RESULT to one representative scenario instead of
   // running the full matrix — for a broad sweep across many templates where one real, correctly-matched
   // scenario per template is enough signal and running all 3 would roughly triple total runtime.
-  if (singleScenario && !claimNumberOverride) scenarios = scenarios.slice(0, 1);
+  if ((singleScenario || printPlan) && !claimNumberOverride) scenarios = scenarios.slice(0, 1);
 
   if (!scenarios.length) {
     return blockedTemplateResult(
@@ -150,7 +151,7 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
         const i = next++;
         if (i >= scenarios.length) return;
         const variant = scenarioVariants.getVariantForIndex(i);
-        scenarioResults[i] = await runScenario(workerPage, { template, scenario: scenarios[i], requirements, recipientEmail, variant, mentionsFraudLanguage, freeFormFields, interactive, s3Session, sourceFile });
+        scenarioResults[i] = await runScenario(workerPage, { template, scenario: scenarios[i], requirements, recipientEmail, variant, mentionsFraudLanguage, freeFormFields, interactive, s3Session, sourceFile, printPlan });
       }
     }
     await Promise.all(pages.map(worker));
@@ -567,8 +568,9 @@ function upgradeRecipientDependentRequirements(reqs, re, additionalRecipient) {
   }
 }
 
-async function runScenario(page, { template, scenario, requirements, recipientEmail, variant, mentionsFraudLanguage, freeFormFields = [], interactive, s3Session, sourceFile }) {
+async function runScenario(page, { template, scenario, requirements, recipientEmail, variant, mentionsFraudLanguage, freeFormFields = [], interactive, s3Session, sourceFile, printPlan }) {
   scenario = { ...scenario };
+  if (printPlan) variant = { ...variant, returnEnvelope: printPlan.returnEnvelope, certifiedMail: printPlan.certifiedMail };
   const base = {
     scenarioId: scenario.scenarioId,
     digNumber: template.digNumber,
@@ -760,7 +762,8 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
       }
     }
     let additionalRecipient;
-    if (templateExpectsAdditionalRecipient(requirements)) {
+    // print test: the plan decides, except a template whose own lines need a copy recipient always gets one (else those lines can't be checked)
+    if (printPlan ? (printPlan.secondary || templateExpectsAdditionalRecipient(requirements)) : templateExpectsAdditionalRecipient(requirements)) {
       additionalRecipient = await documentService.setAdditionalRecipient(page, {
         excludeName: recipient.name, log: scenarioLog,
         preferredRole: templateWantsProducerRole(requirements) ? 'Producer' : undefined,
@@ -777,6 +780,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
         upgradeRecipientDependentRequirements(scenarioRequirements, ADDITIONAL_RECIPIENT_CONDITION_RE, additionalRecipient);
       }
     }
+    if (printPlan) base.printTest = { primaryRecipient: recipient.name, secondaryRecipient: additionalRecipient ? additionalRecipient.name : '', secondaryWanted: !!printPlan.secondary, deliveryChannel: 'Print', returnEnvelope: variant.returnEnvelope, certifiedMail: variant.certifiedMail, documentType: variant.documentType, status: variant.status, securityType: variant.securityType };
     // A template that prints the claimant gets the document related to the claimant's own exposure, as a real
     // claimant letter is (see setAdditionalData) — otherwise its Claimant line prints blank.
     const printsClaimant = (requirements || []).some((r) => r.expectedSource === 'testData.claimantName');
@@ -858,6 +862,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
         freeFormSamples: scenarioRequirements.filter((r) => /free\s*form/i.test(r.fieldName || '') && r.sampleValue).map((r) => r.sampleValue),
       });
       pdfPath = result.pdfPath;
+      if (base.printTest) base.printTest.identifier = result.identifier || '';
       interactiveChecks = result.interactiveChecks;
       metadataChecks = [...(result.lockChecks || []), ...(result.metadataChecks || [])];
       base.dictionaryReference = result.dictionaryReference;
@@ -899,6 +904,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
         pdfPath = path.join(documentService.DOWNLOAD_DIR, `${fileNamePrefix}.pdf`);
         fs.renameSync(found.pdf.localPath, pdfPath);
         s3Log(`On-Demand PDF taken from S3 (Identifier ${found.identifier})`);
+        if (base.printTest) base.printTest.identifier = found.identifier || '';
         metadataChecks = buildMetadataChecks(found.metadata, { template, claimNumber: base.claimNumber });
         try {
           const hits = await s3Session.withPage((s3Page) => s3AdminService.searchSmartCommPayload(s3Page, found.identifier, { log: s3Log }));
@@ -2247,7 +2253,7 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       if (free) lockChecks.push(free);
     }
 
-    return { pdfPath: finalPath, interactiveChecks, metadataChecks, lockChecks, dictionaryReference, payload, rawPayloadRoot, choicesApplied, trackedFields, unmatchedTrackedFields };
+    return { identifier, pdfPath: finalPath, interactiveChecks, metadataChecks, lockChecks, dictionaryReference, payload, rawPayloadRoot, choicesApplied, trackedFields, unmatchedTrackedFields };
   });
   } finally {
     stopLivePreview();

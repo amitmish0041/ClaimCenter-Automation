@@ -63,6 +63,8 @@ async function main() {
   // 3x while still exercising every template's content and field-editability at least once.
   const singleScenario = /^(1|true|yes)$/i.test(process.env.SMARTCOMM_SINGLE_SCENARIO || '');
 
+  // Print test: SMARTCOMM_PRINT_PLAN=<plan from scripts/printTestPlan.js> gives each template ONE scenario with its own Recipients-tab choices.
+  const printPlans = process.env.SMARTCOMM_PRINT_PLAN ? JSON.parse(fs.readFileSync(process.env.SMARTCOMM_PRINT_PLAN, 'utf8')).templates : null;
   console.log(`[Bulk] Validating ${digList.length} templates: ${digList.join(', ')}${interactive ? ' (Interactive templates enabled — a browser window may need your sign-in)' : ''}`);
   // channel:'chromium' runs the full bundled Chromium even when headless, so the packaged app doesn't ship the
   // separate ~270MB chromium-headless-shell build (see electron-app/scripts/stage-resources.js). No behavior
@@ -101,7 +103,7 @@ async function main() {
     }
     console.log(`\n[Bulk] (${i + 1}/${digList.length}) ${dig} — starting...`);
     try {
-      const result = await validationService.validateTemplate(page, { digNumber: dig, recipientEmail, interactive, singleScenario, s3Session });
+      const result = await validationService.validateTemplate(page, { digNumber: dig, recipientEmail, interactive, singleScenario, s3Session, printPlan: printPlans ? printPlans[catalogService.normalizeDig(dig)] : undefined });
       templateResults.push(result);
       console.log(`[Bulk] (${i + 1}/${digList.length}) ${dig}: ${result.overall} (${result.scenarioCount} scenarios, ${result.passed} passed, ${result.failed} failed, ${result.blocked} blocked, ${result.errored} errored)`);
     } catch (err) {
