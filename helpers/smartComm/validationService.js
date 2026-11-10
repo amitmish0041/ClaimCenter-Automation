@@ -203,6 +203,10 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
     // A field whose own technical name says it's the additional recipient's ("current_additionalRecipients_ext.
     // primaryAddress.state.code" → "[DE]") is that recipient's, whatever dictionary row it was paired with — DIG57's was
     // judged against "Claimant Name" (false FAIL, QA review 2026-10-26).
+    // Its agent code box ("additionalRecipient1_AgentCode" -> "[4501307]") is the agent/producer number, not the recipient's name/address
+    // (DIG23MD/DIG116/DIG191/DIG22/DIG23DE edits BLOCKED 2026-11-09, compared against the address).
+    const agentBox = `${c.technicalName || ''} ${c.label || ''}`;
+    if (/additionalRecipient/i.test(agentBox) && /agent\s*(code|number)/i.test(agentBox) && claim.policy && claim.policy.producerCode) return one(claim.policy.producerCode, 'ClaimCenter (agent number)');
     if (/additionalRecipient/i.test(c.technicalName || '')) {
       const vals = [addr.name, addr.streetAddress, addr.cityStateZip, ...String(addr.cityStateZip || '').split(/[\s,]+/)].filter(Boolean).map(String);
       if (vals.length) return { values: vals, value: vals.slice(0, 3).join(' / '), from: 'ClaimCenter (additional recipient)' };

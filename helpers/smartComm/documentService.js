@@ -65,7 +65,9 @@ async function searchTemplateByName(page, templateName) {
   await page.locator(L.selectTemplate.searchButtonId).click();
   await page.waitForLoadState('domcontentloaded').catch(() => {});
 
-  const row = page.getByRole('row', { name: new RegExp(escapeRegExp(templateName), 'i') }).first();
+  // only a row that has a Select button: the same claim failed 5 runs in a row on "waiting for ...Select" (DIG23DE 0747421, DIG22 0747819, 11/09) while its
+  // neighbours passed - a look-alike row without the button was taking the click
+  const row = page.getByRole('row', { name: new RegExp(escapeRegExp(templateName), 'i') }).filter({ has: page.getByRole('button', { name: L.selectTemplate.selectButtonInRow }) }).first();
   try {
     await row.waitFor({ state: 'visible', timeout: 10000 });
   } catch (_) {
@@ -98,7 +100,7 @@ async function searchTemplateById(page, digNumber) {
   // proven getByRole('row', { name: regex }) + waitFor idiom, which lets Playwright poll for the match instead
   // of taking one snapshot too early.
   const boundary = new RegExp(`${escapeRegExp(digNumber)}(?![0-9A-Za-z])`, 'i');
-  const row = page.getByRole('row', { name: boundary }).first();
+  const row = page.getByRole('row', { name: boundary }).filter({ has: page.getByRole('button', { name: L.selectTemplate.selectButtonInRow }) }).first();
   try {
     await row.waitFor({ state: 'visible', timeout: 10000 });
   } catch (_) {
