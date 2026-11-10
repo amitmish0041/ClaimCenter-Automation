@@ -881,7 +881,12 @@ async function generateOnDemand(page, { fileNamePrefix = 'SmartComm' } = {}) {
   // silently no-opped under a swallowed .catch(), leaving "Additional Data"
   // active and the Generate button unreachable).
   await page.getByRole('tab', { name: L.create.tab, exact: true }).click();
-  await page.getByRole('button', { name: L.create.generateButton }).click();
+  try {
+    await page.getByRole('button', { name: L.create.generateButton }).click({ timeout: 30000 });
+  } catch (e) {
+    const diag = await saveDiagnostic(page, 'generate_button_missing').catch(() => null);
+    throw new Error(`GENERATE_BUTTON_NOT_FOUND: no Generate button on the Create tab (${e.message.split('\n')[0]})${diag ? ` Diagnostic: ${diag}.png` : ''}`);
+  }
 
   const resultRow = page.locator(L.create.resultsGrid)
     .getByRole('row')

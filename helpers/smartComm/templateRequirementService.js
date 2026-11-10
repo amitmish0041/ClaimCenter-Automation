@@ -957,6 +957,16 @@ async function getRequirements(template, dataDir) {
       r.enabled = false;
       r.disabledReason = 'A placeholder address in the mapping doc\'s mock-up — sample data, not fixed wording; the claim\'s real address prints here.';
     }
+    // A row of x's ("x x x" — DIG150MI 11/10) is a mock-up placeholder, and a title + ALL-CAPS name ("Mrs. DONNA BRANDT" — DIG227
+    // 11/10) is the BA's sample addressee: the claim's real value prints there.
+    if (r.type === 'requiredText' && r.enabled !== false && /^\s*(?:x[\s.]*){2,}\s*$/i.test(String(r.expectedValue || ''))) {
+      r.enabled = false;
+      r.disabledReason = 'A row of x\'s in the mapping doc — a placeholder in the mock-up, not fixed wording.';
+    }
+    if (r.type === 'requiredText' && r.enabled !== false && /^\s*(?:Mr|Mrs|Ms|Miss|Dr)\.?\s+[A-Z][A-Z'.-]+(?:\s+[A-Z][A-Z'.-]+){0,3}\s*$/.test(String(r.expectedValue || ''))) {
+      r.enabled = false;
+      r.disabledReason = 'A title and an all-capitals name on its own in the mapping doc — the sample addressee, not fixed wording; the claim\'s real name prints here.';
+    }
     // A phone extension on its own ("x7346." — DIG3 2026-11-04): the BA's sample of the sender's phone, whose real value
     // prints from the sender's profile.
     if (r.type === 'requiredText' && r.enabled !== false && /^\s*(x|ext\.?)\s*\d{2,6}\.?\s*$/i.test(String(r.expectedValue || ''))) {

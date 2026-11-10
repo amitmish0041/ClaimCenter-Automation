@@ -837,6 +837,18 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
 
     let pdfPath, payload, interactiveChecks, metadataChecks = [];
     let choicesApplied = [];
+    // The index says On Demand, but ClaimCenter's Create tab offers only "Interactive" (DIG14 11/10: no Generate button, 30s timeout;
+    // it passed On Demand 10/30-31): follow the live screen.
+    if (interactive && template.interactiveOrOnDemand !== 'Interactive') {
+      await page.getByRole('tab', { name: 'Create', exact: true }).click().catch(() => {});
+      await page.getByRole('button', { name: /^(Generate|Interactive)$/ }).first().waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
+      const hasGenerate = await page.getByRole('button', { name: 'Generate', exact: true }).isVisible().catch(() => false);
+      const hasInteractive = await page.getByRole('button', { name: 'Interactive', exact: true }).isVisible().catch(() => false);
+      if (!hasGenerate && hasInteractive) {
+        console.log(`[SmartComm] ${scenario.scenarioId}: the index says "${template.interactiveOrOnDemand}" but ClaimCenter offers only Interactive for ${template.digNumber} - running it as Interactive.`);
+        template = { ...template, interactiveOrOnDemand: 'Interactive' };
+      }
+    }
     base.creationMode = template.interactiveOrOnDemand;
     if (template.interactiveOrOnDemand === 'Interactive') {
       if (!interactive) {
