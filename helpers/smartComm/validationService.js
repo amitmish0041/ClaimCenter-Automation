@@ -153,7 +153,18 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
         const i = next++;
         if (i >= scenarios.length) return;
         const variant = scenarioVariants.getVariantForIndex(i);
-        scenarioResults[i] = await runScenario(workerPage, { template, scenario: scenarios[i], requirements, recipientEmail, variant, mentionsFraudLanguage, freeFormFields, interactive, s3Session, sourceFile, printPlan });
+        const run = () => runScenario(workerPage, { template, scenario: scenarios[i], requirements, recipientEmail, variant, mentionsFraudLanguage, freeFormFields, interactive, s3Session, sourceFile, printPlan });
+        scenarioResults[i] = await run();
+        // ClaimCenter's own "changed by Integrations User ... Please cancel and retry your change" on Complete Document
+        // (DIG168 and DIG122A scenario 3, 2026-11-10: the integration touched the draft document while the editor was
+        // open) and its bare "Error occurred performing the operation" on opening the editor (DIG51, same day) are
+        // passing conditions, not template findings - the scenario is run once more from the start, as the message asks.
+        if (scenarioResults[i].status === 'ERROR' && /Please cancel and retry your change|Error occurred performing the operation/i.test(scenarioResults[i].reason || '')) {
+          console.log(`[SmartComm] ${scenarios[i].scenarioId}: ClaimCenter asked to retry — running this scenario once more.`);
+          await workerPage.waitForTimeout(15000);
+          const again = await run();
+          scenarioResults[i] = again.status === 'ERROR' ? again : { ...again, retriedAfter: scenarioResults[i].reason };
+        }
       }
     }
     await Promise.all(pages.map(worker));
