@@ -28,6 +28,9 @@ const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) {
 
 const rows = XLSX.utils.sheet_to_json(XLSX.readFile(book).Sheets['DIG master'] || XLSX.readFile(book).Sheets[XLSX.readFile(book).SheetNames[0]], { header: 1, defval: '' });
 const picked = rows.filter((r) => /^x$/i.test(String(r[0]).trim())).map((r) => ({ digNumber: catalogService.normalizeDig(r[1]), name: String(r[4]).trim(), lob: String(r[2]).trim(), state: String(r[3]).trim() }));
+// the sheet's own LOB / State columns ("Auto, PR", "PA, DE, MD, MI", "All"): the scenario's claim must fit THESE (the catalog index disagrees for some: DIG104, DIG102, DIG191, DIG151 family)
+const list = (v) => { const a = String(v || '').split(/[,/&;]+|\band\b/i).map((x) => x.trim().toUpperCase()).filter(Boolean).map((x) => (x === 'PROPERTY' ? 'PR' : x)); return a.length ? a : ['ALL']; };
+picked.forEach((p, i) => { const row = rows.filter((r) => /^x$/i.test(String(r[0]).trim()))[i]; p.lobs = list(row[2]); p.states = list(row[3]); });
 const unique = [...new Map(picked.map((p) => [p.digNumber, p])).values()];
 
 const known = [], missing = [];
@@ -39,7 +42,7 @@ const sec = shuffle(known.map((_, i) => i % 2 === 0));
 
 const plan = { seed, createdAt: new Date().toISOString(), source: path.basename(book), deliveryChannel: 'Print', templates: {} };
 known.forEach((p, i) => {
-  plan.templates[p.digNumber] = { name: p.name, secondary: sec[i], certifiedMail: mail[i][0], returnEnvelope: mail[i][1] };
+  plan.templates[p.digNumber] = { name: p.name, lobs: p.lobs, states: p.states, secondary: sec[i], certifiedMail: mail[i][0], returnEnvelope: mail[i][1] };
 });
 plan.notFoundInCatalog = missing;
 const out = outArg || path.join(__dirname, '..', 'results', 'smartComm', `print-test-plan-${Date.now()}.json`);

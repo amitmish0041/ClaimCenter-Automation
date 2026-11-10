@@ -33,7 +33,9 @@ const { loginAsAdmin, loginAsUser, openExistingClaim } = require('../claimCenter
 // printPlan (print test): { secondary, returnEnvelope, certifiedMail } - the Recipients-tab choices for this template's ONE scenario.
 async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOverride, interactive, singleScenario, s3Session, printPlan } = {}) {
   const dig = catalogService.normalizeDig(digNumber);
-  const template = catalogService.getTemplate(dig);
+  let template = catalogService.getTemplate(dig);
+  // print test: the claim must fit the LOB / State the print-test sheet lists for this template (the catalog index differs for some)
+  if (template && printPlan && printPlan.lobs && printPlan.states) template = { ...template, lob: printPlan.lobs, states: printPlan.states };
   if (!template) {
     return blockedTemplateResult(dig, `Template "${dig}" was not found in the SmartCOMM catalog (Claims_Documents_Index.xlsx)`);
   }
@@ -192,6 +194,12 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
     ['underwriting company', td.underwritingCompany], ['recipient', recipient && recipient.name],
     ['policy number', claim.policy && claim.policy.policyNumber], ['policy type', claim.policy && claim.policy.policyType && claim.policy.policyType.name],
     ['loss type', claim.lossType && claim.lossType.name], ['loss description', claim.description],
+    // "Policy Period: [06/01/2026 - 12/01/2026]" (DIG151 family, 16 edits BLOCKED 11/10): the policy's effective - expiration dates
+    ['policy period', (() => {
+      const md = (s) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || '')); return m ? `${m[2]}/${m[3]}/${m[1]}` : ''; };
+      const a = md(claim.policy && claim.policy.effectiveDate); const b = md(claim.policy && claim.policy.expirationDate);
+      return a && b ? `${a} - ${b}` : '';
+    })()],
   ].filter(([, v]) => v && String(v).trim().length >= 3).map(([name, value]) => ({ name, value: String(value) }));
   const exposures = [].concat(claim.exposures || []).flatMap((x) => (x && x.exposures ? [].concat(x.exposures) : [x])).filter(Boolean);
   const nameOf = (o) => (o && (o.name || (typeof o === 'string' ? o : ''))) || '';
@@ -201,6 +209,8 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
   const sourceOf = (c, label) => {
     const field = c.dictionaryField;
     const one = (value, from) => (value ? { values: [String(value)], value: String(value), from } : null);
+    // The reinsurer's OWN claim number ("Willis Re Claim Number:" - DIG151 Gall Re 11/10) is not Donegal's claim number it got paired with.
+    if (/\b(willis|gallagher|guy\s*carp\w*|holborn|reinsur\w*)\b[^:]*\bclaim\s*(number|no)\b/i.test(`${c.label || ''} ${label || ''} ${c.labelContext || ''}`)) return null;
     // A field whose own technical name says it's the additional recipient's ("current_additionalRecipients_ext.
     // primaryAddress.state.code" → "[DE]") is that recipient's, whatever dictionary row it was paired with — DIG57's was
     // judged against "Claimant Name" (false FAIL, QA review 2026-10-26).
@@ -1101,7 +1111,20 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
         // or sale of prescription drugs…" prints, but the text layer jumps from "the issuance" to "pharmacy records").
         // OCR confirms a phrase only when it reads it word-for-word, so a real wording difference stays a FAIL. Fill-in
         // lines ("____") can't be seen by OCR, so those keep their text-layer result.
-        const candidates = fixedFailed.filter((v) => !/_{3,}/.test(v.expected || '') && !/fill-in line/i.test(v.reason || ''));
+        // Same sentence printed with a different list number ("(2) I HEREBY CERTIFY..." prints as "(1) I HEREBY CERTIFY...", DIG128 11/10):
+        // the text layer has it, so say exactly that instead of "missing" / "can't be read".
+        for (const v of fixedFailed) {
+          const m = /^\s*\(?(\d{1,2}|[A-Za-z])[.)]\s*(\S.{20,})$/.exec(String(v.expected || ''));
+          if (!m) continue;
+          const body = m[2].trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+          const hit = new RegExp('\\(?(\\d{1,2}|[A-Za-z])[.)]\\s*' + body, 'i').exec(text);
+          if (hit && hit[1].toLowerCase() !== m[1].toLowerCase()) {
+            v.actual = `(${hit[1]}) ${m[2].slice(0, 60)}`;
+            v.reason = `The document prints this sentence numbered "(${hit[1]})" where the template has "(${m[1]})" - only the list number differs.`;
+            v.numberingDiffers = true;
+          }
+        }
+        const candidates = fixedFailed.filter((v) => !v.numberingDiffers && !/_{3,}/.test(v.expected || '') && !/fill-in line/i.test(v.reason || ''));
         const ocrText = candidates.length ? await require('./pdfOcrService').ocrPdfText(pdfPath).catch(() => null) : null;
         const { ocrContains } = require('./pdfOcrService');
         for (const v of ocrText ? candidates : []) {
@@ -1114,6 +1137,16 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
             // of the HIPAA paragraph, so that line can't be read. Still a FAIL, with a reason that sends someone to look.
             v.reason = 'Most of this wording is printed (read by OCR) but not all of it can be read word-for-word — part of it is drawn as graphics or has something printed over it. Check this passage visually.';
           }
+        }
+      }
+    }
+    // The interactive edit test typed "QA-EDIT-n" over the exposure table's money cells (DIG26 11/10: R16/R17/R18 FAILed on figures
+    // the test itself had replaced). Their before-edit values are judged by the EDIT rows; the printed table can't be compared now.
+    if ((interactiveChecks || []).some((c) => c.observedChanged && /^expo\d+_(reserves|paid|expenses|recoveries|netincurred)/i.test(c.technicalName || ''))) {
+      for (const v of validations) {
+        if (v.result === 'FAIL' && /^R\d/.test(v.id || '') && /^(Every exposure on the claim prints a row|The "Total" row shows|Each column's exposure rows add up)/.test(v.description || '')) {
+          v.result = 'BLOCKED';
+          v.reason = 'The interactive edit test typed over the table figures (QA-EDIT-n) before the document was completed, so the printed amounts can no longer be compared with the payload — not a template defect. The figures before the edit are judged in the EDIT rows.';
         }
       }
     }

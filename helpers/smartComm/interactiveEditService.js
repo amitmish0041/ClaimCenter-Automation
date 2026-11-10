@@ -840,6 +840,32 @@ async function completeDocument(page, { log = console.log, scenarioId = 'scenari
   const completeBtn = page.getByRole('button', { name: 'Complete Document', exact: true });
   if (!(await completeBtn.isVisible().catch(() => false))
     && await page.getByRole('button', { name: 'Request Approval', exact: true }).isVisible().catch(() => false)) {
+    // Discovery (SMARTCOMM_APPROVAL_DISCOVERY=1): press Request Approval once and record what ClaimCenter shows next.
+    if (process.env.SMARTCOMM_APPROVAL_DISCOVERY === '3') {
+      const approval = require('./documentApprovalService');
+      const req = await approval.requestApproval(page, { assignToRe: /Bill Folmar \(System Admin Group\)/, log, scenarioId });
+      await approval.approveFromWorkplan(page, { description: req.description, log, scenarioId }).catch((e) => log(`[Approval] approve failed: ${e.message.split('\n')[0]}`));
+      await page.getByRole('menuitem', { name: 'Documents', exact: true }).click().catch(() => {});
+      await page.waitForTimeout(5000);
+      const d4 = await saveDiagnostic(page, `${scenarioId}_documentsAfterApproval`).catch(() => null);
+      log(`[Approval] documents: ${d4 ? d4 + '.png' : ''} | ${((await page.locator('body').innerText().catch(() => '')) || '').replace(/\s+/g, ' ').slice(0, 1500)}`);
+    } else if (process.env.SMARTCOMM_APPROVAL_DISCOVERY) {
+      await page.getByRole('button', { name: 'Request Approval', exact: true }).click().catch((e) => log(`[Approval] click failed: ${e.message.split('\n')[0]}`));
+      await page.waitForTimeout(6000);
+      const diag = await saveDiagnostic(page, `${scenarioId}_afterRequestApproval`).catch(() => null);
+      const text = ((await page.locator('body').innerText().catch(() => '')) || '').replace(/\s+/g, ' ').slice(0, 1500);
+      log(`[Approval] after Request Approval: ${diag ? diag + '.png' : '(no screenshot)'} | url=${page.url()} | page text: ${text}`);
+      if (process.env.SMARTCOMM_APPROVAL_DISCOVERY === '2') {
+        await page.getByRole('button', { name: 'Update', exact: true }).click().catch((e) => log(`[Approval] Update click failed: ${e.message.split('\n')[0]}`));
+        await page.waitForTimeout(6000);
+        const d2 = await saveDiagnostic(page, `${scenarioId}_afterUpdate`).catch(() => null);
+        log(`[Approval] after Update: ${d2 ? d2 + '.png' : ''} | ${((await page.locator('body').innerText().catch(() => '')) || '').replace(/\s+/g, ' ').slice(0, 900)}`);
+        await page.getByRole('menuitem', { name: 'Workplan', exact: true }).click().catch(() => page.getByText('Workplan', { exact: true }).first().click().catch(() => {}));
+        await page.waitForTimeout(5000);
+        const d3 = await saveDiagnostic(page, `${scenarioId}_workplan`).catch(() => null);
+        log(`[Approval] workplan: ${d3 ? d3 + '.png' : ''} | ${((await page.locator('body').innerText().catch(() => '')) || '').replace(/\s+/g, ' ').slice(0, 1400)}`);
+      }
+    }
     throw new Error('INTERACTIVE_NEEDS_APPROVAL: this document needs approval for the signed-in user ("Request Approval" instead of "Complete Document"), so no completed PDF exists to validate until an approver signs off — the editor checks (editable fields, locked text) above still ran.');
   }
   await completeBtn.click();
