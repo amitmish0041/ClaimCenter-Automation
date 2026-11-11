@@ -159,7 +159,7 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
         // (DIG168 and DIG122A scenario 3, 2026-11-10: the integration touched the draft document while the editor was
         // open) and its bare "Error occurred performing the operation" on opening the editor (DIG51, same day) are
         // passing conditions, not template findings - the scenario is run once more from the start, as the message asks.
-        if (scenarioResults[i].status === 'ERROR' && /Please cancel and retry your change|Error occurred performing the operation/i.test(scenarioResults[i].reason || '')) {
+        if (scenarioResults[i].status === 'ERROR' && /Please cancel and retry your change|Error occurred performing the operation|Content is not allowed in prolog|Read timed out executing/i.test(scenarioResults[i].reason || '')) {
           console.log(`[SmartComm] ${scenarios[i].scenarioId}: ClaimCenter asked to retry — running this scenario once more.`);
           await workerPage.waitForTimeout(15000);
           const again = await run();
@@ -2041,9 +2041,10 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
       // seen from 2026-11-10 ~3 PM on every template: DIG21 2 entries, DIG51 / DIG121B 3). The completed PDF this test
       // downloads is the first copy, so edits typed into the others can never be found in it (14-18 false FAILs per
       // DIG51 scenario) - those copies are left as they are and noted.
-      if (String(encl.title).trim() === String(docPages[0]).trim()) {
-        log(`Document Map: entry ${encl.no} "${encl.title}" is another copy of the first page's document — not edited.`);
-        interactiveChecks.push({ id: `INT${encl.no}`, idx: -1, documentPage: encl.title, label: `[${encl.title}] copy ${encl.no}`, expectedEditable: null, result: 'SKIPPED', reason: `The editor lists this document ${docPages.filter((t) => String(t).trim() === String(docPages[0]).trim()).length} times; copy ${encl.no} is not edited or checked — the completed PDF this test downloads is the first copy.` });
+      // A bundle repeats every one of its documents (DIG191: DIG38 | DIG49MD, three times over), so any earlier entry counts.
+      if (docPages.slice(0, p).some((t) => String(t).trim() === String(encl.title).trim())) {
+        log(`Document Map: entry ${encl.no} "${encl.title}" is another copy of a document listed above it — not edited.`);
+        interactiveChecks.push({ id: `INT${encl.no}`, idx: -1, documentPage: encl.title, label: `[${encl.title}] copy ${encl.no}`, expectedEditable: null, result: 'SKIPPED', reason: `The editor lists this document ${docPages.filter((t) => String(t).trim() === String(encl.title).trim()).length} times; copy ${encl.no} is not edited or checked — the completed PDF this test downloads is the first copy.` });
         continue;
       }
       if (!await interactiveEditService.openDocumentMapEntry(frame, page, p)) {
