@@ -592,13 +592,26 @@ async function closeCloud(page, claimNumber) {
   const B = require('./claimCenterBase');
   const F = require('./financialsHelper');
   const A = require('./oneInc/setupA');
+  // VTDMPL65 "Multiple Final Pay not allowed on same exposure": an exposure with two reserve lines (HO Claim Cost +
+  // Expense, 2026-11-11) takes ONE Final Payment; its other lines are paid out with a Partial Payment of the full amount.
+  const finalPaid = new Set();
   for (let round = 0; round < 6; round++) {
     let line = null;
     try { line = await F.findFirstPositiveReserveLine(page); } catch (_) {}
     if (!line || !(line.amount > 0)) break;
+    const exp = String(line.firstCell || '');
+    const pay = (transactionType) => F.createPayment(page, { paymentAmount: line.amount, reserveLine: line.firstCell, transactionType, payeeHint: line.rowText });
     try {
-      await F.createPayment(page, { paymentAmount: line.amount, reserveLine: line.firstCell, transactionType: 'Final Payment', payeeHint: line.rowText });
-      console.log(`close: Final Payment $${line.amount} on ${line.firstCell}`);
+      let type = finalPaid.has(exp) ? 'Partial Payment' : 'Final Payment';
+      try { await pay(type); } catch (e) {
+        if (type !== 'Final Payment' || !/VTDMPL65|Multiple Final Pay|Finish refused/i.test(e.message)) throw e;
+        await require('./oneInc/wizardDriver').cancelWizard(page).catch(() => {});
+        await B.openExistingClaim(page, claimNumber);
+        type = 'Partial Payment';
+        await pay(type);
+      }
+      finalPaid.add(exp);
+      console.log(`close: ${type} $${line.amount} on ${line.firstCell}`);
     } catch (e) {
       if (!/no payee on this claim has a reserve line/i.test(e.message)) throw e;
       // OneInc's cancelWizard answers the native confirm; a plain Cancel click left the wizard open and the exposure

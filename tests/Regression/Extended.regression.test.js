@@ -13,7 +13,7 @@ const { R, W, B, A, E, F, P, CO } = S;
 S.hooks(test);
 
 const ROUTE = {
-  HO: { assignmentType: 'First Party', lossCause: 'LC01', exposure: 'Coverage A', reserveLine: 'Dwelling|Coverage A' },
+  HO: { assignmentType: 'First Party', lossCause: 'LC01', exposure: 'Coverage A', reserveLine: 'Dwelling|Coverage A|1st Party Building' }, // cloud names the line "(1) 1st Party Building - <insured>"
   WC: { assignmentType: '', lossCause: 'LC07', exposure: 'Medical', reserveLine: 'Medical|Workers' },
   CA: { assignmentType: 'Casualty', lossCause: 'LC15', exposure: 'Collision', reserveLine: 'Collision' },
   BOP: { assignmentType: 'Bodily Injury', lossCause: 'LC03', exposure: 'Bodily Injury', reserveLine: 'Liability|Bodily' },

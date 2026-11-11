@@ -187,6 +187,14 @@ async function fileClaim(page, kind, tag, opts = {}) {
       const routed = await savedAssignment(page);
       await assignClaim(page).catch(() => {});
       await R.makeViewable(page, cn);
+      // Property claims land on the "New Property Losses" queue user, whose contact record is incomplete - every payment
+      // is then refused ("Exposure owner Default Owner is missing ... First Name, Last Name, Email", HO 2026-11-11).
+      // Routing is already captured above, so hand the exposures to the standard user.
+      if (/New Property Losses|Default Owner/i.test(routed.user || '')) {
+        await B.openExistingClaim(page, cn);
+        console.log(`${tag}: ` + await A.assignExposuresTo(page, process.env.REG_EXPOSURE_OWNER || 'Benjamin Smith', null)
+          .catch((e) => `exposure assignment failed — ${e.message.split('\n')[0]}`));
+      }
       console.log(`${tag}: ${kind} claim ${cn} — routed to ${routed.group || '?'} / ${routed.user || '?'}`);
       // Every freshly filed claim is offered to the pool, so later read-mostly cases reuse it instead of filing again.
       // opts.pool === false keeps it out (claims a case is going to close, drain or otherwise use up).
@@ -508,7 +516,10 @@ async function isoTab(page, cn, { send = false } = {}) {
   const r = { status: after(/Status\s*\n\s*Status\s*\n\s*([^\n]*)/), sent: after(/Date sent to ISO\s*\n\s*([^\n]*)/i), resp: after(/Last response from ISO\s*\n\s*([^\n]*)/i), body, pressed: false };
   if (send && /^none$/i.test(r.status)) {
     const b = page.getByRole('button', { name: /^Send To ISO$/i }).first();
-    if (await b.isVisible().catch(() => false)) { await b.click(); await page.waitForTimeout(4000); r.pressed = true; }
+    // Shown but disabled on some claims (BOP/PA, TC056/TC057 2026-11-11) - then there is nothing to press.
+    if (await b.isVisible().catch(() => false)) r.pressed = await b.click({ timeout: 5000 }).then(() => true).catch(() => false);
+    if (r.pressed) await page.waitForTimeout(4000);
+    else r.sendDisabled = true;
   }
   return r;
 }

@@ -969,6 +969,7 @@ async function fillCloudNewExposure(page, coverageLabel) {
       const real = [...sel.options].filter(o => {
         const t = (o.text || '').trim();
         if (!t || /^<?none>?$/i.test(t)) return false;
+        if (/employee/i.test(t)) return false; // "Employee claim" hides the claim from the standard user (HO, 2026-11-11)
         return !(isClaimantNumber && usedSet.has(t));
       });
       const opt = (isClaimant && insured && real.find(o => o.text.trim().toUpperCase() === insured.trim().toUpperCase())) || real[0];
@@ -1037,7 +1038,7 @@ async function fillCloudNewExposure(page, coverageLabel) {
             const lbl = ((w && w.querySelector('.gw-label')) || {}).textContent || '';
             const boatStyle = /^\s*Style\s*$/i.test(lbl) && /^Boat$/i.test(cur.trim());
             if (cur && !/^<?none>?$/i.test(cur.trim()) && !boatStyle) continue;
-            const real = [...sel.options].filter(o => o.text && !/^<?none>?$/i.test(o.text.trim()));
+            const real = [...sel.options].filter(o => o.text && !/^<?none>?$/i.test(o.text.trim()) && !/employee/i.test(o.text));
             const opt = (/^\s*Style\s*$/i.test(lbl) && real.find(o => /^Other$/i.test(o.text.trim()))) || real[0];
             if (!opt) continue;
             sel.value = opt.value;
@@ -2004,7 +2005,11 @@ async function fillIncidentFields(page) {
       if (!sel.offsetParent || sel.disabled) continue;
       const cur = (sel.options[sel.selectedIndex] || {}).text || '';
       if (cur && !/^<?none>?$/i.test(cur.trim())) continue;
-      const opt = [...sel.options].find(o => o.text && !/^<?none>?$/i.test(o.text.trim()));
+      // Optional claim flags this sweep must leave blank (it ran over the whole Loss Details page, 2026-11-11):
+      // Special Claim Permission "Employee claim" hid every HO claim from the standard user, and a CAT code changes
+      // routing.
+      if (/ClaimPermissionRequired|Catastrophe/i.test(sel.name || '')) continue;
+      const opt = [...sel.options].find(o => o.text && !/^<?none>?$/i.test(o.text.trim()) && !/employee/i.test(o.text));
       if (!opt) continue;
       sel.value = opt.value;
       sel.dispatchEvent(new Event('change', { bubbles: true }));
@@ -4016,8 +4021,11 @@ async function selectOptionMatching(page, selector, want, waitMs = 5000) {
   if (!(await el.waitFor({ state: 'visible', timeout: waitMs }).then(() => true).catch(() => false))) return;
   const opts = await el.locator('option').evaluateAll((os) => os.map((o) => ({ v: o.value, t: (o.textContent || '').trim() })));
   const w = String(want).toLowerCase().replace(/^tc_/, '');
+  // Property LOBs list loss causes by NAME only ("Fire", no LC01 value) - fell to "Animal or Bird" on HO (2026-11-11).
+  const LC_TEXT = { lc01: /^fire$/i, lc02: /^wind/i, lc33: /^hail$/i, lc35: /^water damage$/i, lc13: /theft/i, lc08: /theft/i, lc15: /collision/i, lc14: /glass/i, lc40: /all other/i };
   const hit = opts.find((o) => o.v && o.v.toLowerCase() === w)
-    || opts.find((o) => o.v && (o.v.toLowerCase().includes(w) || o.t.toLowerCase().includes(w)));
+    || opts.find((o) => o.v && (o.v.toLowerCase().includes(w) || o.t.toLowerCase().includes(w)))
+    || (LC_TEXT[w] && opts.find((o) => o.v && LC_TEXT[w].test(o.t)));
   if (!hit) {
     console.log(`${selector}: no option matching "${want}" (options: ${opts.map((o) => o.t).filter(Boolean).join(' | ')}) — first option used`);
     return selectFirstOption(page, selector, waitMs);
