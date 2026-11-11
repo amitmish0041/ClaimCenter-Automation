@@ -19,6 +19,9 @@ const D = (why) => ({ automation: 'NEEDS_DATA', reason: why });
 
 const REASONS = {
 
+  // ── INT.001/002 company name + disclaimer: automated on the OneInc portal (recipes/oneIncPortal.js) except these two companies ──
+  ...Object.fromEntries(['GCCM-1003/INT/TC-202', 'GCCM-803/TC/TC-058', 'GCCM-1003/INT/TC-207', 'GCCM-803/TC/TC-063'].map((id) => [id, D('Needs a TEST claim whose policy has the Underwriting Company is Sheboygan Falls Insurance Company (TC-202 / TC-058) or Mountain States Commercial Insurance Company (TC-207 / TC-063) — none found 2026-11-11 (OneInc portal payments + Policy screens of WI / AZ / NM / UT claims). Give a policy or claim number and the case runs like the other companies (recipes/oneIncPortal.js).')])),
+
   // ── Former "needs data" cases that stay manual (review 2026-11-03) ──
   ...Object.fromEntries(['GCCM-763/VBR/TC-045', 'GCCM-763/VBR/TC-046', 'GCCM-1003/VBR/TC-128', 'GCCM-1003/VBR/TC-129'].map((id) => [id, D('Needs a TEST policy carrying Extraordinary / Extended Medical Benefits (EMB) coverage, so an exposure can have that Primary Coverage — none is known on TEST (the negatives without EMB are automated)')])),
   ...Object.fromEntries(['GCCM-763/VBR/TC-054', 'GCCM-763/VBR/TC-061', 'GCCM-1003/VBR/TC-137', 'GCCM-1003/VBR/TC-144'].map((id) => [id, D('Needs an earlier First and Final / Final Payment in status "Paid" on the exposure — on TEST payments never get past Awaiting submission / Requesting (OneInc does not report back). BA decision needed on whether "Awaiting submission" counts as active (2026-10-21: a second First and Final was accepted while the first was Awaiting submission)')])),
