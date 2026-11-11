@@ -8,6 +8,21 @@
 
 const base = (label, seed) => ({ label, lob: 'ANY', state: 'ANY', prefix: /^[A-Z]{2,4}-/, poolOnly: true, seed });
 module.exports = {
+  // INT.018–031 payload cleansing: ONE new PA auto claim per run (AUTO_PA's FNOL) shared by every cleansing case; each case
+  // adds the dirty claim-only payees (portalChecks.addDirtyContacts, no-op once there) and makes its own $1.6x payment.
+  INT_CLEAN: { label: 'New PA auto claim for the OneInc payload-cleansing cases', lob: 'AUTO', state: 'PA', prefix: /^PA-PA-/, poolOnly: true, fnolAs: 'AUTO_PA', shareFresh: true },
+  // OneInc payment states on EXISTING TEST claims (OneInc staging portal, 2026-11-11). The ClaimCenter check is found by the
+  // OneInc check number, or by its Payment Identifier = the portal's CR Tracking Number.
+  // Issued OneInc mailed checks (read-only cases: Additional Payment Details, feedback, Get Payment Status).
+  ONEINC_ISSUED: base('Claim with an Issued OneInc mailed check', ['HO-PA-01-26-0749093', 'PA-PA-01-26-0749092', 'PA-PA-01-26-0749103']),
+  // Issued OneInc mailed checks the void case may use up (one per run) — kept apart from ONEINC_ISSUED.
+  ONEINC_VOID_ISSUED: base('Claim with an Issued OneInc mailed check to void', ['PA-PA-01-26-0749089', 'PA-PA-01-26-0749083', 'PA-PA-01-26-0749067', 'PA-PA-01-26-0749055', 'PA-PA-01-26-0749054', 'WC-PA-01-26-0748934']),
+  // Issued OneInc Virtual Card payment (4000000253, $1.70).
+  ONEINC_VC_ISSUED: base('Claim with an Issued OneInc Virtual Card payment', ['PA-PA-01-26-0748998']),
+  // OneInc "Stopped" mailed checks: 7000002610 ($50) / 7000002611 ($100), stopped 10/29.
+  ONEINC_STOPPED: base('Claim with a OneInc check in status Stopped', ['PA-PA-01-26-0748675', 'PA-PA-01-26-0748591']),
+  // OneInc "Cancelled" with no payee selection (Undefined-Let Customer PickUp): $1.37 (11/04) / $200 (10/29).
+  ONEINC_CANCELLED: base('Claim with a OneInc payment Cancelled before a payment method was chosen', ['PA-PA-01-26-0748843', 'PA-PA-01-26-0748675']),
   UW_DMIC: base('Claim underwritten by Donegal Mutual Insurance Company', ['WC-DE-01-26-0748953', 'PA-PA-01-26-0747704', 'CA-IN-04-26-0748758']),
   UW_ASIC: base('Claim underwritten by Atlantic States Insurance Company', ['CA-IL-60-26-0749170', 'PA-PA-01-26-0749097', 'CPP-DE-01-25-0745771']),
   // read: PA-PA-01-26-0748662.

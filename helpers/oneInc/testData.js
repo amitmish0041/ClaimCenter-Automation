@@ -311,7 +311,11 @@ const D = {
     id: `contact:${name}`,
     label: `Contact "${name}" on the claim`,
     check: async (page) => ((await contactsList(page)).some((t) => t.toUpperCase().includes(name.toUpperCase())) ? '' : `${name} is not on Parties Involved`),
-    build: null,
+    // The payload-cleansing payees (portalChecks.DIRTY) are claim-only people the suite creates itself (fresh claims only).
+    build: (() => {
+      const spec = Object.values(require('./portalChecks').DIRTY).find((d) => `${d.first} ${d.last}`.toUpperCase() === name.toUpperCase());
+      return spec ? async (page) => { await require('./wizardDriver').addClaimPersonContact(page, spec); return `added claim-only contact "${name}"`; } : null;
+    })(),
     manual: how,
   }),
 

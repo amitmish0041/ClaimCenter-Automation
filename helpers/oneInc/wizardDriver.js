@@ -267,6 +267,7 @@ async function addClaimPersonContact(page, { first, last, role = 'Covered Party'
   await fill(page, 'Last name', last);
   await select(page, 'Country', 'United States').catch(() => {});
   await fill(page, 'Address 1', a.line1);
+  if (a.line2) await fill(page, 'Address 2', a.line2);
   await fill(page, 'City', a.city);
   await select(page, 'State', a.state);
   await fill(page, 'ZIP Code', a.zip);
