@@ -145,7 +145,14 @@ async function showNotes(page) {
 async function sendTaxIdRow(page, i = 0) {
   const box = page.locator(`input[name$="NewCheckPayeeDVPayeesLV-${i}-ExtSendTaxIDToPMS"]`).first();
   if (!await box.count()) throw new W.Blocked('no "Which vendor or other Tax ID" column on the joint payee grid');
-  if (!await box.isChecked().catch(() => false)) await box.check({ force: true }).catch(() => box.click({ force: true }));
+  // The input is hidden behind GW's styled box ("Element is not visible", 2026-11-11): click its visible wrapper, else
+  // click it from the page (fires the same change).
+  if (!await box.isChecked().catch(() => false)) {
+    const wrap = box.locator('xpath=ancestor::*[contains(@class,"gw-CheckBoxValueWidget") or contains(@class,"gw-checkbox") or self::label][1]');
+    if (await wrap.isVisible().catch(() => false)) await wrap.click().catch(() => {});
+    if (!await box.isChecked().catch(() => false)) await box.evaluate((e) => e.click());
+  }
+  if (!await box.isChecked().catch(() => false)) throw new W.Blocked(`could not tick the "Which vendor or other Tax ID" box on joint payee row ${i}`);
   await W.settle(page, 1200);
   return `Tax ID row ${i} ticked`;
 }
