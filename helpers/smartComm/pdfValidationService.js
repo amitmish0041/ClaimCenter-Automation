@@ -528,6 +528,17 @@ function evaluateOne(req, haystack, context) {
       if (close) {
         return { expected: req.expectedValue, actual: close, result: 'FAIL', reason: `The document prints "${close}" instead of the template's "${req.expectedValue}" — one word differs (added, dropped or spelled differently).` };
       }
+      // A date that IS printed, only in another format or a day off ("Nov 11, 2026, 12:30:28 AM" for "November 10, 2026" -
+      // DIG221A 2026-11-10, reported as "missing entirely"): still a FAIL, but say what printed.
+      const want = Date.parse(String(req.expectedValue).trim());
+      if (dateVariants(req.expectedValue).length && !Number.isNaN(want)) {
+        const printed = (haystack.match(/\b[A-Z][a-z]{2,8}\.? \d{1,2}, \d{4}(?:, \d{1,2}:\d{2}(?::\d{2})? ?[AP]M)?|\b\d{1,2}\/\d{1,2}\/\d{4}\b/g) || [])
+          .find((d) => { const t = Date.parse(d.replace(/, \d{1,2}:\d{2}.*$/, '')); return !Number.isNaN(t) && Math.abs(t - want) <= 864e5; });
+        if (printed) {
+          const sameDay = Date.parse(printed.replace(/, \d{1,2}:\d{2}.*$/, '')) === want;
+          return { expected: req.expectedValue, actual: printed, result: 'FAIL', reason: `The document prints this date as "${printed}" instead of "${req.expectedValue}" — ${sameDay ? 'a different date format' : 'a different format and one day off (likely a time-zone shift)'}.` };
+        }
+      }
       return {
         expected: req.expectedValue, actual: 'Not Found', result: 'FAIL',
         reason: `No similar wording found anywhere in the generated document — this content appears to be missing entirely, not just reworded.`,

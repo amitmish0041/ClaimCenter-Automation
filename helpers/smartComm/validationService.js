@@ -35,7 +35,12 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
   const dig = catalogService.normalizeDig(digNumber);
   let template = catalogService.getTemplate(dig);
   // print test: the claim must fit the LOB / State the print-test sheet lists for this template (the catalog index differs for some)
-  if (template && printPlan && printPlan.lobs && printPlan.states) template = { ...template, lob: printPlan.lobs, states: printPlan.states };
+  // ("ALL" on the sheet doesn't widen the catalog's own LOB / State: DIG57D "15 day letter DE WC" and DIG217 are WC
+  //  in the catalog and listed ALL - 2026-11-10 they were run on a property claim; DIG57D failed to assemble there.)
+  if (template && printPlan && printPlan.lobs && printPlan.states) {
+    const all = (l) => !l.length || l.some((x) => /^all$/i.test(String(x).trim()));
+    template = { ...template, lob: all(printPlan.lobs) ? template.lob : printPlan.lobs, states: all(printPlan.states) ? template.states : printPlan.states };
+  }
   if (!template) {
     return blockedTemplateResult(dig, `Template "${dig}" was not found in the SmartCOMM catalog (Claims_Documents_Index.xlsx)`);
   }
@@ -2850,6 +2855,19 @@ function annotateInteractiveEditFailures(validations, interactiveChecks) {
       v.result = 'BLOCKED';
       v.reason = `The field next to this label showed "${beforeValues.join(' ')}" before the edit — a number/code, not a "${v.expected}"-type value — so this tool paired the label with the neighbouring field. Can't be judged here; not a template defect.`;
       continue;
+    }
+    // The label picked a neighbouring field, while ANOTHER edited field held exactly this value before the test typed
+    // over it (DIG227 "CC" name, 2026-11-10: judged on the address field INT18 while INT16 showed the agency name, its
+    // own edit then typed over by the next field's). The value was right before the edit; that field's edit is judged
+    // in its own EDIT row.
+    if (!beforeOk && expectedNorm.length >= minLen) {
+      const held = (interactiveChecks || []).filter((c) => c.observedChanged === true && !hits.includes(c) && normForKnownValueMatch(c.before) === expectedNorm);
+      if (held.length) {
+        v.result = 'PASS';
+        v.actual = `Before edit: "${held.map((c) => c.before).join(' ')}"`;
+        v.reason = `The field showed the expected value before the interactive-edit test overwrote it (${held.map((c) => c.id).join(', ')}); the edit itself is judged in that field's own EDIT row.`;
+        continue;
+      }
     }
     v.result = beforeOk ? 'PASS' : 'FAIL';
     v.reason = beforeOk
