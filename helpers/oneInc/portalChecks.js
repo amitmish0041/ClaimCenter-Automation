@@ -157,4 +157,17 @@ async function sendTaxIdRow(page, i = 0) {
   return `Tax ID row ${i} ticked`;
 }
 
-module.exports = { underwritingCompany, oneIncPayment, addDirtyContacts, DIRTY, oneIncCheck, reopenCheck, noteField, showNotes, sendTaxIdRow };
+// Joint payee grid row `i` › Type. A claim-only person typed "Other" (CC's default for role Other) is refused: "payee type
+// of Vendor or Other. A tax id is required and this payee must be pulled from the address book" (CONFIRMED 2026-11-11), so
+// the cleansing payees are typed "Additional Claimant".
+async function payeeRowType(page, i, type) {
+  const sel = page.locator(`select[name$="NewCheckPayeeDVPayeesLV-${i}-PayeeType"]`).first();
+  if (!await sel.count()) throw new W.Blocked(`no Type on joint payee row ${i}`);
+  const o = (await sel.locator('option').evaluateAll((os) => os.map((x) => ({ v: x.value, t: x.textContent.trim() })))).find((x) => x.t === type);
+  if (!o) throw new W.Blocked(`joint payee row ${i}: Type "${type}" not offered`);
+  await sel.selectOption(o.v);
+  await W.settle(page, 1500);
+  return `row ${i} Type = ${type}`;
+}
+
+module.exports = { underwritingCompany, oneIncPayment, addDirtyContacts, DIRTY, oneIncCheck, reopenCheck, noteField, showNotes, sendTaxIdRow, payeeRowType };

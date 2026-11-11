@@ -59,7 +59,7 @@ module.exports = (api) => {
   const P1 = `${DIRTY.primary.first} ${DIRTY.primary.last}`;
   const P2 = `${DIRTY.secondary.first} ${DIRTY.secondary.last}`;
   const NAMES = ['Insured First Name', 'Insured Last Name', 'CoInsured First Name', 'CoInsured Last Name', 'Payment Mailing Address', 'Additional Text Field 3', 'Additional Text Field 8'];
-  const DIRTY_PAY = (amount) => [pc('addDirtyContacts'), ...VAL([{ open: 'full' }, { payee: P1 }, { joint: [{ who: P2 }] }, pc('sendTaxIdRow', 0), { next: true }, { reserve: 'open' },
+  const DIRTY_PAY = (amount) => [pc('addDirtyContacts'), ...VAL([{ open: 'full' }, { payee: P1 }, { joint: [{ who: P2, type: 'Additional Claimant' }] }, pc('payeeRowType', 0, 'Additional Claimant'), { next: true }, { reserve: 'open' },
     { step2: { transactionType: 'Partial Payment', amount } }], null), op('escalateChecks', amount), pc('oneIncPayment', { fields: NAMES, amount, waitMin: 20 })];
   const CLEAN_NOTE = `New PA auto claim (shared by the cleansing cases). Payee "${P1}" (claim-only person; address ${JSON.stringify(DIRTY.primary.address)}) with joint payee "${P2}"; the payment is submitted, sent to OneInc (Financials Escalation batch) and read on the OneInc staging portal. `;
   add('GCCM-1013/INT/TC-115', 'INT_CLEAN', DIRTY_PAY('1.61'), [V('OneInc Insured First Name', { value: /^JOHN5$/i }), V('OneInc CoInsured First Name', { value: /^MKE$/i })],
