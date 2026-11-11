@@ -89,7 +89,19 @@ async function tryNewPayment(page) {
 // Exposure whose row matches `match` (Exposures list): Medicare tab › "Is Claimant a Medicare Beneficiary?" = beneficiary
 // ('Yes' | 'No' | '<none>'), and the Included ICD codes = [icd] (or none). Idempotent.
 async function openExposureMatching(page, match) {
-  await W.navigate(page, 'exposures');
+  // WC claims have no "Exposures" nav item: each exposure is a Loss Details sub-item ("Medical", ...) - 2026-11-10.
+  const wcItem = async () => {
+    const group = page.locator('[id="Claim-MenuLinks-Claim_ClaimLossDetailsGroup"]').first();
+    const items = page.locator('[id^="Claim-MenuLinks-Claim_ClaimLossDetailsGroup-"][id$="LossDetailsExposureDetail"]');
+    if (!await items.first().isVisible().catch(() => false)) { await group.click().catch(() => {}); await W.settle(page, 2500); }
+    const hit = items.filter({ hasText: new RegExp(match, 'i') }).first();
+    if (!await hit.isVisible().catch(() => false)) return false;
+    await hit.click(); await W.settle(page, 3500); return true;
+  };
+  try { await W.navigate(page, 'exposures'); } catch (e) {
+    if (e.name === 'Blocked' && await wcItem()) return;
+    throw e;
+  }
   await page.locator('tr[id*="ExposuresLV-0-"]').first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
   const re = new RegExp(match, 'i');
   const i = await page.evaluate((src) => {

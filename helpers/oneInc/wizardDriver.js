@@ -503,7 +503,7 @@ async function fill(page, label, value) {
   const visible = await el.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
   // Date fields: the label resolves to the date WIDGET wrapper, not its <input> ("Element is not an <input>" —
   // CONFIRMED 2026-10-21 on Service Period Start / Payment Date), so use the widget's own input then too.
-  const fillable = visible && await el.evaluate((n) => /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName) || n.isContentEditable).catch(() => false);
+  const fillable = visible && await el.evaluate((n) => /^(INPUT|TEXTAREA)$/.test(n.tagName) || n.isContentEditable) // a SELECT can't be filled: phone labels hit the country-code select (TC006).catch(() => false);
   if (!fillable) {
     // Fallback: the input inside the field's gw-InputWidget (date inputs such as Service Period / Payment Date are
     // not always reachable by label — CONFIRMED 2026-10-20 on the WC claim).
@@ -1026,7 +1026,9 @@ async function fillRequiredEmpties(page) {
       // ClaimsPay Type is left blank for vendor payees (the CPD.013 finding) — choose "Vendor" there, matching the
       // payee, rather than the first option ("Contact(s)").
       const preferred = /ClaimsPay Type/i.test(f.label) ? opts.find((o) => /^vendor$/i.test(o.t)) : null;
-      const pick = preferred || opts.find((o) => o.v && !/^<none>$/i.test(o.t));
+      // Never "Employee claim" / "Relative of Employee": it locks the claim away from the standard user ("Cannot View
+      // Claim", HO-PA-01-26-0749148, 2026-11-10) and routes every payment for approval.
+      const pick = preferred || opts.find((o) => o.v && !/^<none>$/i.test(o.t) && !/employee/i.test(o.t));
       if (pick) { await sel.selectOption(pick.v).catch(() => {}); filled.push(`${f.label}=${pick.t}`); await settle(page, 1200); }
     } else if (f.kind === 'input' && !f.value && /date|period|start|end/i.test(f.label)) {
       const inp = root.locator('input').first();

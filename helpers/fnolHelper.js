@@ -621,7 +621,8 @@ async function satisfyNamedRequiredFields(page) {
     const cb = page.getByRole('combobox', { name, exact: true }).first();
     if (await cb.isVisible().catch(() => false)) {
       const opts = await cb.locator('option').allTextContents().catch(() => []);
-      const real = opts.find(o => o && !/^<?none>?$/i.test(o.trim()));
+      // Never "Employee claim": it hides the claim from the standard user (HO-PA-01-26-0749148, 2026-11-10).
+      const real = opts.find(o => o && !/^<?none>?$/i.test(o.trim()) && !/employee/i.test(o));
       if (real) {
         const ok = await cb.selectOption({ label: real }).then(() => true).catch(() => false);
         if (ok) { done.push(name + '=' + real.trim()); continue; }
@@ -901,7 +902,11 @@ async function pickCloudCoverage(page, labels) {
     const openedIds = pickCloudCoverage._opened || (pickCloudCoverage._opened = new Set());
     const next = all.find(n => n.depth === 1 && !n.isLeaf && !openedIds.has(n.id))
               || all.find(n => n.depth === 1 && !openedIds.has(n.id));
-    if (!next) { console.log('CLOUD exposure: every grouper opened, no matching coverage found'); break; }
+    if (!next) {
+      console.log('CLOUD exposure: every grouper opened, no matching coverage found. Offered: ' +
+        [...new Set(all.filter(n => n.depth >= 2 && n.text).map(n => n.text))].slice(0, 40).join(' | '));
+      break;
+    }
     openedIds.add(next.id);
     console.log('CLOUD exposure: opening grouper "' + next.text + '"');
     if (!await clickId(next.id, 'expand')) break;
@@ -2599,7 +2604,17 @@ async function searchPolicy(page, policyNumber, lossDate, policyType) {
     if (/Step\s*1\s*of\s*5/i.test(step)) {
       // A div role=radio — a script-dispatched click doesn't stick; it needs a real click.
       const yesRadio = page.getByRole('radiogroup', { name: /year selected for the date of loss correct/i }).getByRole('radio', { name: /^Yes$/i }).first();
-      const yes = await yesRadio.click({ timeout: 5000 }).then(() => true).catch(() => false);
+      let yes = await yesRadio.click({ timeout: 5000 }).then(() => true).catch(() => false);
+      // The radiogroup has no accessible name on some cloud screens (IMP-9400001 / GL-8859175 / FOP-0011013, 2026-11-10:
+      // the validation panel listed the question but the click above found nothing). Go from the question text to the
+      // smallest container holding its radios and click its "Yes".
+      if (!yes) {
+        const box = page.locator('div, fieldset, tr').filter({ hasText: /year selected for the date of loss correct/i })
+          .filter({ has: page.locator('[role="radio"], input[type="radio"]') }).last();
+        const byRole = box.getByRole('radio', { name: /^Yes$/i }).first();
+        yes = await byRole.click({ timeout: 5000 }).then(() => true).catch(() => false)
+          || await box.getByText(/^Yes$/).first().click({ timeout: 5000 }).then(() => true).catch(() => false);
+      }
       if (yes) {
         console.log('searchPolicy: answered "Is the year selected for the date of loss correct?" -> Yes after Next; pressing Next again');
         await page.waitForTimeout(600);

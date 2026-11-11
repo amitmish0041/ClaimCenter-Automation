@@ -108,7 +108,7 @@ test('RG-TC072 [Financials]: Recovery reserve on an Auto claim (EMDMRR03)', asyn
   await B.openExistingClaim(page, cn);
   await E.recovery(page, 'PA', 750, { skipSubro: false });
   const added = R.newRows(before, await R.transactionRows(page, cn));
-  await R.check(page, ti, { description: 'Recovery reserve transaction (exposure, category, amount, status)', expected: 'Recovery Reserve $750.00', actual: added.join(' | ') || 'no new transaction', ok: added.some((r) => /Recovery/i.test(r) && /750\.00/.test(r)) });
+  await R.check(page, ti, { description: 'Recovery reserve transaction (exposure, category, amount, status)', expected: 'Recovery Reserve $750.00', actual: added.join(' | ') || 'no new transaction', ok: added.some((r) => /750\.00/.test(r)) }); // the Recovery Reserves filter's rows carry no "Recovery" word
   ti.annotations.push({ type: 'manual', description: 'EMDMRR03 RecoveryReserveAdded event message is not visible on a screen (step 7).' });
 }));
 

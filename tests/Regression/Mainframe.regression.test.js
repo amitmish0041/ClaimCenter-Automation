@@ -25,7 +25,7 @@ async function dayOne(page, ti, id) {
   const tx = await R.transactionRows(page, claim.cn);
   const st = read(); st[id] = { claim: claim.cn, day1: today() }; write(st);
   R.setClaim(ti, claim.cn, 'su');
-  await R.check(page, ti, { description: 'Day 1: claim with exposure and reserve', expected: 'reserve on Collision', actual: tx.filter((r) => /Reserve/i.test(r)).join(' | ') || 'no reserve', ok: tx.some((r) => /Reserve/i.test(r)) });
+  await R.check(page, ti, { description: 'Day 1: claim with exposure and reserve', expected: 'reserve on Collision', actual: tx.filter((r) => /^\d.*\$[\d,]+\.\d\d/.test(r)).join(' | ') || 'no reserve', ok: tx.some((r) => /^\d.*\$[\d,]+\.\d\d/.test(r)) }); // Reserves filter: rows carry no "Reserve" word
   test.skip(true, `BLOCKED: Day 1 done (${claim.cn}) — run this case again tomorrow or later for Day 2`);
 }
 

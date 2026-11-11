@@ -198,7 +198,10 @@ async function assignExposuresTo(page, who = 'Benjamin Smith', group = 'Recovery
 async function openLossDetailsGeneral(page) {
   const sub = page.locator('[id="Claim-MenuLinks-Claim_ClaimLossDetailsGroup-ClaimLossDetailsGroup_ClaimLossDetails"]').first();
   if (!await sub.isVisible().catch(() => false)) {
-    await page.locator('[id="Claim-MenuLinks-Claim_ClaimLossDetailsGroup"]').first().click();
+    const group = page.locator('[id="Claim-MenuLinks-Claim_ClaimLossDetailsGroup"]').first();
+    // Only WC has the Loss Details GROUP; other LOBs (HO, PA, CA) have a plain "Loss Details" item (RX013/RX017, 2026-11-10).
+    if (await group.isVisible().catch(() => false)) await group.click();
+    else await page.locator('[id^="Claim-MenuLinks-Claim_ClaimLossDetails"]').first().click({ timeout: 15000 });
     await W.settle(page, 2500);
   }
   if (await sub.isVisible().catch(() => false)) { await sub.click(); await W.settle(page, 3500); }

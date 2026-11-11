@@ -25,7 +25,7 @@ const WC_DIARY = { rule: 'DMCW0021 + DMCP0025 WC 30-day diaries', re: /30.?day|d
 const CASES = [
   { id: 'TC007', feature: 'Intake FNOL', title: 'OH Personal Auto PC — Ohio branch routing (DMGA0060), DMIR0004 $200 Transportation Expense reserve', kind: 'PA_OH', assignmentType: 'Casualty', lossCause: 'LC15', group: /Ohio/i, activities: [], format: true, reserve: { line: /Transportation/i, amount: '$200.00', rule: 'DMIR0004' } },
   { id: 'TC008', feature: 'Intake FNOL', title: 'DE Commercial Auto — routing (DMGA0030), workplan, Silver Series/MicPak exposure', kind: 'CA_DE', assignmentType: 'Casualty', lossCause: 'LC11', group: null, activities: [VERIFY_COV, CONTACT_INS, SUBRO_POT] },
-  { id: 'TC009', feature: 'Intake FNOL', title: "MI Workers Comp (legacy) — Michigan Workers' Compensation group (DMGA0100)", kind: 'WC_MI', group: /Michigan Workers/i, activities: [WC_DIARY], format: true, wcApproval: true },
+  { id: 'TC009', feature: 'Intake FNOL', title: "MI Workers Comp (legacy) — Michigan Workers' Compensation group (DMGA0100)", kind: 'WC_MI', group: /Michigan Workers|\bMI WC\b/i, activities: [WC_DIARY], format: true, wcApproval: true },
   { id: 'TC010', feature: 'Intake FNOL', title: 'PA Personal Excess Liability (legacy) — BI Section / General Casualty routing', kind: 'PEL', assignmentType: 'Bodily Injury', lossCause: 'LC03', group: /BI Section|General Casualty|Bodily Injury/i, activities: [VERIFY_COV, CONTACT_INS, SUBRO_POT] },
   { id: 'TC011', feature: 'Intake FNOL', title: 'PA Inland Marine (legacy) — First Party → Property Clerical (DMGA0007)', kind: 'IM', assignmentType: 'First Party', lossCause: 'LC40', group: /Property Clerical/i, activities: [VERIFY_COV, CONTACT_INS, REVIEW_30, SUBRO_POT], format: true },
   { id: 'TC012', feature: 'Intake FNOL', title: 'General Liability — GL group (DMGA0062), Contact Insured (DMCW0006)', kind: 'GL', assignmentType: 'Bodily Injury', lossCause: 'LC03', group: /General Liability|\bGL\b/i, activities: [CONTACT_INS, { ...SUBRO_POT, optional: 'if applicable for GL' }], format: true },
@@ -76,11 +76,18 @@ for (const c of CASES) {
       await R.asAdmin(page, claim.cn);
       await S.E.repairCloud(page, claim.cn).catch(() => {});
       await createReserve(page, { reserveAmount: 20000, exposure: 'Workers', strict: false });
-      await R.asStandard(page, claim.cn);
-      const pay = await P.makePayment(page, { amount: P.uniqueAmount(7500) });
-      await R.step(page, ti, `Payment $${pay.amount} as ${process.env.CC_USER}: finished=${pay.finished} ${pay.messages.join(' | ')}`);
-      const approver = await R.approverFor(page).catch(() => null);
-      await R.check(page, ti, { description: 'DMAR0074 MI WC approval routing', expected: 'approval activity routed to the Michigan WC group approver', actual: approver || 'no open approval activity', ok: !!approver });
+      // The payment must be made by a WC claim rep: CC_USER (benjsmit) is a manager whose authority covers it, so the check
+      // lands "Awaiting submission" and no approval is ever routed (WC-MI-70-26-0749136, 2026-11-10). Without the team
+      // password the approval half can't be exercised - say so instead of failing.
+      if (!process.env.CC_TEAM_PASS) {
+        ti.annotations.push({ type: 'manual', description: 'DMAR0074 MI WC approval routing not checked - set CC_TEAM_PASS so the payment is made by a WC claim rep (the standard user\'s authority covers it, no approval routes).' });
+      } else {
+        const payer = await R.asReserveUser(page, claim.cn, 'WC');
+        const pay = await P.makePayment(page, { amount: P.uniqueAmount(7500) });
+        await R.step(page, ti, `Payment $${pay.amount} as ${payer}: finished=${pay.finished} ${pay.messages.join(' | ')}`);
+        const approver = await R.approverFor(page).catch(() => null);
+        await R.check(page, ti, { description: 'DMAR0074 MI WC approval routing', expected: 'approval activity routed to the Michigan WC group approver', actual: approver || `no open approval activity (payment by ${payer})`, ok: !!approver });
+      }
     }
     ti.annotations.push({ type: 'manual', description: `On-prem vs cloud screen comparison: run Migration Reconciliation on ${claim.cn}.` });
   }));

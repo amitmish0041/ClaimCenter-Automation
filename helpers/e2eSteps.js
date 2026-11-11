@@ -686,12 +686,41 @@ async function completeActivitiesCloud(page) {
     const subjects = (await openWorkplan()).filter(s => !skipped.has(s));
     if (!subjects.length) break;
     const subject = subjects[0];
-    await page.locator('tr[role="row"]').filter({ hasText: /\bOpen\b/ }).getByText(subject, { exact: true }).first().click().catch(() => {});
+    // hasText matches textContent, where cells run together ("NormalOpen7 Day…") so /\bOpen\b/ matched no row and no
+    // activity was ever opened (2026-11-10). Match a cell whose whole text is "Open".
+    await page.locator('tr[role="row"]').filter({ has: page.locator('td', { hasText: /^\s*Open\s*$/ }) })
+      .getByText(subject, { exact: true }).first().click({ timeout: 8000 }).catch(() => {});
     await page.waitForTimeout(2500);
     const btn = page.locator('#gw-south-panel').getByRole('button', { name: 'Complete', exact: true }).first();
-    if (!(await btn.isVisible().catch(() => false)) || (await btn.getAttribute('aria-disabled')) === 'true') { skipped.add(subject); continue; }
-    await btn.click().catch(() => {});
+    // At the default 1280x720 viewport the south panel's Complete sits below the fold, so isVisible() was false and
+    // every activity was skipped (PA-PA-01-26-0749160, 2026-11-10; fine at 1600x1000). Wait for it and scroll to it.
+    await btn.waitFor({ state: 'attached', timeout: 8000 }).catch(() => {});
+    await btn.scrollIntoViewIfNeeded().catch(() => {});
+    if (!(await btn.count()) || (await btn.getAttribute('aria-disabled').catch(() => 'true')) === 'true') { skipped.add(subject); continue; }
+    await btn.click({ timeout: 5000 }).catch(() => btn.dispatchEvent('click').catch(() => {}));
     await page.waitForTimeout(3000);
+    // Activities with required questions ("Was contact able to be made?", "Subro Potential?") stay open with a
+    // validation message: answer the required empties (wizardDriver's generic filler) and press Complete again.
+    if (await btn.count().catch(() => 0)) { // still on the activity (count, not isVisible: below the fold at 1280x720)
+      const W = require('./oneInc/wizardDriver');
+      for (let r = 0; r < 2; r++) if (!(await W.fillRequiredEmpties(page).catch(() => [])).length) break;
+      // Yes/No radio questions aren't covered by the filler. "Was contact able to be made?" → Yes; anything else → No
+      // ("Create a copy of this activity?" = Yes adds a required copy due date, 2026-11-10).
+      const groups = page.locator('#gw-south-panel [role="radiogroup"]');
+      for (let g = 0; g < await groups.count(); g++) {
+        const grp = groups.nth(g);
+        if (await grp.locator('[role="radio"][aria-checked="true"], input[type="radio"]:checked').count()) continue;
+        const label = await grp.evaluate((el) => {
+          const id = el.getAttribute('aria-labelledby');
+          return ((id && document.getElementById(id)) || {}).textContent || '';
+        }).catch(() => '');
+        // "Are you closing this claim?" = No re-creates the Status Update Letter (recurring); this sweep runs to close.
+        const answer = /contact able to be made|closing this claim/i.test(label) ? 'Yes' : 'No';
+        await grp.getByRole('radio', { name: new RegExp(`^${answer}$`, 'i') }).first().click({ timeout: 3000 }).catch(() => {});
+      }
+      await btn.click({ timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(3000);
+    }
     const still = (await openWorkplan()).includes(subject);
     if (still) skipped.add(subject); else done++;
   }

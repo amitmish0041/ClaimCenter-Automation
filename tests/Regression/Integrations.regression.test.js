@@ -46,16 +46,12 @@ test('RG-TC028 [Catastrophe]: CAT shown on Loss Details and Summary', async ({ p
 // ISO status lives on the claim (Loss Details / ISO section): Status SENT, Date Sent, Last Response. Polled — async.
 async function isoStatus(page, cn, maxMin = 10) {
   let seen = '';
+  let pressed = false;
   for (let t = 0; t < maxMin * 2; t++) {
-    await B.openExistingClaim(page, cn);
-    await A.openLossDetailsGeneral(page);
-    await S.nav(page, /^ISO$/i).catch(() => {});
-    const s = await S.readScreen(page);
-    const st = S.findField(s, 'ISO Status') || S.findField(s, 'Status');
-    const sent = S.findField(s, 'Date Sent to ISO') || S.findField(s, 'Date Sent');
-    const resp = S.findField(s, 'Last Response from ISO') || S.findField(s, 'Last Response');
-    seen = `status=${st ? st.value : '?'}; sent=${sent ? sent.value : '?'}; response=${resp ? resp.value : '?'}`;
-    if (st && /sent/i.test(st.value)) return { ok: true, seen, sent: sent && sent.value, resp: resp && resp.value, insights: /Claim ?InSights/i.test(s.body) };
+    const r = await S.isoTab(page, cn, { send: !pressed }); // "None" hours after FNOL on TEST - press Send To ISO once
+    pressed = pressed || r.pressed;
+    seen = `status=${r.status || '?'}; sent=${r.sent || '?'}; response=${r.resp || '?'}${pressed ? ' (Send To ISO pressed by the test)' : ''}`;
+    if (/sent|accepted/i.test(r.status)) return { ok: true, seen, sent: r.sent, resp: r.resp, insights: /Claim ?InSights/i.test(r.body) };
     await page.waitForTimeout(30000);
   }
   return { ok: false, seen };

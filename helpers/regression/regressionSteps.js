@@ -69,9 +69,13 @@ function hooks(test) {
   });
 }
 
+// .env placeholders ("XXXX-000017" - no real policy in the data sheet) count as not set, so the case is BLOCKED instead of
+// filing a claim against a made-up policy number.
+const envVal = (k) => { const v = String(process.env[k] || '').trim(); return /XXXX/i.test(v) ? '' : v; };
+
 // A missing prerequisite → BLOCKED (skip with the reason), never a false FAIL.
 function need(test, ...vars) {
-  const missing = vars.filter((v) => !String(process.env[v] || '').trim());
+  const missing = vars.filter((v) => !envVal(v));
   test.skip(missing.length > 0, `BLOCKED: set ${missing.join(', ')} (test data / configuration for this case)`);
   return vars.map((v) => process.env[v]);
 }
@@ -90,6 +94,8 @@ async function blockable(test, fn) {
 // ── Claims ────────────────────────────────────────────────────────────────────────────────────────────────────────
 // financialRules.CLAIM_KINDS covers PA/HO/WC; the Intake FNOL cases need every LOB, with a SPECIFIC assignment type and
 // loss cause (fnolHelper's opt-in lossDetails.assignmentType / lossCause). policyVar names follow fixtures/testData.js.
+// Liability coverages: cloud's New Exposure tree lists "Bodily Injury Liability" under the GL subline, not
+// "Premises/Operations" (CPP-PA, 2026-11-10) - the older names stay first for policies that still carry them.
 const KINDS = {
   PA_OH: { policyVar: 'POLICY_PA_AUTO_OH', state: 'OH', policyType: 'Personal auto', cause: 'LC15', exposures: [{ coverageLabel: 'Transportation Expense' }] },
   PA_WI: { policyVar: 'POLICY_PA_AUTO_WI', state: 'WI', policyType: 'Personal auto', cause: 'LC15', exposures: [{ coverageLabel: 'Collision' }] },
@@ -97,16 +103,16 @@ const KINDS = {
   CA_DE: { policyVar: 'POLICY_CAU_DE', state: 'DE', policyType: 'Commercial auto', cause: 'LC15', exposures: [{ coverageLabel: ['Silver Series or MicPak', 'Silver Series/MicPak'] }] },
   CA:    { policyVar: 'POLICY_CAU_PA', state: 'PA', policyType: 'Commercial auto', cause: 'LC15', exposures: [{ coverageLabel: 'Collision' }] },
   WC_MI: { policyVar: 'POLICY_WC_MI', state: 'MI', policyType: "Workers' comp", cause: 'LC07', exposures: [{ coverageLabel: "Workers' Compensation And Employers' Liability" }] },
-  PEL:   { policyVar: 'POLICY_PEL_PA', state: 'PA', policyType: 'Personal Excess', cause: 'LC03', exposures: [{ coverageLabel: 'Personal Excess Liability' }] },
+  PEL:   { policyVar: 'POLICY_PEL_PA', state: 'PA', policyType: 'Personal Excess', cause: 'LC03', exposures: [{ coverageLabel: ['Personal Excess Liability', 'Bodily Injury Liability'] }] },
   IM:    { policyVar: 'POLICY_IM_PA', state: 'PA', policyType: 'Inland Marine', cause: 'LC40', exposures: [{ coverageLabel: ['Inland Marine All Other', 'Inland Marine, All Other'] }] },
-  GL:    { policyVar: 'POLICY_GL_IA', state: 'IA', policyType: 'General Liability', cause: 'LC03', exposures: [{ coverageLabel: ['Premises/Operations', 'Products/Completed Operations'] }] },
+  GL:    { policyVar: 'POLICY_GL_IA', state: 'IA', policyType: 'General Liability', cause: 'LC03', exposures: [{ coverageLabel: ['Premises/Operations', 'Products/Completed Operations', 'Bodily Injury Liability'] }] },
   FARM:  { policyVar: 'POLICY_FARM_PA', state: 'PA', policyType: "Farmowner's", cause: 'LC01', exposures: [{ coverageLabel: ['Farmowners, Building', 'Farmowners Building'] }] },
   BOAT:  { policyVar: 'POLICY_BOAT_MI', state: 'MI', policyType: "Boatowner's", cause: 'LC40', exposures: [{ coverageLabel: ['Inland Marine, All Other', 'Inland Marine All Other'] }] },
-  CP:    { policyVar: 'POLICY_CP_PA', state: 'PA', policyType: 'Commercial Package', cause: 'LC03', exposures: [{ coverageLabel: 'Premises/Operations' }] },
-  BOP:   { policyVar: 'POLICY_BOP_PA', state: 'PA', policyType: 'BOP', cause: 'LC03', exposures: [{ coverageLabel: 'Business Liability' }] },
+  CP:    { policyVar: 'POLICY_CP_PA', state: 'PA', policyType: 'Commercial Package', cause: 'LC03', exposures: [{ coverageLabel: ['Premises/Operations', 'Bodily Injury Liability'] }] },
+  BOP:   { policyVar: 'POLICY_BOP_PA', state: 'PA', policyType: 'BOP', cause: 'LC03', exposures: [{ coverageLabel: ['Business Liability', 'Bodily Injury Liability'] }] },
   HO:    { policyVar: 'POLICY_HO_PA', state: 'PA', policyType: "Homeowner's", cause: 'LC01', exposures: [{ coverageLabel: 'Coverage A Dwelling' }] },
   DF:    { policyVar: 'POLICY_DF_PA', state: 'PA', policyType: 'Dwelling Fire', cause: 'LC01', exposures: [{ coverageLabel: 'Coverage A Dwelling' }] },
-  CEL:   { policyVar: 'POLICY_CEL_PA', state: 'PA', policyType: 'Commercial Excess', cause: 'LC03', exposures: [{ coverageLabel: 'Commercial Excess Liability' }] },
+  CEL:   { policyVar: 'POLICY_CEL_PA', state: 'PA', policyType: 'Commercial Excess', cause: 'LC03', exposures: [{ coverageLabel: ['Commercial Excess Liability', 'Bodily Injury Liability'] }] },
   WC:    { policyVar: 'POLICY_WC_PA', state: 'PA', policyType: "Workers' comp", cause: 'LC07', exposures: [{ coverageLabel: "Workers' Compensation And Employers' Liability" }] },
 };
 
@@ -114,29 +120,64 @@ const KINDS = {
 // User: …" — CONFIRMED in claimLifecycleHelper.assignClaim). Read it BEFORE navigating anywhere else.
 async function savedAssignment(page) {
   const body = await page.locator('body').innerText().catch(() => '');
-  return {
-    group: ((body.match(/Assigned Group:\s*([^\n]+)/i) || [])[1] || '').trim(),
-    user: ((body.match(/Assigned User:\s*([^\n]+)/i) || [])[1] || '').trim(),
-  };
+  let group = ((body.match(/Assigned Group:\s*([^\n]+)/i) || [])[1] || '').trim();
+  let user = ((body.match(/Assigned User:\s*([^\n]+)/i) || [])[1] || '').trim();
+  // Some LOBs (WC) land on the claim Summary instead of New Claim Saved — read the info bar "Adj: User (Group)".
+  if (!group) {
+    const adj = body.match(/Adj:\s*([^\n(]+?)\s*\(([^)\n]+)\)/);
+    if (adj) { user = user || adj[1].trim(); group = adj[2].trim(); }
+  }
+  return { group, user };
+}
+
+// Policies from the team's claim inventory (the spreadsheet OneInc / SmartCOMM / the E2E pool use): a real claim of the
+// same LOB + state proves the policy exists in the cloud tier, and its loss date + 2 days is inside the policy term.
+// The .env lists hold many policies the cloud tier doesn't have (legacy numbers, expired terms), so the inventory goes
+// first and the .env rotation is the fallback. REG_POLICY_FROM_INVENTORY=0 turns it off.
+const INVENTORY_PREFIX = {
+  PA_OH: 'PA-OH-', PA_WI: 'PA-WI-', PA: 'PA-PA-', CA_DE: 'CA-DE-', CA: 'CA-PA-', WC_MI: 'WC-MI-', PEL: 'PXL-PA-',
+  IM: 'IMP-PA-', GL: 'GL-', FARM: 'FOP-PA-', BOAT: 'BT-MI-', CP: 'CPP-PA-', BOP: 'BOP-PA-', HO: 'HO-PA-', DF: 'DFP-PA-',
+  CEL: 'CXL-PA-', WC: 'WC-PA-',
+};
+let inventoryRows;
+function inventoryPolicies(kind) {
+  const prefix = INVENTORY_PREFIX[kind];
+  if (!prefix || process.env.REG_POLICY_FROM_INVENTORY === '0') return [];
+  try { inventoryRows = inventoryRows || require('../smartComm/testDataService').getAllRecords(); } catch (e) {
+    console.log(`Claim inventory not readable (${String(e.message).split('\n')[0]}) — using the .env policy list`);
+    inventoryRows = [];
+  }
+  const fmt = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+  const seen = new Set();
+  return inventoryRows
+    .filter((r) => String(r.claimNumber || '').startsWith(prefix) && r.policyNumber && !isNaN(new Date(r.lossDate)))
+    .sort((a, b) => new Date(b.lossDate) - new Date(a.lossDate)) // newest losses first — current terms
+    .filter((r) => !seen.has(String(r.policyNumber)) && seen.add(String(r.policyNumber)))
+    .map((r) => { const d = new Date(r.lossDate); d.setDate(d.getDate() + 2); return { policy: String(r.policyNumber), lossDate: fmt(d > yesterday ? yesterday : d), basedOn: r.claimNumber }; });
 }
 
 // FNOL for any KIND. opts: { assignmentType, lossCause, exposures, withExposures=true }. Returns { cn, group, user }.
-// Retries with the next policy in the env-var rotation, like financialRules.newClaim.
+// Tries inventory policies first, then the env-var rotation, like financialRules.newClaim.
 async function fileClaim(page, kind, tag, opts = {}) {
   const k = KINDS[kind];
   if (!k) throw new Error(`unknown claim kind ${kind}`);
-  if (!String(process.env[k.policyVar] || process.env[`${k.policyVar}_${B.TIER.toUpperCase()}`] || '').trim()) {
-    throw new W.Blocked(`no ${kind} policy configured — set ${k.policyVar} in ClaimCenter-Automation/.env`);
+  const inv = inventoryPolicies(kind);
+  if (!inv.length && !(envVal(k.policyVar) || envVal(`${k.policyVar}_${B.TIER.toUpperCase()}`))) {
+    throw new W.Blocked(`no ${kind} policy — none in the claim inventory (${INVENTORY_PREFIX[kind] || 'n/a'}) and ${k.policyVar} not set in ClaimCenter-Automation/.env`);
   }
   let last;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       await B.loginToClaimCenter(page);
-      const policyNumber = B.getNextPolicy(k.policyVar, tag);
+      const fromInv = inv[attempt];
+      if (!fromInv && !(envVal(k.policyVar) || envVal(`${k.policyVar}_${B.TIER.toUpperCase()}`))) throw last || new W.Blocked(`no more ${kind} policies to try`);
+      const policyNumber = fromInv ? fromInv.policy : B.getNextPolicy(k.policyVar, tag);
+      if (fromInv) console.log(`${tag}: policy ${fromInv.policy} from claim inventory (${fromInv.basedOn}), loss date ${fromInv.lossDate}`);
       const cn = await completeFNOL(page, {
         policyNumber, policyEnvVar: k.policyVar, policyType: k.policyType,
         lossDetails: {
-          lossDate: B.getTestLossDate(1, policyNumber), lossState: B.getLossState(policyNumber, k.state),
+          lossDate: fromInv ? fromInv.lossDate : B.getTestLossDate(1, policyNumber), lossState: B.getLossState(policyNumber, k.state),
           lossCauseCode: k.cause, lossDescription: `Regression ${tag}`,
           assignmentType: opts.assignmentType || '', lossCause: opts.lossCause || '',
         },
@@ -155,7 +196,17 @@ async function fileClaim(page, kind, tag, opts = {}) {
       last = e;
       if (e && e.name === 'Blocked') throw e;
       console.log(`${tag}: FNOL attempt ${attempt + 1} failed (${String(e.message).split('\n')[0].slice(0, 140)}) — next policy`);
-      await page.goto(B.BASE_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+      // A draft wizard left open made the next page.goto hang for 60 s, so attempts 2-3 died on navigation, not the
+      // policy (2026-11-10). Cancel the wizard (accepting its "unsaved work" confirm) before navigating.
+      const accept = (d) => d.accept().catch(() => {});
+      page.on('dialog', accept);
+      await page.getByRole('button', { name: /^Cancel$/i }).first().click({ timeout: 3000 }).catch(() => {});
+      await page.getByRole('button', { name: /^(OK|Yes)$/i }).first().click({ timeout: 2000 }).catch(() => {});
+      // A legacy policy lookup still running server-side holds the session, so every navigation queues behind it (TC011
+      // IMP-9400001 / TC013 FOP-0011661, 2026-11-10). Start a fresh session; the next attempt logs in again.
+      await page.context().clearCookies().catch(() => {});
+      await page.goto(B.BASE_URL, { waitUntil: 'commit', timeout: 90000 }).catch(() => {});
+      page.off('dialog', accept);
     }
   }
   throw last;
@@ -207,7 +258,7 @@ async function pooledClaim(page, kind, tag, opts = {}) {
 
 // A claim to work on: the env var's claim when set, else a shared registry claim (PA/HO/WC), else a fresh FNOL.
 async function claimFor(page, ti, envVar, kind, tag) {
-  const given = String(process.env[envVar] || '').trim();
+  const given = envVal(envVar);
   let cn;
   if (given) {
     await B.loginToClaimCenter(page);
@@ -442,7 +493,28 @@ async function activities(page, cn, re) {
   return rows.filter((r) => re.test(r));
 }
 
+// ISO is a card TAB on Loss Details (Details | ISO), not a left-nav item - findField never saw it (2026-11-10). Opens it
+// and reads "Status / Date sent to ISO / Last response from ISO"; with send=true presses "Send To ISO" when Status is None.
+async function isoTab(page, cn, { send = false } = {}) {
+  await B.openExistingClaim(page, cn);
+  await A.openLossDetailsGeneral(page);
+  const id = await page.evaluate(() => { const e = [...document.querySelectorAll('[id]')].filter((x) => x.offsetParent && (x.innerText || '').trim() === 'ISO' && !/MenuLinks/.test(x.id)); return e.length ? e[e.length - 1].id : null; });
+  if (id) { await page.locator(`[id="${id}"]`).click(); await page.waitForTimeout(3000); }
+  const body = await bodyText(page);
+  // Tab text reads "ISO\nStatus\nStatus\nNone\nDate sent to ISO\n<date>\nLast response from ISO\n<resp>" (blank values
+  // simply leave the next label on the following line).
+  const LABELS = /^(Status|Date sent to ISO|Last response from ISO)$/i;
+  const after = (re) => { const m = body.match(re); const v = m ? m[1].trim() : ''; return LABELS.test(v) ? '' : v; };
+  const r = { status: after(/Status\s*\n\s*Status\s*\n\s*([^\n]*)/), sent: after(/Date sent to ISO\s*\n\s*([^\n]*)/i), resp: after(/Last response from ISO\s*\n\s*([^\n]*)/i), body, pressed: false };
+  if (send && /^none$/i.test(r.status)) {
+    const b = page.getByRole('button', { name: /^Send To ISO$/i }).first();
+    if (await b.isVisible().catch(() => false)) { await b.click(); await page.waitForTimeout(4000); r.pressed = true; }
+  }
+  return r;
+}
+
 module.exports = {
+  isoTab,
   CATALOG, BY_ID, RESULTS_DIR, RUN_ID, idOf, meta, saveResult, hooks, need, external, blockable,
   KINDS, fileClaim, pooledClaim, poolFresh, claimFor, savedAssignment, claimNumberFormat,
   nav, bodyText, field, action, editAndUpdate, searchClaims, runBatchProcess, openAdmin, activities,
