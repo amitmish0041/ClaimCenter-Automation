@@ -59,11 +59,25 @@ module.exports = (api) => {
   const P1 = `${DIRTY.primary.first} ${DIRTY.primary.last}`;
   const P2 = `${DIRTY.secondary.first} ${DIRTY.secondary.last}`;
   const NAMES = ['Insured First Name', 'Insured Last Name', 'CoInsured First Name', 'CoInsured Last Name', 'Payment Mailing Address', 'Additional Text Field 3', 'Additional Text Field 8'];
-  const DIRTY_PAY = (amount) => [pc('addDirtyContacts'), ...VAL([{ open: 'full' }, { payee: P1 }, { joint: [{ who: P2 }] }, { next: true }, { reserve: 'open' },
+  const DIRTY_PAY = (amount) => [pc('addDirtyContacts'), ...VAL([{ open: 'full' }, { payee: P1 }, { joint: [{ who: P2 }] }, pc('sendTaxIdRow', 0), { next: true }, { reserve: 'open' },
     { step2: { transactionType: 'Partial Payment', amount } }], null), op('escalateChecks', amount), pc('oneIncPayment', { fields: NAMES, amount, waitMin: 20 })];
   const CLEAN_NOTE = `New PA auto claim (shared by the cleansing cases). Payee "${P1}" (claim-only person; address ${JSON.stringify(DIRTY.primary.address)}) with joint payee "${P2}"; the payment is submitted, sent to OneInc (Financials Escalation batch) and read on the OneInc staging portal. `;
   add('GCCM-1013/INT/TC-115', 'INT_CLEAN', DIRTY_PAY('1.61'), [V('OneInc Insured First Name', { value: /^JOHN5$/i }), V('OneInc CoInsured First Name', { value: /^MKE$/i })],
     CLEAN_NOTE + 'PCON / SCON first names "jo#hn$5" / "m!ke%" must arrive as "JOHN5" / "MKE" (only letters, digits, space, hyphen, period and apostrophe kept).');
+  add('GCCM-1013/INT/TC-116', 'INT_CLEAN', DIRTY_PAY('1.62'), [V('OneInc Insured Last Name', { value: /^O'BRIEN-X$/i })],
+    CLEAN_NOTE + 'PCON last name (a person, PCONBusiness = N) "o’b%ri*en-x" with the plain apostrophe must arrive as "O\'BRIEN-X".'.replace('’', "'"));
+  add('GCCM-1013/INT/TC-118', 'INT_CLEAN', DIRTY_PAY('1.63'), [V('OneInc CoInsured Last Name', { value: /^SMITH\.JR$/i })],
+    CLEAN_NOTE + 'SCON last name (a person, SCONBusiness = N) "sm~it%h.jr" must arrive as "SMITH.JR".');
+  // ClaimCenter itself drops the quotes and < > from a contact's address line when the contact is saved (it stored
+  // '12 main st & rear', CONFIRMED 2026-11-11); the "&" reaches the payment, so the check is that none of " & < > is sent.
+  add('GCCM-1013/INT/TC-123', 'INT_CLEAN', DIRTY_PAY('1.64'), [V('OneInc Payment Mailing Address', { value: /^(?!.*["&<>]).*12 MAIN ST/i })],
+    CLEAN_NOTE + 'PMA street "12 \\"main\\" st & <rear>" (stored by ClaimCenter as "12 main st & rear") must reach OneInc with no quotation marks, ampersands or chevrons.');
+  add('GCCM-1013/INT/TC-124', 'INT_CLEAN', DIRTY_PAY('1.65'), [V('OneInc Payment Mailing Address', { value: /,\s*LANCASTER\s*,/i })],
+    CLEAN_NOTE + 'City "lan%cas*ter" must arrive as "LANCASTER" (% and * are not in the allowed set).');
+  add('GCCM-1013/INT/TC-125', 'INT_CLEAN', DIRTY_PAY('1.66'), ['Insured First Name', 'Insured Last Name', 'CoInsured First Name', 'CoInsured Last Name', 'Payment Mailing Address']
+    .map((f) => V(`OneInc ${f}`, { value: /^(?=.*[A-Z])[^a-z]*$/ })), CLEAN_NOTE + 'Every name and address value is entered in lower case on ClaimCenter and must reach OneInc in CAPS.');
+  add('GCCM-1013/INT/TC-126', 'INT_CLEAN', DIRTY_PAY('1.67'), [V('OneInc Payment Mailing Address', { value: /\|\s*UNIT 7/i })],
+    CLEAN_NOTE + 'The payee address has two lines ("12 main st & rear" / "unit 7"): OneInc must receive them joined by a pipe ("…|UNIT 7").');
 
   // ── OneInc status / feedback shown in ClaimCenter (existing TEST payments; profiles/oneIncPortal.js) ─────────────────
   // portalChecks.oneIncCheck reads the payment's state on the OneInc portal and opens the ClaimCenter check behind it.

@@ -54,10 +54,10 @@ async function oneIncPayment(page, { fields = [], amount = '', waitMin = 0 } = {
 
 // INT.018–031 payload cleansing: two claim-only people whose names / address carry characters the OneInc request must not
 // (names: only [A-Za-z0-9 -.'] survive; street: no quotes, &, < >; city: no % * & / ~ |), in lower case (INT.029 CAPS) and
-// with two address lines (INT.030 pipe). Created once per claim (no-op when already there). Role Covered Party (payable).
+// with two address lines (INT.030 pipe). Created once per claim (no-op when already there). Role Other (claim-level: "Covered Party" is offered only against the policy, which files the person as a policy contact — not listed on the claim, not a payee; CONFIRMED 2026-11-11).
 const DIRTY = {
-  primary: { first: 'jo#hn$5', last: "o'b%ri*en-x", role: 'Covered Party', address: { line1: '12 "main" st & <rear>', line2: 'unit 7', city: 'lan%cas*ter', zip: '17603' } },
-  secondary: { first: 'm!ke%', last: 'sm~it&h.jr', role: 'Covered Party', address: { line1: '12 main st', city: 'lancaster', zip: '17603' } },
+  primary: { first: 'jo#hn$5', last: "o'b%ri*en-x", role: 'Other', address: { line1: '12 "main" st & <rear>', line2: 'unit 7', city: 'lan%cas*ter', zip: '17603' } },
+  secondary: { first: 'm!ke%', last: 'sm~it%h.jr', role: 'Other', address: { line1: '12 main st', city: 'lancaster', zip: '17603' } },
 };
 async function addDirtyContacts(page) {
   for (const k of ['primary', 'secondary']) await W.addClaimPersonContact(page, DIRTY[k]);
@@ -140,4 +140,14 @@ async function showNotes(page) {
   return `${Object.keys(m).length} noted field(s) shown`;
 }
 
-module.exports = { underwritingCompany, oneIncPayment, addDirtyContacts, DIRTY, oneIncCheck, reopenCheck, noteField, showNotes };
+// Joint payees of type "Other": CC requires exactly one row ticked under "Which 'vendor' or 'other' Tax ID should be assigned
+// to payment?" ("must contain unique values", CONFIRMED 2026-11-11) — tick row `i` (default the primary payee).
+async function sendTaxIdRow(page, i = 0) {
+  const box = page.locator(`input[name$="NewCheckPayeeDVPayeesLV-${i}-ExtSendTaxIDToPMS"]`).first();
+  if (!await box.count()) throw new W.Blocked('no "Which vendor or other Tax ID" column on the joint payee grid');
+  if (!await box.isChecked().catch(() => false)) await box.check({ force: true }).catch(() => box.click({ force: true }));
+  await W.settle(page, 1200);
+  return `Tax ID row ${i} ticked`;
+}
+
+module.exports = { underwritingCompany, oneIncPayment, addDirtyContacts, DIRTY, oneIncCheck, reopenCheck, noteField, showNotes, sendTaxIdRow };
