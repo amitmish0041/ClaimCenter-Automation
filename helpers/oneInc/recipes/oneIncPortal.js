@@ -225,4 +225,17 @@ module.exports = (api) => {
   add('GCCM-1013/VBR/TC-099', 'WC_PA', [{ call: ['setupA.setLossDetailAnswers', { 'Employment Status': '<none>' }] },
     ...VAL([...FULL_PAYMENTS('claimant', 'open'), { step2: { transactionType: 'Partial Payment', amount: '1.37' } }], /Employment Status must be selected in Loss Details/i)], [],
   'New PA WC claim with Employment Status left blank (Loss Details); EnableWCEmploymentStatusValidation is Yes on TEST (read 2026-11-11). A Full Check must stop at Finish with "Employment Status must be selected in Loss Details."');
+
+  // ── Payee e-mail flow (OneInc "Issued a Digital Payment" → Accept Payment), user direction 2026-11-11 ──────────────
+  // The new claim's contacts carry the QA mailbox (contactEmails.js, amitmishra@ since 2026-11-11), so OneInc's payee
+  // e-mails land in this machine's Outlook (helpers/oneInc/oneIncEmail.js). A Full Check to the claimant goes out as a
+  // digital payment (ClaimsPay Type "Contact(s)"); the Financials Escalation batch sends it; the Issued e-mail's Accept
+  // Payment link opens the OneInc payee portal. The accept step itself is written once a live e-mail has been seen.
+  const em = (fn, ...a) => ({ call: [`oneIncEmail.${fn}`, ...a] });
+  add('GCCM-1013/UIF/TC-013', 'INT_CLEAN', [em('markStart'),
+    ...VAL([...FULL_PAYMENTS('claimant', 'open'), { step2: { transactionType: 'Partial Payment', amount: '1.71' } }], null),
+    op('escalateChecks', '1.71'), pc('oneIncPayment', { fields: ['Payment Status', 'Payment Method'], amount: '1.71', waitMin: 20 }),
+    em('waitEmail', { kind: 'issued', waitMin: 45 }), em('openAcceptPayment'), em('acceptPayment', 'Direct Deposit')],
+  [V('OneInc issued e-mail', { value: /Accept Payment link present/ })],
+  'New PA auto claim (claimant e-mail = QA mailbox). $1.71 Full Check to the claimant, sent to OneInc; waits for the OneInc "Issued a Digital Payment" e-mail in Outlook, opens Accept Payment and (to be built from the live portal) accepts by Direct Deposit; then the ClaimCenter ClaimsPay Method Id must be filled. Runs only on the machine whose Outlook holds the QA mailbox.');
 };

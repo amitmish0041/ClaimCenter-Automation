@@ -81,8 +81,6 @@ async function createPendingInvoice(page, { amount = '1.00', vendorTaxId = '02-0
   await W.select(page, 'Default Cost Category', 'Other').catch(() => W.select(page, 'Default Cost Category', 1));
   await W.fill(page, 'Payment #', inv);
   await W.select(page, 'Approval Workflow', 1);
-  // Required ("Missing required field \"Payment Type\"", 2026-11-11): Partial when offered, else the first option.
-  await W.select(page, 'Payment Type', 'Partial').catch(() => W.select(page, 'Payment Type', 1)).catch(() => {});
   // Item: this claim, its first Claim Cost reserve line, the amount.
   await page.locator('[id$="BulkInvoiceItemsLV_tb-Add"]').first().click();
   await W.settle(page, 2500);
@@ -96,6 +94,14 @@ async function createPendingInvoice(page, { amount = '1.00', vendorTaxId = '02-0
   if (!line) throw new W.Blocked(`bulk invoice item: claim ${claim} offers no reserve line (${opts.map((o) => o.t).join(', ')})`);
   await rl.selectOption(line.v);
   await W.settle(page, 2500);
+// The item row's Payment Type (required: "Missing required field \"Payment Type\"", 2026-11-11; not in the header):
+  // Partial when offered, else the first real option.
+  const pt = page.locator('select[name*="BulkInvoiceItemsLV-0-"][name*="PaymentType" i]').first();
+  if (await pt.count()) {
+    const o = await pt.locator('option').evaluateAll((os) => os.map((x) => ({ v: x.value, t: x.textContent.trim() })));
+    const pick = o.find((x) => /partial/i.test(x.t)) || o.find((x) => x.v && !/<none>/i.test(x.t));
+    if (pick) { await pt.selectOption(pick.v); await W.settle(page, 1500); }
+  } else await W.select(page, 'Payment Type', 'Partial').catch(() => {});
   await page.locator('input[name$="BulkInvoiceItemsLV-0-BulkInvoiceItemsLV_Amount"]').first().fill(amount);
   await page.keyboard.press('Tab');
   await W.settle(page, 1500);
