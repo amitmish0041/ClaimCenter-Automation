@@ -59,6 +59,20 @@ const DIRTY = {
   primary: { first: 'jo#hn$5', last: "o'b%ri*en-x", role: 'Other', address: { line1: '12 "main" st & <rear>', line2: 'unit 7', city: 'lan%cas*ter', zip: '17603' } },
   secondary: { first: 'm!ke%', last: 'sm~it%h.jr', role: 'Other', address: { line1: '12 main st', city: 'lancaster', zip: '17603' } },
 };
+// Claim-only companies the suite creates (testData's contact item builds them on a fresh claim): the adverse carrier of
+// a subrogation payment (CPD.029 — ClaimsPay Type "Subrogation-Contact NOT in Address Book").
+const COMPANIES = {
+  subroCarrier: { name: 'ACME ADVERSE MUTUAL INS CO', role: 'Other', taxId: '99-1110001' },
+  // INT.020 / INT.022: business payees (PCONBusiness / SCONBusiness = Y) whose names carry characters outside the business
+  // set [a-zA-Z0-9 !@#?();:=,{}[]"'+*^$_-.&/\] — % ~ | < > ` (ClaimCenter itself refuses & and / in payee names).
+  dirtyBiz1: { name: 'acme% roof~ing <co>', role: 'Other', taxId: '99-1110002' },
+  dirtyBiz2: { name: 'beta| paving` llc', role: 'Other', taxId: '99-1110003' },
+};
+// The two dirty business payees (INT.020 / INT.022) on this claim (no-op once there).
+async function addDirtyCompanies(page) {
+  for (const k of ['dirtyBiz1', 'dirtyBiz2']) await W.addClaimCompanyContact(page, COMPANIES[k]);
+  return `companies "${COMPANIES.dirtyBiz1.name}" + "${COMPANIES.dirtyBiz2.name}"`;
+}
 async function addDirtyContacts(page) {
   for (const k of ['primary', 'secondary']) await W.addClaimPersonContact(page, DIRTY[k]);
   return `payees "${DIRTY.primary.first} ${DIRTY.primary.last}" + joint "${DIRTY.secondary.first} ${DIRTY.secondary.last}"`;
@@ -89,8 +103,10 @@ async function oneIncCheck(page, { status = '.', method = '.', amount = '', clai
   const num = /^\d+$/.test(info['Transaction ID/Check #'] || '') ? info['Transaction ID/Check #'] : '';
   await W.openClaim(page, claim);
   let opened = '';
-  if (num) opened = await K.openCheck(page, { number: num });
-  else {
+  // Older checks are listed under the OneInc number (7000002610); newer ones under ClaimCenter's own reference
+  // (8200005345 for OneInc 7000002886, CONFIRMED 2026-11-11) — so the number is tried first, the Payment Identifier after.
+  if (num) opened = await K.openCheck(page, { number: num }).catch(() => '');
+  if (!opened) {
     // Matched exactly by the check's "Payment Identifier" (= the portal's CR Tracking Number), newest same-amount check first.
     const amt = String(info.Amount).replace(/[^0-9.]/g, '');
     const cands = (await K.checkRows(page)).filter((r) => String(r.amount).replace(/[^0-9.]/g, '') === amt).reverse();
@@ -140,6 +156,25 @@ async function showNotes(page) {
   return `${Object.keys(m).length} noted field(s) shown`;
 }
 
+// A vendor as OneInc holds it (Business/Vendor Report), found by TIN (digits) or name. `until` = { field, re }: poll up to
+// `waitMin` minutes until that field matches (a ContactManager change reaches OneInc through CreateVendor). Each of
+// `fields` becomes an observed field "OneInc Vendor <field>".
+async function oneIncVendor(page, { tin = '', name = '', fields = ['BusinessName', 'Tin', 'BillingStreet', 'City', 'DateModified'], until = null, waitMin = 0 } = {}) {
+  const deadline = Date.now() + waitMin * 60e3;
+  let v = null;
+  for (;;) {
+    let rows;
+    try { rows = await P.vendors({ tin, name }); } catch (e) { throw new W.Blocked(e.message); }
+    v = rows[0] || null;
+    const ok = v && (!until || new RegExp(until.re, 'i').test(String(v[until.field] || '')));
+    if (ok || Date.now() > deadline) break;
+    await page.waitForTimeout(60000);
+  }
+  if (!v) throw new W.Blocked(`vendor ${tin || name} is not on OneInc's Business/Vendor Report`);
+  for (const f of fields) await observe(page, `OneInc Vendor ${f}`, v[f] == null || v[f] === '' ? '(blank)' : String(v[f]));
+  return `OneInc vendor ${v.BusinessName} (${v.BusinessID})`;
+}
+
 // Joint payees of type "Other": CC requires exactly one row ticked under "Which 'vendor' or 'other' Tax ID should be assigned
 // to payment?" ("must contain unique values", CONFIRMED 2026-11-11) — tick row `i` (default the primary payee).
 async function sendTaxIdRow(page, i = 0) {
@@ -170,4 +205,4 @@ async function payeeRowType(page, i, type) {
   return `row ${i} Type = ${type}`;
 }
 
-module.exports = { underwritingCompany, oneIncPayment, addDirtyContacts, DIRTY, oneIncCheck, reopenCheck, noteField, showNotes, sendTaxIdRow, payeeRowType };
+module.exports = { underwritingCompany, oneIncPayment, oneIncVendor, addDirtyContacts, addDirtyCompanies, DIRTY, COMPANIES, oneIncCheck, reopenCheck, noteField, showNotes, sendTaxIdRow, payeeRowType };

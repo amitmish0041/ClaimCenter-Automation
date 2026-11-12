@@ -168,6 +168,10 @@ module.exports = (api) => {
   add('GCCM-1003/VBR/TC-107', 'MS_PA_PD', QUICK_CC('2500.00', PD), [NOT_SHOWN(VBR008)], PD_NOTE + 'Quick Payment from that reserve row. Boundary: exactly $2,500.00. ' + SUBMITS);
   add('GCCM-763/VBR/TC-025', 'MS_PA_BIG', FULL_CC('3000.00', VEH), [NOT_SHOWN(VBR008)], VEH_NOTE + SUBMITS);
   add('GCCM-1003/VBR/TC-108', 'MS_PA_BIG', QUICK_CC('3000.00', VEH), [NOT_SHOWN(VBR008)], VEH_NOTE + 'Quick Payment from that reserve row. ' + SUBMITS);
+  // VBR.010 positive — a check over $1,000 WITH a claim document linked submits with no error (user approval 2026-11-11 to
+  // run the cases held back as "admin" ones; these two need no admin change, only a $1,500 TEST payment).
+  add('GCCM-763/VBR/TC-029', 'MS_PA_BIG', FULL_CC('1500.00', VEH), [OUT(/^submitted/i)], VEH_NOTE + 'VBR.010: $1,500 Full Check with the claim document linked must submit with no error. ' + SUBMITS);
+  add('GCCM-1003/VBR/TC-112', 'MS_PA_BIG', QUICK_CC('1500.00', VEH), [OUT(/^submitted/i)], VEH_NOTE + 'VBR.010: $1,500 Quick Payment with the claim document linked must submit with no error. ' + SUBMITS);
 
   // ════ VBR.011 — expense check cannot exceed $99,999 ("Must do a manual check for full amount") ═══════════════════
   const VBR011 = /manual check for full amount/i;

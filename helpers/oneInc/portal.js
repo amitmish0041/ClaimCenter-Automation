@@ -127,4 +127,23 @@ async function payment({ crTracking = '', checkNumber = '', claim = '', amount =
   return info;
 }
 
-module.exports = { page, payments, payment, PortalUnavailable };
+// Reports › Business/Vendor Report (UI/BusinessVendorReport): vendors OneInc received through CreateVendor (ContactManager
+// vendors — BAIKOW LEGAL LLC is BusinessID "ab:145846", Tin "020725566", CONFIRMED 2026-11-11). Opened in its own tab of
+// the signed-in window so a payment search in progress is not disturbed. Returns the raw rows ({ BusinessName, Tin,
+// BusinessID, BillingStreet, City, BillingState, BillingPostalCode, DateModified, … }).
+async function vendors({ name = '', tin = '' } = {}) {
+  const main = await page();
+  const tab = await main.context().newPage();
+  try {
+    await tab.goto(HOME.replace(/\/UI\/Reports$/, '/UI/BusinessVendorReport'), { waitUntil: 'domcontentloaded' });
+    await tab.locator('#SearchButton').waitFor({ timeout: 30000 });
+    await tab.fill('#BusinessName', name);
+    await tab.fill('#Tin', tin);
+    await tab.click('#SearchButton');
+    await tab.waitForTimeout(3000);
+    await tab.waitForFunction(() => window.jQuery && jQuery('.k-grid').data('kendoGrid') && !document.querySelector('.k-loading-mask'), null, { timeout: 60000 }).catch(() => {});
+    return await tab.evaluate(() => { const g = jQuery('.k-grid').data('kendoGrid'); return g ? g.dataSource.data().toJSON() : []; });
+  } finally { await tab.close().catch(() => {}); }
+}
+
+module.exports = { page, payments, payment, vendors, PortalUnavailable };

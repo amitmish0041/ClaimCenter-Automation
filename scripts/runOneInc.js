@@ -409,6 +409,21 @@ function annotate(r, story, readiness) {
       const left = await require('../helpers/oneInc/contactManager').restoreVendors(pages[w]).catch((e) => `restore failed: ${e.message.split('\n')[0]}`);
       if (left) log(`[OneInc] ${tc.scenarioId}: ContactManager restore — ${String(left).slice(0, 200)}`);
     }
+    // A user field a case changed (CPD.002 approver email) is put back whatever the result (helpers/oneInc/adminUsers.js ledger).
+    if ([...(RECIPES[tc.scenarioId].steps || []), ...(RECIPES[tc.scenarioId].checks || [])].some((s) => s && Array.isArray(s.call) && /^adminUsers.setUserEmail/.test(String(s.call[0])))) {
+      const left = await require('../helpers/oneInc/adminUsers').restoreUsers(pages[w]).catch((e) => 'restore failed: ' + String(e.message).slice(0, 200));
+      log(`[OneInc] ${tc.scenarioId}: user restore — ${String(left).slice(0, 200)}`);
+    }
+    // A role permission a case removed (GCCM-791) is put back whatever the result (helpers/oneInc/adminRoles.js ledger).
+    if ([...(RECIPES[tc.scenarioId].steps || []), ...(RECIPES[tc.scenarioId].checks || [])].some((s) => s && Array.isArray(s.call) && /^adminRoles\.removePermission/.test(String(s.call[0])))) {
+      const left = await require('../helpers/oneInc/adminRoles').restoreRoles(pages[w]).catch((e) => `restore failed: ${e.message.split('\n')[0]}`);
+      log(`[OneInc] ${tc.scenarioId}: role restore — ${String(left).slice(0, 200)}`);
+    }
+    // Same for a bulk invoice a case created (VBR.099): deleted whatever the result (helpers/oneInc/bulkInvoice.js ledger).
+    if ([...(RECIPES[tc.scenarioId].steps || []), ...(RECIPES[tc.scenarioId].checks || [])].some((s) => s && Array.isArray(s.call) && /^bulkInvoice\.createPendingInvoice/.test(String(s.call[0])))) {
+      const left = await require('../helpers/oneInc/bulkInvoice').deletePending(pages[w]).catch((e) => `delete failed: ${e.message.split('\n')[0]}`);
+      log(`[OneInc] ${tc.scenarioId}: bulk invoice cleanup — ${String(left).slice(0, 200)}`);
+    }
     results.set(tc.scenarioId, annotate({ ...r, automation: 'AUTOMATED' }, story, readiness));
     log(`[OneInc] (${n}/${toRun.length}) ${tc.scenarioId}: ${r.status}${r.reason ? ' — ' + String(r.reason).slice(0, 220) : ''}`);
     run.done = (run.done || 0) + 1;
@@ -434,5 +449,7 @@ function annotate(r, story, readiness) {
   // Per-case Word documents (Reports\CaseReviews\<id>.docx) — latest result of every case, steps + screenshots, for qTest
   // (2026-10-22). Only cases whose latest result is new get rewritten, so this takes seconds after a small run.
   try { await require('./oneIncCaseReviews').build({ log }); } catch (e) { log(`[OneInc] case documents not written: ${e.message}`); }
-  logStream.end();
+  // Exit explicitly: the OneInc portal helper stays attached to the shared portal window over CDP, which kept the process
+  // alive after DONE (2026-11-11 — chained batches never started).
+  logStream.end(() => process.exit(0));
 })().catch((e) => { console.error('[OneInc] fatal:', e.stack || e.message); process.exit(1); });

@@ -1,6 +1,8 @@
 /**
  * helpers/oneInc/contactEmails.js — every new OneInc test claim: all claim contacts get the QA mailbox as their e-mail, so
  * OneInc payment notifications never go to a real customer (user direction 2026-11-03, standing step for all tests).
+ * Mailbox moved from Amanda Hess to Amit Mishra 2026-11-11 (user direction) so the OneInc payment e-mails can be read in
+ * Outlook on the automation machine and their links used for the accept-payment cases.
  *
  * Per contact on Parties Involved (contacts linked to the Address Book are read-only in ClaimCenter and are skipped):
  *  1. Edit › E-mail "Main" (person) / "Main Email" (company) = QA_EMAIL, Update;
@@ -13,7 +15,7 @@
 const W = require('./wizardDriver');
 const { readScreen, norm } = require('./screenReader');
 
-const QA_EMAIL = process.env.ONEINC_CONTACT_EMAIL || 'amandahess@donegalgroup.com';
+const QA_EMAIL = process.env.ONEINC_CONTACT_EMAIL || 'amitmishra@donegalgroup.com';
 const QA_MOBILE = process.env.ONEINC_CONTACT_MOBILE || '717-555-0142';
 const TIER = (process.env.CC_TIER || 'test').toLowerCase();
 const NAME_CELLS = '[id*="PeopleInvolvedDetailedLV-"][id$="-Name"]';

@@ -19,6 +19,11 @@ const D = (why) => ({ automation: 'NEEDS_DATA', reason: why });
 
 const REASONS = {
 
+  // ── GCCM-791 / 1013 VBR.097 — admin access the TEST logins do not have (checked 2026-11-11, user approved the changes) ──
+  ...Object.fromEntries(['GCCM-791/TC/TC-001', 'GCCM-791/TC/TC-002'].map((id) => [id, M('Needs a ClaimCenter login with Administration › Users and Security › Roles (add/edit roles and permissions). The TEST admin login has no Roles screen (Administration offers only Requiring Approval, Business Settings, Utilities, Testing Pages — checked 2026-11-11). Give such a login and the case is automated with the permission change reverted afterwards.')])),
+  'GCCM-791/TC/TC-004': M('Needs a TEST login that HAS the Bulk Invoice Payer role but NOT the "Create OneInc Bulk Invoice" permission (or a Roles-admin login to remove it temporarily). The standard TEST user has the permission (OneInc is offered — TC-003).'),
+  'GCCM-1013/VBR/TC-099': M('Needs the EnableWCEmploymentStatusValidation script parameter switched to Yes. Script parameters are not on the Administration menu of the TEST admin login (checked 2026-11-11) — needs a login with Script Parameters access (the switch is reverted afterwards).'),
+
   // ── INT.001/002 company name + disclaimer: automated on the OneInc portal (recipes/oneIncPortal.js) except these two companies ──
   ...Object.fromEntries(['GCCM-1003/INT/TC-202', 'GCCM-803/TC/TC-058', 'GCCM-1003/INT/TC-207', 'GCCM-803/TC/TC-063'].map((id) => [id, D('Needs a TEST claim whose policy has the Underwriting Company is Sheboygan Falls Insurance Company (TC-202 / TC-058) or Mountain States Commercial Insurance Company (TC-207 / TC-063) — none found 2026-11-11 (OneInc portal payments + Policy screens of WI / AZ / NM / UT claims). Give a policy or claim number and the case runs like the other companies (recipes/oneIncPortal.js).')])),
 

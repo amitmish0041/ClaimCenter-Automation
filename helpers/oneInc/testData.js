@@ -313,8 +313,11 @@ const D = {
     check: async (page) => ((await contactsList(page)).some((t) => t.toUpperCase().includes(name.toUpperCase())) ? '' : `${name} is not on Parties Involved`),
     // The payload-cleansing payees (portalChecks.DIRTY) are claim-only people the suite creates itself (fresh claims only).
     build: (() => {
-      const spec = Object.values(require('./portalChecks').DIRTY).find((d) => `${d.first} ${d.last}`.toUpperCase() === name.toUpperCase());
-      return spec ? async (page) => { await require('./wizardDriver').addClaimPersonContact(page, spec); return `added claim-only contact "${name}"`; } : null;
+      const PC = require('./portalChecks');
+      const spec = Object.values(PC.DIRTY).find((d) => `${d.first} ${d.last}`.toUpperCase() === name.toUpperCase());
+      if (spec) return async (page) => { await require('./wizardDriver').addClaimPersonContact(page, spec); return `added claim-only contact "${name}"`; };
+      const co = Object.values(PC.COMPANIES).find((c) => c.name.toUpperCase() === name.toUpperCase());
+      return co ? async (page) => { await require('./wizardDriver').addClaimCompanyContact(page, co); return `added claim-only company "${name}"`; } : null;
     })(),
     manual: how,
   }),

@@ -275,6 +275,29 @@ async function addClaimPersonContact(page, { first, last, role = 'Covered Party'
   return setContactRoleAndUpdate(page, name, role);
 }
 
+// Parties Involved › New Contact › Company: a claim-only company (NOT in the Address Book) with a Pennsylvania address
+// and `role` on this claim — e.g. the adverse carrier of a subrogation payment (CPD.029). No-op when already there.
+async function addClaimCompanyContact(page, { name, role = 'Other', address = {}, taxId = '' }) {
+  await navigate(page, 'parties');
+  await page.locator('tr[id*="LV-0-"]:visible').first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+  const listed = await page.evaluate(() => [...document.querySelectorAll('[id*="PeopleInvolvedDetailedLV-"][id$="-Name"]')].map((e) => (e.innerText || '').trim().toUpperCase()));
+  if (listed.includes(name.toUpperCase())) return false;
+  await page.locator('[id$="ClaimContacts_CreateNewContactButton"]').first().click();
+  await page.waitForTimeout(1500);
+  await page.getByRole('menuitem', { name: /^Company$/ }).first().click();
+  await settle(page, 4000);
+  const a = { line1: '200 Market St', city: 'Harrisburg', state: 'Pennsylvania', zip: '17101', ...address };
+  await fill(page, 'Name', name);
+  await select(page, 'Country', 'United States').catch(() => {});
+  await fill(page, 'Address 1', a.line1);
+  await fill(page, 'City', a.city);
+  await select(page, 'State', a.state);
+  await fill(page, 'ZIP Code', a.zip);
+  // A company with role Other needs a Tax ID (EIN) ("Missing required field", CONFIRMED 2026-11-11).
+  if (taxId) await fill(page, 'Tax ID (EIN)', taxId);
+  return setContactRoleAndUpdate(page, name, role);
+}
+
 // Incident #index: the loan/mortgage question = Yes with a loan row naming `lienholderName` (same ExtLienholderInformationLV
 // grid on both, CONFIRMED 2026-10-21). kind 'vehicle': "Is there a loan on the Vehicle?"; 'property' (HO fixed-property
 // incident): "Is there a mortgage on this property?".
@@ -1092,7 +1115,7 @@ async function currentStep(page) {
 }
 
 module.exports = {
-  Blocked, fillTotalAmount, settle, inWizard, openClaim, newPaymentErrorText, repairSurcharging, assignClaimAndExposures, abilityToPayErrors, abilityToPay, repairVehicleVins, lienholders, addClaimContactWithRole, addClaimPersonContact, setContactRoleAndUpdate, addVehicleLoan, addIncidentLoan, addDigitalPaymentAccount, repairClaimantAddress, getParties, optionsOf, select, fill, answer, answerUnansweredNo, clickButton,
+  Blocked, fillTotalAmount, settle, inWizard, openClaim, newPaymentErrorText, repairSurcharging, assignClaimAndExposures, abilityToPayErrors, abilityToPay, repairVehicleVins, lienholders, addClaimContactWithRole, addClaimPersonContact, addClaimCompanyContact, setContactRoleAndUpdate, addVehicleLoan, addIncidentLoan, addDigitalPaymentAccount, repairClaimantAddress, getParties, optionsOf, select, fill, answer, answerUnansweredNo, clickButton,
   visibleMenuItems, openActionsMenu, closeMenus, navigate, openFinancialsRowMenu,
   openPayment, cancelWizard, selectPayee, addJointPayees, selectVendorPayee, openPayeeSearch, searchAddressBookVendor, vendors, selectReserveLine, availableReserves, fillLineItem, completePaymentsStep, next, nextFillingServicePeriod, fillRequiredEmpties, serverError, currentStep,
   warningsOnly,

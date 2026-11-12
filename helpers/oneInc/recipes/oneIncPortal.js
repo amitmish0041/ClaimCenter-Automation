@@ -124,4 +124,105 @@ module.exports = (api) => {
     EXN('Stopped (mailed check, not PayPal/Venmo)') + 'ClaimCenter must show the check Voided. The Workplan is read for the record (activities digital_payment_stoppending_reminder / digital_payment_reminder have no fixed subject to match). ' + RO);
   add('GCCM-787/TC/TC-028', 'ONEINC_CANCELLED', [OIC({ status: '^Cancelled$', method: 'Undefined|Customer' })], [V('OneInc Status', { value: /^Cancelled$/i }), V('Check status', { value: /^Voided$/i }), op('workplan')],
     EXN('Cancelled before the payee chose a payment method (Undefined - Let Customer PickUp)') + 'ClaimCenter must show the check Voided. ' + RO);
+  // ── CPD.029 — payee = Adverse Carrier / Other Insurance Company (subrogation outbound), single payee ─────────────
+  // Not an integration case (classifier matched "Subro Outbound"): the ClaimsPay defaults are on the payment screen.
+  // The carrier is a claim-only company (NOT in the Address Book) added to the new claim (portalChecks.COMPANIES).
+  const SUBRO = require('../portalChecks').COMPANIES.subroCarrier.name;
+  const ADVERSE = 'Adverse Carrier/Other Insurance Company';
+  const SUBRO_CHECKS = [V('ClaimsPay Type', { value: /Subrogation.*not in address book/i }), V('ClaimsPay Method', { value: /^Mailed Check$/i })];
+  const SUBRO_NOTE = `New PA auto claim; payee = claim-only company "${SUBRO}" (not in the Address Book), payee Type "${ADVERSE}". `;
+  add('GCCM-799/CPD-Joint/TC-84', 'AUTO_PA', [{ open: 'full' }, { payee: SUBRO }, { select: ['Type', ADVERSE] }, { next: true }, { reserve: 'open' }, { step2: {} }, { next: true }, { expectStep: 3 }],
+    SUBRO_CHECKS, SUBRO_NOTE + 'Full Check, Step 3.');
+  add('GCCM-1003/CPD-Joint/TC-255', 'AUTO_PA', [{ open: 'quick', needOpenReserve: true }, { payee: SUBRO }, { select: ['Type', ADVERSE] }, { step2: {} }, { next: true }, { expectStep: 2 }],
+    SUBRO_CHECKS, SUBRO_NOTE + 'Quick Payment, Step 2.');
+  // ── CreateVendor / business cleansing on OneInc's Business/Vendor Report (ContactManager vendor BAIKOW LEGAL LLC) ────
+  // ContactManager edits are TEST-only, recorded in the shared restore ledger first and reverted at the end (contactManager.js,
+  // user authorization 2026-10-22); runOneInc also restores after a BLOCKED case. CreateVendor carried BAIKOW's address change
+  // to OneInc on 11/06 (DateModified 11:59 PST) — the case waits up to 20 min for it.
+  const cmv = (fn, ...a) => ({ call: [`contactManager.${fn}`, ...a] });
+  const BAIKOW = 'BAIKOW LEGAL LLC';
+  const BAIKOW_TAX = '02-0725566';
+  const VENDOR_NOTE2 = `ContactManager vendor ${BAIKOW} (Tax ID ${BAIKOW_TAX}; OneInc BusinessID ab:145846), read on OneInc's Business/Vendor Report. `;
+  add('GCCM-795/INT/TC-001', 'ONEINC_ISSUED', [cmv('restoreVendors'), cmv('setCompanyAddress', BAIKOW, BAIKOW_TAX, 'B'),
+    pc('oneIncVendor', { tin: '020725566', until: { field: 'BillingStreet', re: '1195 RIVER' }, waitMin: 20 })],
+  [V('OneInc Vendor BillingStreet', { value: /1195 RIVER RD/i }), V('OneInc Vendor City', { value: /MARIETTA/i }), cmv('restoreVendors')],
+  VENDOR_NOTE2 + 'Its primary address is changed in ContactManager (1195 River Rd, Marietta); the update must reach OneInc (CreateVendor) with the new address. Restored afterwards.');
+  add('GCCM-1013/INT/TC-127', 'ONEINC_ISSUED', [cmv('restoreVendors'), cmv('setCompanyAddress', BAIKOW, BAIKOW_TAX, '1195 "River" Rd & <B>||Marietta|Lancaster|PA|17547'),
+    pc('oneIncVendor', { tin: '020725566', until: { field: 'BillingStreet', re: '1195' }, waitMin: 20 })],
+  [V('OneInc Vendor BillingStreet', { value: /^(?!.*["&<>]).*1195s+RIVERs+RD/i }), cmv('restoreVendors')],
+  VENDOR_NOTE2 + 'BUS_Street set in ContactManager to 1195 "River" Rd & <B>: OneInc must receive it without quotation marks, ampersands or chevrons. Restored afterwards.');
+  add('GCCM-1013/INT/TC-122', 'ONEINC_ISSUED', [pc('oneIncVendor', { tin: '020725566' })], [V('OneInc Vendor Tin', { value: /^020725566$/ })],
+    VENDOR_NOTE2 + `Its Tax ID is "${BAIKOW_TAX}" in ContactManager; OneInc must hold it with the hyphen removed (020725566). Read-only. (OneInc's own "BusinessID" column holds the Address Book id ab:145846, which has no spaces/hyphens/commas either.)`);
+
+  // ── GCCM-791 UIF.001 — OneInc payment method on a new Bulk Invoice (user with the Create OneInc Bulk Invoice permission) ──
+  // The standard TEST login has Desktop › Bulk Invoices and its new invoice offers OneInc (oneinc_gc, CONFIRMED 2026-11-11).
+  // The permission itself cannot be viewed or changed with the TEST logins (the admin login has no Roles screen), so
+  // TC-001 / 002 / 004 stay manual (caseReasons.js).
+  add('GCCM-791/TC/TC-003', 'ONEINC_ISSUED', [{ call: ['bulkInvoice.newInvoicePaymentMethods'] }],
+    [V('Bulk Invoice Payment Methods', { value: /oneinc/i }), { call: ['bulkInvoice.cancelInvoice'] }],
+    'Logged in as the standard TEST user (Bulk Invoices on the Desktop): Bulk Invoices › Create New › Check Details › Payment Method must offer OneInc. Read-only: the new invoice is cancelled.');
+
+  // ── INT.020 / INT.022 — business payee names (PCON / SCON last name when PCONBusiness / SCONBusiness = Y) ─────────────
+  const CO = require('../portalChecks').COMPANIES;
+  const BIZ_FIELDS = ['Insured First Name', 'Insured Last Name', 'CoInsured First Name', 'CoInsured Last Name', 'Vendor Name', 'Additional Text Field 3', 'Additional Text Field 8'];
+  const BIZ_PAY = (amount) => [pc('addDirtyCompanies'), ...VAL([{ open: 'full' }, { payee: CO.dirtyBiz1.name }, { joint: [{ who: CO.dirtyBiz2.name, type: 'Additional Claimant' }] }, pc('payeeRowType', 0, 'Additional Claimant'),
+    { next: true }, { reserve: 'open' }, { step2: { transactionType: 'Partial Payment', amount } }], null), op('escalateChecks', amount), pc('oneIncPayment', { fields: BIZ_FIELDS, amount, waitMin: 20 })];
+  const BIZ_NOTE = `New PA auto claim (shared by the cleansing cases). Payee = claim-only company "${CO.dirtyBiz1.name}" with joint payee claim-only company "${CO.dirtyBiz2.name}" (both businesses), submitted and sent to OneInc; read on the OneInc staging portal. `;
+  add('GCCM-1013/INT/TC-117', 'INT_CLEAN', BIZ_PAY('1.68'), [V('OneInc Insured Last Name', { value: /^ACME ROOFING CO$/i })],
+    BIZ_NOTE + 'PCON last name of a business payee: "%", "~" and "< >" are not in the business set and must be removed — "ACME ROOFING CO".');
+  add('GCCM-1013/INT/TC-119', 'INT_CLEAN', BIZ_PAY('1.69'), [V('OneInc CoInsured Last Name', { value: /^BETA PAVING LLC$/i })],
+    BIZ_NOTE + 'SCON last name of a business joint payee: "|" and "`" must be removed — "BETA PAVING LLC".');
+
+  // ── VBR.099 — a payment on an exposure with bulk payments pending (GCCM-1013 VBR TC-101; admin-type change approved 2026-11-11) ──
+  // A $1.00 Draft bulk invoice with one item on the claim's Claim Cost line is created (bulkInvoice.createPendingInvoice,
+  // ledger on the share) and deleted at the end (and by runOneInc after a BLOCKED case).
+  const BULK = /There are bulk payments currently pending for this exposure/i;
+  add('GCCM-1013/VBR/TC-101', 'AUTO_PA', [{ call: ['bulkInvoice.createPendingInvoice'] }, { open: 'full' }, { payee: 'claimant' }, { next: true }, { reserve: 'open' }, { step2: {} }, { click: 'Next' }],
+    [{ message: { re: BULK, present: true } }, { call: ['bulkInvoice.deletePending'] }],
+    'New PA auto claim: a $1.00 Draft bulk invoice (Desktop › Bulk Invoices, payee BAIKOW LEGAL LLC) gets one item on the Claim Cost line of the claim; a Full Check on that line must stop on Next with the pending-bulk-payments error. The bulk invoice is deleted afterwards.');
+
+  // ── GCCM-791 UIF.001 — the "Create OneInc Bulk Invoice" permission (Roles admin: run with CC_ADMIN_USER = su) ───────────
+  // Bulk Invoice Payer holds it today; TC-002 removes it and adds it back through the UI (the role ends as it started);
+  // TC-004 removes it, reads the standard user's new bulk invoice, and puts it back. Ledger + restore (adminRoles.js).
+  const ar = (fn, ...a) => ({ call: [`adminRoles.${fn}`, ...a] });
+  const ROLE = 'Bulk Invoice Payer';
+  const PERM = 'Create OneInc Bulk Invoice';
+  const RN = 'Administration › Users & Security › Roles, as the Roles admin login (su). ';
+  add('GCCM-791/TC/TC-001', 'ONEINC_ISSUED', [ar('addRolePermissionOptions')], [V('New Role permission options', { value: /Create OneInc Bulk Invoice/ })],
+    RN + 'Add Role › permissions › Add: the Permission dropdown must offer "Create OneInc Bulk Invoice". The new role is cancelled.');
+  add('GCCM-791/TC/TC-002', 'ONEINC_ISSUED', [ar('restoreRoles'), ar('removePermission', ROLE, PERM), ar('addPermission', ROLE, PERM), ar('rolePermissions', ROLE)],
+    [V(`${ROLE} permissions`, { value: /Create OneInc Bulk Invoice/ }), ar('restoreRoles')],
+    RN + `"${PERM}" (already on ${ROLE}) is removed and then added back through Edit › Add › Permission › Update; the saved role must list it. The role ends as it started.`);
+  add('GCCM-791/TC/TC-004', 'ONEINC_ISSUED', [ar('restoreRoles'), ar('removePermission', ROLE, PERM), ar('standardUserBulkInvoiceMethods')],
+    [V('Standard user: Bulk Invoice Payment Methods', { value: /^(?![sS]*oneinc)/i }), ar('restoreRoles')],
+    RN + `"${PERM}" is removed from ${ROLE} for the check, then the standard TEST user (a Bulk Invoice Payer) opens Bulk Invoices › Create New: OneInc must not be offered. The permission is put back right after.`);
+
+  // ── CPD.002 — payment approver with / without email & phone (Admin › Users, as su in a separate session) ───────────────
+  // The approver of the standard user's payments, Keith Eisenhart (keiteise), has NO email and NO phone (Profile, CONFIRMED
+  // 2026-11-11), so the positive cases need no change; the negative ones give him the case's test e-mail (approver@example.com)
+  // for the check and blank it again (adminUsers ledger + restore). $5.00 is over the standard user's $1.00 authority, so
+  // the payment needs the approver.
+  const au = (fn, ...a) => ({ call: [`adminUsers.${fn}`, ...a] });
+  const APPROVER = 'keiteise';
+  const OTHER_MAILED = /Other.*Mailed Check/i;
+  const QUICK5 = [{ open: 'quick', needOpenReserve: true }, { payee: 'claimant' }, { step2: { transactionType: 'Partial Payment', amount: '5.00' } }, { next: true }, { expectStep: 2 }];
+  const FULL5 = [{ open: 'full' }, { payee: 'claimant' }, { next: true }, { reserve: 'open' }, { step2: { transactionType: 'Partial Payment', amount: '5.00' } }, { next: true }, { expectStep: 3 }];
+  const NO_CONTACT = V(`${APPROVER} email/phone`, { value: /Email: (blank).*Primary Phone: (blank).*Work: (blank).*Mobile: (blank)/ });
+  const APN = 'New PA auto claim; claimant payee, $5.00 (over the standard user’s $1.00 authority, so the payment needs the approver Keith Eisenhart). ';
+  add('GCCM-1003/CPD/TC-210', 'AUTO_PA', QUICK5, [V('ClaimsPay Type', { value: OTHER_MAILED }), V('ClaimsPay Method', { value: /check/i }), au('userContact', APPROVER), NO_CONTACT],
+    APN + 'Approver has no email and no phone: ClaimsPay Type must default to Other / Mailed Check and Method to Check. Quick Payment.');
+  add('GCCM-759/CPD/TC-033', 'AUTO_PA', FULL5, [V('ClaimsPay Type', { value: OTHER_MAILED }), V('ClaimsPay Method', { value: /check/i }), au('userContact', APPROVER), NO_CONTACT],
+    APN + 'Approver has no email and no phone: ClaimsPay Type must default to Other / Mailed Check and Method to Check. Full Check.');
+  add('GCCM-1003/CPD/TC-211', 'AUTO_PA', [au('restoreUsers'), au('setUserEmail', APPROVER, 'approver@example.com'), ...QUICK5],
+    [V('ClaimsPay Type', { value: /^(?![sS]*Other.*Mailed Check)/i }), au('restoreUsers')],
+    APN + 'Approver given the email approver@example.com for the check (blanked again after): ClaimsPay Type must NOT default to Other / Mailed Check by this rule. Quick Payment.');
+  add('GCCM-759/CPD/TC-034', 'AUTO_PA', [au('restoreUsers'), au('setUserEmail', APPROVER, 'approver@example.com'), ...FULL5],
+    [V('ClaimsPay Type', { value: /^(?![sS]*Other.*Mailed Check)/i }), au('restoreUsers')],
+    APN + 'Approver given the email approver@example.com for the check (blanked again after): ClaimsPay Type must NOT default to Other / Mailed Check by this rule. Full Check.');
+
+  // ── VBR.097 — WC payment with no Employment Status while EnableWCEmploymentStatusValidation = Yes ───────────────────────
+  // The switch is already Yes on TEST (Admin › Utilities › Script Parameters, read 2026-11-11), so nothing is changed.
+  add('GCCM-1013/VBR/TC-099', 'WC_PA', [{ call: ['setupA.setLossDetailAnswers', { 'Employment Status': '<none>' }] },
+    ...VAL([...FULL_PAYMENTS('claimant', 'open'), { step2: { transactionType: 'Partial Payment', amount: '1.37' } }], /Employment Status must be selected in Loss Details/i)], [],
+  'New PA WC claim with Employment Status left blank (Loss Details); EnableWCEmploymentStatusValidation is Yes on TEST (read 2026-11-11). A Full Check must stop at Finish with "Employment Status must be selected in Loss Details."');
 };
