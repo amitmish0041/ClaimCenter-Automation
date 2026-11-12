@@ -5,7 +5,8 @@
  * part (Accept Payment with the texted code: PayPal / Venmo / Physical check / reject) is done later, per slot, from the
  * ledger <TestData>/payee-prep-<tier>.json.
  *
- *   ONEINC_ALLOW_FINISH=1 ONEINC_CONTACT_MOBILE=<mobile> node scripts/oneIncPayeePrep.js [--only <slot,…>] [--headless]
+ *   ONEINC_ALLOW_FINISH=1 ONEINC_CONTACT_MOBILE=<mobile> node scripts/oneIncPayeePrep.js [--only <slot,…>] [--claim <slot>=<claim>,…] [--headless]
+ *   --claim reuses a claim already made for that slot (no new FNOL).
  *
  * Never texts anyone: it stops once the check is with OneInc.
  */
@@ -47,9 +48,10 @@ async function payOne(page, claim, s) {
   const who = (await W.getParties(page)).insured || 'insured';
   await W.openPayment(page, 'actions');
   await W.selectPayee(page, 'insured');
-  if (s.joint) await X.addJoint(page, [{ who: '@person', type: 'Other' }]).catch((e) => log(`${s.slot}: joint payee not added (${e.message.split('\n')[0]})`));
+  if (s.joint) await W.addJointPayees(page, [{ who: process.env.PREP_JOINT_WHO || 'other', type: 'Other' }]).catch((e) => log(`${s.slot}: joint payee not added (${e.message.split('\n')[0]})`));
   await W.nextFillingServicePeriod(page);
   await W.selectReserveLine(page, 'open');
+  await W.answer(page, 'Payment for a total loss?', 'No').catch(() => {});
   await W.completePaymentsStep(page, { transactionType: 'Partial Payment', amount: s.amount });
   if (s.delivery) {
     await W.nextFillingServicePeriod(page).catch(() => {});
@@ -69,10 +71,13 @@ async function payOne(page, claim, s) {
   if (!todo.length) { log('nothing to prepare — every slot is in the ledger'); return; }
   const runId = `PayeePrep_${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}`;
   log(`${todo.length} slot(s): ${todo.map((s) => s.slot).join(', ')} — filing ${todo.length} new INT_CLEAN claim(s)`);
-  await testClaims.provision('INT_CLEAN', todo.length, { log: (m) => console.log(m), headless: !!arg('headless', false), runId });
-  const made = (claimPicker.readPool().INT_CLEAN || []).filter((e) => e.usable && e.status === 'Unused' && e.reservedFor === runId).map((e) => e.claim);
+  const given = Object.fromEntries(String(arg('claim', '') || '').split(',').filter(Boolean).map((x) => x.split('=')));
+  const toFile = todo.filter((t) => !given[t.slot]);
+  if (toFile.length) await testClaims.provision('INT_CLEAN', toFile.length, { log: (m) => console.log(m), headless: !!arg('headless', false), runId });
+  const fresh = toFile.length ? (claimPicker.readPool().INT_CLEAN || []).filter((e) => e.usable && e.status === 'Unused' && e.reservedFor === runId).map((e) => e.claim) : [];
+  const made = todo.map((t) => given[t.slot] || fresh.shift());
   log(`claims: ${made.join(', ') || 'none'}`);
-  testClaims.markUsed('INT_CLEAN', made, { runId, scenarios: todo.slice(0, made.length).map((s, i) => ({ claim: made[i], id: `payee-prep:${s.slot}` })) });
+  testClaims.markUsed('INT_CLEAN', made.filter(Boolean), { runId, scenarios: todo.slice(0, made.length).map((s, i) => ({ claim: made[i], id: `payee-prep:${s.slot}` })) });
   const browser = await chromium.launch({ headless: !!arg('headless', false) });
   const page = await (await browser.newContext({ viewport: { width: 1600, height: 1000 } })).newPage();
   page.setDefaultTimeout(20000);
