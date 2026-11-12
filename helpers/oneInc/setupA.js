@@ -520,6 +520,10 @@ async function setMedicareBeneficiary(page, value = 'Yes') {
       await W.settle(page, 1500);
       const d = findField(await readScreen(page), 'Cause of Loss Description');
       if (d && d.kind === 'select' && !d.value.replace(/<none>/i, '')) await selectByLabel(page, 'Cause of Loss Description', /^(?!<none>).+/);
+      // Hospital / Discharge Date left to the generic filler (today) made the save throw a server error on
+      // WC-PA-01-26-0749381 (2026-11-12) — give them the loss date instead.
+      const dol = await page.evaluate(() => ((document.body.innerText || '').match(/DoL:\s*(\d{2}\/\d{2}\/\d{4})/) || [])[1]);
+      for (const l of ['Hospital Date', 'Discharge Date']) { const h = findField(await readScreen(page), l); if (dol && h && !h.value) await fillByLabel(page, l, dol).catch(() => {}); }
       if ((await fillRequiredOnEdit(page)).length === 0 && !d) break;
     } // else warnings only (birthdate / SSN): the next Update accepts them
   }
