@@ -69,7 +69,9 @@ async function waitEmail(page, { kind = 'issued', payee = '', waitMin = 30, sinc
 // The payee portal (cportaluat.oneinc.com), CONFIRMED 2026-11-11 from a live Issued e-mail (it arrived 1 minute after the
 // payment reached OneInc): 1 Identity Verification — "What is your claim number?" (#claimnumber, NEXT), then
 // "How should we send your verification code to (7**) ***-0142?" TEXT ME / CALL ME — the Mobile of the payee's Payment
-// Contact Details (contactEmails.js QA_MOBILE) — 2 Payment Details, 3 Payment Options, 4 Confirmations (not seen yet).
+// Contact Details (contactEmails.js QA_MOBILE; a company payee's own phone) — "We're texting … your 6-digit verification
+// code" (#verificationCode, NEXT) — 2 Payment Details "Is this information correct?" (agree checkbox, NO / YES) —
+// 3 Payment Options — 4 Confirmations "Your payment is on its way … A confirmation email will be sent to <email>" FINISH.
 const payeeText = async (p) => (await p.evaluate(() => document.body.innerText || '').catch(() => '')).replace(/\s+/g, ' ').trim();
 const payeeShot = async (p) => {
   const shot = path.join(require('./reportService').RESULTS_DIR, 'Evidence', `oneinc-payee-portal-${Date.now()}.png`);
@@ -104,16 +106,120 @@ async function openAcceptPayment(page) {
 // First step of an e-mail case: only e-mails arriving after this moment count.
 async function markStart(page) { page.__oneIncEmailSince = Date.now(); return `watching the inbox for OneInc e-mails from ${new Date().toLocaleTimeString()}`; }
 
-// Accept Payment on the OneInc payee portal with `method` (e.g. 'Direct Deposit'). Stops at the verification code: OneInc
-// texts / calls it to the payee's Mobile, which is the dummy 555 number on test claims — BLOCKED until the contacts carry
-// a phone whose code this machine can read (ONEINC_CONTACT_MOBILE) or OneInc gives UAT a fixed code. Steps 2-4 unbuilt.
-async function acceptPayment(page, method) {
-  const { ctx } = page.__oneIncPayee || {};
-  const seen = page.__oneIncPayeePortal;
-  if (ctx) await ctx.close().catch(() => {});
-  page.__oneIncPayee = null;
-  if (seen && /verification code/i.test(seen.text)) throw new W.Blocked(`Accept Payment with "${method}": the claim number was accepted, then OneInc wants a verification code sent by text / call to the payee's mobile ${(seen.text.match(/\(\d\*\*\) \*\*\*-\d{4}/) || ['(on file)'])[0]} (screenshot ${seen.shot})`);
-  throw new W.Blocked(`Accept Payment with "${method}" is not automated yet — the payee portal showed: ${seen ? `${seen.url.slice(0, 80)} — ${seen.text.slice(0, 200)} (screenshot ${seen.shot})` : 'nothing (not opened)'}`);
+// ── The verification code ────────────────────────────────────────────────────────────────────────────────────────────
+// OneInc texts a 6-digit code to the payee's Mobile (the claim's Payment Contact Details; ONEINC_CONTACT_MOBILE on new
+// claims). Whoever holds that phone hands it over with `node scripts/oneIncCode.js <code>` (writes CODE_FILE). The code
+// lasts about 2 minutes, so each text is waited on for ONEINC_CODE_WAIT_SEC (110) and re-sent up to ONEINC_CODE_TEXTS (3)
+// times; a code written before the text went out is ignored.
+const CODE_FILE = process.env.ONEINC_CODE_FILE || path.join(__dirname, '..', '..', 'results', 'oneInc', 'verification-code.txt');
+// Names are matched whole but case-insensitively: the buttons are upper-cased by CSS only (an exact 'TEXT ME' found
+// nothing, 2026-11-11).
+const whole = (s) => new RegExp(`^\\s*${s}\\s*$`, 'i');
+const btn = (p, name) => p.getByRole('button', { name: whole(name) }).first();
+const firstVisible = async (p, text) => {
+  const all = p.getByText(whole(text)); // the method cards exist twice in the DOM, one copy hidden
+  for (let i = 0; i < await all.count(); i++) if (await all.nth(i).isVisible().catch(() => false)) return all.nth(i);
+  return null;
+};
+async function passVerification(p, masked) {
+  const waitMs = (Number(process.env.ONEINC_CODE_WAIT_SEC) || 110) * 1000;
+  const texts = Number(process.env.ONEINC_CODE_TEXTS) || 3;
+  for (let n = 1; n <= texts; n++) {
+    fs.rmSync(CODE_FILE, { force: true });
+    await btn(p, 'TEXT ME').click();
+    await p.waitForTimeout(3000);
+    console.log(`[OneInc] verification code ${n}/${texts} texted to ${masked} — hand it over within ${Math.round(waitMs / 1000)} s: node scripts/oneIncCode.js <code>`);
+    let code = '';
+    for (const end = Date.now() + waitMs; Date.now() < end && !code;) {
+      code = (fs.existsSync(CODE_FILE) ? fs.readFileSync(CODE_FILE, 'utf8') : '').replace(/\D/g, '');
+      if (!code) await p.waitForTimeout(2000);
+    }
+    fs.rmSync(CODE_FILE, { force: true });
+    if (code) {
+      await p.fill('#verificationCode', code);
+      await btn(p, 'NEXT').click();
+      await p.waitForTimeout(6000);
+      if (/Is this information correct/i.test(await payeeText(p))) return n;
+    }
+    if (n < texts) { await btn(p, 'BACK').click().catch(() => {}); await p.waitForTimeout(3000); } // back to TEXT ME / CALL ME
+  }
+  throw new W.Blocked(`Accept Payment: no valid verification code was handed over (${texts} text(s) to ${masked}, ${Math.round(waitMs / 1000)} s each) — the payee portal showed: ${(await payeeText(p)).slice(0, 200)} (screenshot ${await payeeShot(p)})`);
 }
 
-module.exports = { inbox, markStart, waitEmail, openAcceptPayment, acceptPayment };
+// Payment Options (step 3), CONFIRMED 2026-11-11: cards Bank account / Debit card / PayPal / Venmo / "View more payment
+// methods" → Physical check. Bank account = Checking | Savings, #acc_number, #repeat_acc_number, #routing_num (SUBMIT
+// stays disabled until valid); Physical check = "Confirm your payment method … address on file" + SUBMIT.
+const METHODS = [
+  { re: /direct deposit|bank|ach|eft/i, name: 'Bank account',
+    pick: async (p) => {
+      await (await firstVisible(p, 'Bank account')).click();
+      await p.waitForTimeout(3000);
+      const eft = W.DUMMY_EFT; // the test bank account the suite already uses for ClaimCenter EFT
+      await p.locator('mat-radio-button', { hasText: eft.BankAccountType }).first().locator('label').first().click();
+      await p.fill('#acc_number', eft.BankAccountNumber);
+      await p.fill('#repeat_acc_number', eft.BankAccountNumber);
+      await p.fill('#routing_num', eft.BankRoutingNumber);
+      await p.locator('#routing_num').press('Tab');
+      await p.waitForTimeout(3000);
+    } },
+  { re: /check|mail/i, name: 'Physical check',
+    pick: async (p) => {
+      await (await firstVisible(p, 'View more payment methods')).click();
+      await p.waitForTimeout(2500);
+      await (await firstVisible(p, 'Physical check')).click();
+      await p.waitForTimeout(3000);
+    } },
+];
+
+// Accept Payment on the OneInc payee portal (opened by openAcceptPayment) with `method`: 'Direct Deposit' (Bank account)
+// or 'Check' (Physical check). TEXT ME → code → "Is this information correct?" (agree + YES) → the method → SUBMIT →
+// "Your payment is on its way" → FINISH. Observed "OneInc payee acceptance" = the Confirmations screen.
+async function acceptPayment(page, method = 'Check') {
+  const { ctx, p } = page.__oneIncPayee || {};
+  const seen = page.__oneIncPayeePortal;
+  if (!p) throw new W.Blocked('Accept Payment: the payee portal was not opened earlier in this case');
+  try {
+    const how = METHODS.find((m) => m.re.test(method));
+    if (!how) throw new W.Blocked(`Accept Payment with "${method}" is not automated (only Direct Deposit / Bank account and Check so far)`);
+    if (!/verification code/i.test(seen.text)) throw new W.Blocked(`Accept Payment: the payee portal did not ask for a verification code — it showed: ${seen.text.slice(0, 200)} (screenshot ${seen.shot})`);
+    const masked = (seen.text.match(/\(\d\*\*\) \*\*\*-\d{4}/) || ['the mobile on file'])[0];
+    await passVerification(p, masked);
+    await p.locator('mat-checkbox label').first().click(); // "I have read and agree to the Payment Authorization…"
+    await btn(p, 'YES').click();
+    await p.waitForTimeout(5000);
+    await how.pick(p);
+    for (let i = 0; i < 2 && !/on its way/i.test(await payeeText(p)); i++) { // Bank account may confirm once more
+      const submit = btn(p, 'SUBMIT');
+      if (!await submit.isEnabled().catch(() => false)) break;
+      await submit.click();
+      await p.waitForTimeout(8000);
+    }
+    const text = await payeeText(p);
+    const shot = await payeeShot(p);
+    if (!/on its way/i.test(text)) throw new W.Blocked(`Accept Payment with ${how.name}: not confirmed — the payee portal showed: ${text.replace(/^person /, '').slice(0, 300)} (screenshot ${shot})`);
+    await btn(p, 'FINISH').click().catch(() => {});
+    await p.waitForTimeout(3000);
+    return observe(page, 'OneInc payee acceptance', `${how.name}: ${(text.match(/Your payment is on its way.*?(?= FINISH|$)/) || [text.slice(0, 200)])[0]}`);
+  } finally {
+    if (ctx) await ctx.close().catch(() => {});
+    page.__oneIncPayee = null;
+  }
+}
+
+// After the acceptance OneInc reports the chosen method back to ClaimCenter: the check goes Requested → Issued and its
+// "Confirmed Payment Method" fills (Mailed Check seen within 10 minutes of a Physical check acceptance, 2026-11-11).
+// Re-reads the payment on the OneInc portal and its ClaimCenter check every minute (portalChecks.oneIncCheck: observed
+// "OneInc Status", "OneInc Payment Method", "Check status") until that field is filled; leaves the check open.
+async function waitAccepted(page, { amount = '', waitMin = 20 } = {}) {
+  const { readScreen, findField } = require('./screenReader');
+  const end = Date.now() + waitMin * 60000;
+  for (;;) {
+    const opened = await require('./portalChecks').oneIncCheck(page, { amount });
+    const method = String((findField(await readScreen(page), 'Confirmed Payment Method') || {}).value || '').trim();
+    if (method) return `${opened}; Confirmed Payment Method ${method}`;
+    if (Date.now() > end) throw new W.Blocked(`the ClaimCenter check shows no Confirmed Payment Method ${waitMin} min after the payee accepted (${opened})`);
+    await page.waitForTimeout(60000);
+  }
+}
+
+module.exports = { inbox, markStart, waitEmail, openAcceptPayment, acceptPayment, waitAccepted, CODE_FILE };

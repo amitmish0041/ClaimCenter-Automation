@@ -193,36 +193,80 @@ function writeRun(run, results, dirs) {
 //           counting only scenarios that run actually attempted (not the dev-pending / not-selected ones every run
 //           lists), newest first.
 // Cached until a run file is added or rewritten.
+//
+// Speed (2026-11-12): the run files live on a network share (253 files / 285 MB took 16 s to read, and the Runner
+// drops this module's memory every 5 minutes). Each run file's part of the answer — its run header and its attempted
+// results — is kept as a digest in a LOCAL file (ONEINC_AGG_CACHE_DIR, default ~/.claimcenter-runner), keyed by the
+// file's size + modified time, so only new or rewritten runs are read from the share. The file list itself is
+// re-checked at most every AGG_RECHECK_MS.
 const ATTEMPTED = (r) => r.automation === 'AUTOMATED' && ['PASS', 'FAIL', 'BLOCKED'].includes(r.status)
   && !/^Queued|not selected for this run/i.test(r.reason || '');
-let aggCache = { key: '', value: null };
+const AGG_VERSION = 1;
+const AGG_RECHECK_MS = 5000;
+const aggCacheFile = (root) => path.join(process.env.ONEINC_AGG_CACHE_DIR || path.join(require('os').homedir(), '.claimcenter-runner'),
+  `oneinc-runs-${require('crypto').createHash('md5').update(path.resolve(root).toLowerCase()).digest('hex').slice(0, 10)}.json`);
+function digestOf(d) {
+  const run = d.run || {};
+  const results = d.results || [];
+  const queued = results.filter((r) => /^Queued/.test(r.reason || '')).length;
+  return {
+    run: { runId: run.runId, startedAt: run.startedAt, finishedAt: run.finishedAt, durationMs: run.durationMs, scope: run.scope, complete: run.complete,
+      tier: (run.env || {}).tier, planned: run.planned, done: run.done, summary: run.summary, queued,
+      plannedCalc: results.filter((r) => r.automation === 'AUTOMATED' && r.reason !== 'Automated, not selected for this run').length },
+    att: results.filter(ATTEMPTED).map((r) => [r.scenarioId, r.status, r.reason || '', r.devNote || '', r.finishedAt || run.startedAt, r.story, r.name, r.claim || '']),
+  };
+}
+let aggCache = { root: '', key: '', value: null, checkedAt: 0, digests: null };
 function aggregate(root = RESULTS_DIR) {
   const dir = path.join(root, 'Reports');
+  if (aggCache.root === root && aggCache.value && Date.now() - aggCache.checkedAt < AGG_RECHECK_MS) return aggCache.value;
   if (!fs.existsSync(dir)) return { latest: {}, runs: [] };
   const files = fs.readdirSync(dir).filter((f) => /^OneInc_\d{8}_\d{6}_\w+\.json$/.test(f)).sort();
-  const key = files.map((f) => `${f}:${fs.statSync(path.join(dir, f)).mtimeMs}`).join('|');
-  if (aggCache.key === key && aggCache.value) return aggCache.value;
+  const stats = files.map((f) => { try { const st = fs.statSync(path.join(dir, f)); return { f, m: st.mtimeMs, s: st.size }; } catch (_) { return null; } }).filter(Boolean);
+  const key = stats.map((x) => `${x.f}:${x.m}:${x.s}`).join('|');
+  if (aggCache.root === root && aggCache.key === key && aggCache.value) { aggCache.checkedAt = Date.now(); return aggCache.value; }
+  let digests = aggCache.root === root ? aggCache.digests : null;
+  if (!digests) {
+    try { const c = JSON.parse(fs.readFileSync(aggCacheFile(root), 'utf8')); digests = c.version === AGG_VERSION ? c.files : {}; } catch (_) { digests = {}; }
+  }
+  const next = {};
+  let changed = Object.keys(digests).length !== stats.length;
+  for (const x of stats) {
+    const have = digests[x.f];
+    if (have && have.m === x.m && have.s === x.s) { next[x.f] = have; continue; }
+    changed = true;
+    try { next[x.f] = { m: x.m, s: x.s, ...digestOf(JSON.parse(fs.readFileSync(path.join(dir, x.f), 'utf8'))) }; } catch (_) { /* half-written file: read it next time */ }
+  }
+  if (changed) {
+    try {
+      const file = aggCacheFile(root);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(`${file}.tmp`, JSON.stringify({ version: AGG_VERSION, files: next }));
+      fs.renameSync(`${file}.tmp`, file);
+    } catch (_) { /* the digest is only a shortcut */ }
+  }
   const latest = {};
   const runs = [];
-  for (const f of files) {
-    let d;
-    try { d = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (_) { continue; }
+  for (const x of stats) {
+    const d = next[x.f];
+    if (!d || !d.run || !d.run.runId) continue;
     const counts = { PASS: 0, FAIL: 0, BLOCKED: 0 };
     const byStory = {};
-    for (const r of d.results || []) {
-      if (!ATTEMPTED(r)) continue;
-      counts[r.status]++;
-      const s = byStory[r.story] || (byStory[r.story] = { PASS: 0, FAIL: 0, BLOCKED: 0 });
-      s[r.status]++;
-      latest[r.scenarioId] = { status: r.status, reason: r.reason || '', devNote: r.devNote || '', runId: d.run.runId,
-        at: r.finishedAt || d.run.startedAt, story: r.story, name: r.name, claim: r.claim || '' };
+    for (const [scenarioId, status, reason, devNote, at, story, name, claim] of d.att) {
+      counts[status]++;
+      const s = byStory[story] || (byStory[story] = { PASS: 0, FAIL: 0, BLOCKED: 0 });
+      s[status]++;
+      latest[scenarioId] = { status, reason, devNote, runId: d.run.runId, at, story, name, claim };
     }
-    runs.push({ runId: d.run.runId, startedAt: d.run.startedAt, durationMs: d.run.durationMs, scope: d.run.scope,
+    const r = d.run;
+    runs.push({ runId: r.runId, startedAt: r.startedAt, durationMs: r.durationMs, scope: r.scope,
       // A stopped run never writes complete=true: no update for 30 min = not running (2026-10-22).
-      complete: d.run.complete !== false || Date.now() - Date.parse(d.run.finishedAt || d.run.startedAt) > 30 * 60 * 1000, tier: (d.run.env || {}).tier, counts, byStory });
+      complete: r.complete !== false || Date.now() - Date.parse(r.finishedAt || r.startedAt) > 30 * 60 * 1000, tier: r.tier, counts, byStory,
+      // the run header as written (for "is a run in progress" without re-reading the run file)
+      finishedAt: r.finishedAt, completeFlag: r.complete, planned: r.planned, done: r.done, summary: r.summary, queued: r.queued, plannedCalc: r.plannedCalc });
   }
   runs.reverse();
-  aggCache = { key, value: { latest, runs } };
+  aggCache = { root, key, value: { latest, runs }, checkedAt: Date.now(), digests: next };
   return aggCache.value;
 }
 

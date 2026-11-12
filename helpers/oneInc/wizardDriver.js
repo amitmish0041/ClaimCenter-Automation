@@ -1118,5 +1118,5 @@ module.exports = {
   Blocked, fillTotalAmount, settle, inWizard, openClaim, newPaymentErrorText, repairSurcharging, assignClaimAndExposures, abilityToPayErrors, abilityToPay, repairVehicleVins, lienholders, addClaimContactWithRole, addClaimPersonContact, addClaimCompanyContact, setContactRoleAndUpdate, addVehicleLoan, addIncidentLoan, addDigitalPaymentAccount, repairClaimantAddress, getParties, optionsOf, select, fill, answer, answerUnansweredNo, clickButton,
   visibleMenuItems, openActionsMenu, closeMenus, navigate, openFinancialsRowMenu,
   openPayment, cancelWizard, selectPayee, addJointPayees, selectVendorPayee, openPayeeSearch, searchAddressBookVendor, vendors, selectReserveLine, availableReserves, fillLineItem, completePaymentsStep, next, nextFillingServicePeriod, fillRequiredEmpties, serverError, currentStep,
-  warningsOnly,
+  warningsOnly, DUMMY_EFT,
 };

@@ -235,7 +235,8 @@ module.exports = (api) => {
   add('GCCM-1013/UIF/TC-013', 'INT_CLEAN', [em('markStart'),
     ...VAL([...FULL_PAYMENTS('insured', 'open'), { step2: { transactionType: 'Partial Payment', amount: '1.71' } }], null),
     op('escalateChecks', '1.71'), pc('oneIncPayment', { fields: ['Payment Status', 'Payment Method'], amount: '1.71', waitMin: 20 }),
-    em('waitEmail', { kind: 'issued', waitMin: 45 }), em('openAcceptPayment'), em('acceptPayment', 'Direct Deposit')],
-  [V('OneInc issued e-mail', { value: /Accept Payment link present/ })],
-  'New PA auto claim (claimant e-mail = QA mailbox). $1.71 Full Check to the claimant, sent to OneInc; waits for the OneInc "Issued a Digital Payment" e-mail in Outlook, opens Accept Payment and (to be built from the live portal) accepts by Direct Deposit; then the ClaimCenter ClaimsPay Method Id must be filled. Runs only on the machine whose Outlook holds the QA mailbox.');
+    em('waitEmail', { kind: 'issued', waitMin: 45 }), em('openAcceptPayment'), em('acceptPayment', 'Direct Deposit'),
+    em('waitAccepted', { amount: '1.71', waitMin: 20 })],
+  [V('Confirmed Payment Method', { value: /\S/ }), V('ClaimsPay Method Id', { value: /\S/ })],
+  'New PA auto claim (insured\'s e-mail = QA mailbox, mobile = ONEINC_CONTACT_MOBILE). $1.71 Full Check to the insured, sent to OneInc; waits for the OneInc "Issued a Digital Payment" e-mail in Outlook, opens Accept Payment, passes the texted verification code (handed over with scripts/oneIncCode.js) and accepts by Direct Deposit (Bank account, the suite\'s test account); once ClaimCenter shows the Confirmed Payment Method the check must show a filled ClaimsPay Method Id. Runs only on the machine whose Outlook holds the QA mailbox, with someone holding the payee\'s phone.');
 };
