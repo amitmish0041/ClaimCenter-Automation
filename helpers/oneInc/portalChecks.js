@@ -67,6 +67,8 @@ const COMPANIES = {
   // set [a-zA-Z0-9 !@#?();:=,{}[]"'+*^$_-.&/\] — % ~ | < > ` (ClaimCenter itself refuses & and / in payee names).
   dirtyBiz1: { name: 'acme% roof~ing <co>', role: 'Other', taxId: '99-1110002' },
   dirtyBiz2: { name: 'beta| paving` llc', role: 'Other', taxId: '99-1110003' },
+  // 799 CPD-Mortgagee TC-78 (QA update 2026-11-11): a mortgagee payee that is NOT linked to an Address Book contact.
+  claimMortgagee: { name: 'QA CLAIM ONLY MORTGAGE CO', role: 'Lienholder/Mortgagee', taxId: '99-1110004' },
 };
 // The two dirty business payees (INT.020 / INT.022) on this claim (no-op once there).
 async function addDirtyCompanies(page) {

@@ -37,10 +37,11 @@ function readLedger() {
 const writeLedger = (l) => { fs.mkdirSync(path.dirname(LEDGER), { recursive: true }); fs.writeFileSync(LEDGER, JSON.stringify(l, null, 2)); };
 const fmt = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
 
-// 'past' | 'future' | 'none' | an explicit MM/DD/YYYY
+// 'past' | 'future' | 'today' | 'none' | an explicit MM/DD/YYYY
 function dateFor(when) {
   if (when === 'past') return '01/01/2020';
   if (when === 'future') { const d = new Date(); d.setFullYear(d.getFullYear() + 2); return fmt(d); }
+  if (when === 'today') return fmt(new Date());
   if (when === 'none') return '';
   return String(when);
 }

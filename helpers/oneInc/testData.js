@@ -54,7 +54,7 @@ const D = {
   // A vehicle-level coverage exposure added through Actions › New Exposure › Choose by Coverage › <vehicle> ›
   // <coverage> [› leaf], with Cause of Loss `cause`, claimant = insured, a new injury incident (workerF.addMedExposure,
   // CONFIRMED 2026-10-21 on DE Medical Benefits / PA Medical Expense / DE PIP › Wage Loss Benefits).
-  vehicleExposure: ({ coverage, leaf = null, cause, match }) => ({
+  vehicleExposure: ({ coverage, leaf = null, cause, match, tort = null }) => ({
     id: `exposure:${coverage}${leaf ? '>' + leaf : ''}`,
     label: `Exposure "${coverage}${leaf ? ' › ' + leaf : ''}" with Cause of Loss "${cause}"`,
     check: async (page) => {
@@ -63,7 +63,7 @@ const D = {
       const col = await exposureField(page, i, 'Cause of Loss');
       return new RegExp(cause, 'i').test(col) ? '' : `exposure /${src(match)}/ has Cause of Loss "${col || '?'}", not "${cause}"`;
     },
-    build: (page) => F().addMedExposure(page, { coverage, leaf, cause, existing: toRe(match) }),
+    build: (page) => F().addMedExposure(page, { coverage, leaf, cause, existing: toRe(match), tort }),
   }),
 
   // A property (HO) coverage exposure added through Actions › New Exposure › Choose by Coverage › <location> ›
@@ -444,7 +444,7 @@ const MANUAL_DATA = [
   { id: 'owner-no-info', label: 'Exposure owner with no first/last name, email, phone', cases: ['GCCM-763/VBR/TC-004', 'GCCM-1003/VBR/TC-086'], unblock: 'name such a user (candidate: Austin Acheson, Inactive Users — VBR.026 may fire first) (VBR.002)' },
   { id: 'pre-2013-dol', label: 'Policy with a pre-2013 loss date', cases: [], unblock: 'a 2012 policy in TEST (none exists)' },
   { id: 'emb-coverage', label: 'Policy with Extraordinary/Extended Medical Benefits coverage', cases: ['GCCM-763/VBR/TC-045', 'GCCM-763/VBR/TC-046', 'GCCM-763/VBR/TC-047', 'GCCM-1003/VBR/TC-128', 'GCCM-1003/VBR/TC-129', 'GCCM-1003/VBR/TC-130'], unblock: 'a TEST policy carrying EMB (VBR.016)' },
-  { id: 'paid-status', label: 'A prior payment in status "Paid"', cases: ['GCCM-763/VBR/TC-054', 'GCCM-763/VBR/TC-055', 'GCCM-763/VBR/TC-061', 'GCCM-763/VBR/TC-062', 'GCCM-1003/VBR/TC-137', 'GCCM-1003/VBR/TC-138', 'GCCM-1003/VBR/TC-144', 'GCCM-1003/VBR/TC-145'], unblock: 'decision: treat "Awaiting submission" as active, or wait for checks that issue (VBR.019/022)' },
+  { id: 'paid-status', label: 'A prior payment in status "Paid"', cases: ['GCCM-763/VBR/TC-055', 'GCCM-763/VBR/TC-062', 'GCCM-1003/VBR/TC-137', 'GCCM-1003/VBR/TC-138', 'GCCM-1003/VBR/TC-144', 'GCCM-1003/VBR/TC-145'], unblock: 'decision: treat "Awaiting submission" as active, or wait for checks that issue (VBR.019/022)' },
   { id: 'tax-id-valid-until', label: 'Vendor with Tax ID Valid Until in the past / future', cases: [], unblock: 'Contact Manager data (VBR.034) — manual' },
   { id: 'pa-tort-codes', label: 'Display names of Cause of Loss LC03 / LC09 / LC90', cases: ['GCCM-799/UIF/TC-006', 'GCCM-1003/UIF/TC-024'], unblock: 'BA: which Cause of Loss labels are LC03/LC09/LC90' },
 ];

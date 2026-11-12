@@ -109,7 +109,7 @@ async function fillInjuryPopup(page, claimant) {
 // Adds a medical exposure through Actions › New Exposure › Choose by Coverage › <vehicle> › <coverage> [› <leaf>]
 // with the given Cause of Loss (e.g. "Medical Benefits" = LC50), claimant = the insured, a new injury incident, then
 // Update. Idempotent: does nothing when an exposure row already matches `existing`.
-async function addMedExposure(page, { coverage = 'Medical Benefits', leaf = null, cause = 'Medical Benefits', existing = /Medical/i } = {}) {
+async function addMedExposure(page, { coverage = 'Medical Benefits', leaf = null, cause = 'Medical Benefits', existing = /Medical/i, tort = null } = {}) {
   testOnly('addMedExposure');
   const rows = await exposureRows(page);
   const have = rows.find((r) => existing.test(r.t));
@@ -136,6 +136,8 @@ async function addMedExposure(page, { coverage = 'Medical Benefits', leaf = null
   await selectIn(page, 'Claimant', ins ? new RegExp(`^${ins.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') : /./).catch(() => selectIn(page, 'Claimant', /./));
   await selectIn(page, 'Type', /^Insured$/).catch(() => {});
   await selectIn(page, 'Is Claimant Employed?', /^No$/).catch(() => {});
+  // PA liability exposures carry a required "Tort Option" (Full Tort | Limited Tort | Undetermined) — UIF.029 PA Tort Code.
+  if (tort) await selectIn(page, 'Tort Option', tort);
   await fillIn(page, 'Description', 'OneInc automation — LC50 Medical Benefits exposure');
   await fillIn(page, 'Policy Limit', '10000');
   // Injury incident (required)
