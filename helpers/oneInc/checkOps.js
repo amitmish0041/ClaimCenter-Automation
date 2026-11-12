@@ -134,7 +134,7 @@ async function createQuickCheck(page, { txn = 'Partial Payment', costType = 'cla
   gate('Creating a check');
   // A new check reaches "Requested" (voidable) only once OneInc acknowledges it — never on TEST (user confirmation
   // 2026-10-27). Stop before creating a payment that could not be used; ONEINC_VOIDABLE_NEW=1 once OneInc does respond.
-  if (requireVoidable && process.env.ONEINC_VOIDABLE_NEW !== '1') {
+  if (requireVoidable && process.env.ONEINC_VOIDABLE_NEW === '0') { // OneInc acknowledges TEST checks since 2026-11-12 — '0' turns the old guard back on
     throw new W.Blocked('needs a NEW voidable check: a check becomes "Requested" only after OneInc acknowledges it, which OneInc does not do on TEST (the Financials Escalation batch takes it only to Requesting). Set ONEINC_VOIDABLE_NEW=1 once OneInc processes TEST payments.');
   }
   const amt = amount || `0.${41 + Math.floor(Math.random() * 58)}`; // ≤ $1.00 approval authority (see createFullCheck)
@@ -170,6 +170,13 @@ async function createQuickCheck(page, { txn = 'Partial Payment', costType = 'cla
   // A new check waits in "Awaiting submission" until the Financials Escalation batch runs (then it becomes Requested).
   if (requireVoidable && row && /Awaiting submission/i.test(row.status)) {
     await escalateChecks(page, amt);
+    row = (await checkRows(page)).filter((r) => String(r.amount).replace(/[^0-9.]/g, '') === amt).slice(-1)[0];
+  }
+  // OneInc acknowledges a sent check within minutes on TEST (CONFIRMED 2026-11-12: Requesting → Requested / Issued), so wait
+  // for it (ONEINC_REQUESTED_WAIT_MIN, default 10).
+  for (let end = Date.now() + (Number(process.env.ONEINC_REQUESTED_WAIT_MIN) || 10) * 60000; requireVoidable && row && /^(Requesting|Awaiting submission)$/i.test(row.status) && Date.now() < end;) {
+    await page.waitForTimeout(30000);
+    await page.reload().catch(() => {});
     row = (await checkRows(page)).filter((r) => String(r.amount).replace(/[^0-9.]/g, '') === amt).slice(-1)[0];
   }
   page.__createdCheck = { amount: amt, txn, status: row ? row.status : '' };

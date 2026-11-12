@@ -548,6 +548,9 @@ async function ensureLostTimeSeverity(page) {
   const dol = await page.evaluate(() => ((document.body.innerText || '').match(/DoL:\s*(\d{2}\/\d{2}\/\d{4})/) || [])[1]);
   await editAndSave(page, 'Severity Lost Time', async () => {
     await selectByLabel(page, 'Severity', 'Lost Time');
+    // Every WC claim built 2026-11-12 failed this save with "Date Employer Notified : Date must be in the past" (the FNOL's
+    // date + CC's pre-filled time land after the server clock) — set it to the loss date, which is always in the past.
+    if (dol && findField(await readScreen(page), 'Date Employer Notified')) await fillByLabel(page, 'Date Employer Notified', dol).catch(() => {});
     const d = findField(await readScreen(page), 'Date Disability Began');
     if (d && !d.value) await fillByLabel(page, 'Date Disability Began', dol);
     const t = findField(await readScreen(page), 'Time Employee Began Work');

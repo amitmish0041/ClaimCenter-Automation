@@ -1060,6 +1060,14 @@ async function fillRequiredEmpties(page) {
       await inp.press('Tab').catch(() => {});
       filled.push(`${f.label}=${today}`);
       await settle(page, 1000);
+    } else if (f.kind === 'input' && !f.value && /number of checks|day of (the )?month/i.test(f.label)) {
+      // Recurring check sets (Recurrence Weekly / Monthly) add these required fields (1003 VBR TC-133/141, 2026-11-12).
+      const v = /day of/i.test(f.label) ? '15' : '2';
+      const inp = root.locator('input').first();
+      await inp.fill(v).catch(() => {});
+      await inp.press('Tab').catch(() => {});
+      filled.push(`${f.label}=${v}`);
+      await settle(page, 1000);
     }
   }
   return filled;

@@ -48,7 +48,7 @@ async function payOne(page, claim, s) {
   const who = (await W.getParties(page)).insured || 'insured';
   await W.openPayment(page, 'actions');
   await W.selectPayee(page, 'insured');
-  if (s.joint) await W.addJointPayees(page, [{ who: process.env.PREP_JOINT_WHO || 'other', type: 'Other' }]).catch((e) => log(`${s.slot}: joint payee not added (${e.message.split('\n')[0]})`));
+  if (s.joint) await W.addJointPayees(page, [{ who: process.env.PREP_JOINT_WHO || 'other', type: 'Additional Claimant' }]) // type Other needs a Tax ID + Address Book payee.catch((e) => log(`${s.slot}: joint payee not added (${e.message.split('\n')[0]})`));
   await W.nextFillingServicePeriod(page);
   await W.selectReserveLine(page, 'open');
   await W.answer(page, 'Payment for a total loss?', 'No').catch(() => {});

@@ -8,7 +8,7 @@
  */
 'use strict';
 
-const NO_ONEINC = 'OneInc does not report back on TEST (every OneInc check stays "Requesting": no External Identifier, One Inc Status or feedback)';
+const NO_ONEINC = 'OneInc reports back on TEST only after the payee acts on the payee portal (texted code to the payee mobile — see scripts/oneIncPayeePrep.js) or a check is printed/shipped'; // was "never reports back" until 2026-11-12
 const WEBHOOK = `Needs OneInc to return a status for the check (Stopped / Issued / Success / Cancelled / Error / Stop Pending) — ${NO_ONEINC}, and the suite cannot send the webhook itself`;
 const PAYLOAD = 'Checks the payload ClaimCenter sends to OneInc (field cleansing / mapping) — needs integration-log or OneInc-side access, not visible in the ClaimCenter UI';
 const DOC_SEND = 'Needs a linked document whose send to OneInc FAILS (Failed to Send / Failed Retrieval from IR / Over Size Limit). The document flow runs on TEST (CONFIRMED 2026-11-06): a NON-ImageRight document or a SmartCOMM letter gives "Not an IR document", an ImageRight document "Sent Successfully" (TC-108 / TC-109 automated) — no failing document is known yet (e.g. an ImageRight document over the OneInc size limit, or one missing from ImageRight)';
@@ -44,6 +44,11 @@ const REASONS = {
   'GCCM-787/TC/TC-019': M('Needs a digital_payment_failed_to_send activity on another check — see TC-017'),
   'GCCM-787/TC/TC-021': M(`Needs a check issued by OneInc (status Issued) — ${NO_ONEINC}, and Void is disabled on Requesting checks`),
   ...Object.fromEntries(['022', '023', '024', '025', '026', '027', '028', '029', '030', '031', '032', '033'].map((n) => [`GCCM-787/TC/TC-${n}`, M(WEBHOOK)])),
+  // Venmo (TC-023/024): OneInc UAT refuses a Venmo acceptance ("invalid credentials or the bank not allowing this transaction", 2026-11-12,
+  // screenshot Evidence/payee-portal) and the business note says there is no Venmo sandbox — covered by the PayPal case TC-025.
+  ...Object.fromEntries(['023', '024'].map((n) => [`GCCM-787/TC/TC-${n}`, M('Venmo cannot be accepted on the OneInc UAT payee portal (refused 2026-11-12; business note: no Venmo sandbox, only PayPal, same setup) — covered by GCCM-787 TC-025 (PayPal Stopped → Voided)')])),
+  // TC-026/027: after a ClaimCenter void OneInc UAT always answers Stopped (3 voids 2026-11-12) — the Issued / Success stop-failure replies need OneInc.
+  ...Object.fromEntries(['026', '027'].map((n) => [`GCCM-787/TC/TC-${n}`, M('Needs OneInc to answer a void with a stop FAILURE (Issued / Success) — OneInc UAT stopped every voided check on 2026-11-12; ask OneInc to send that status')])),
 
   // ── GCCM-1013 Full Check wizard / Check-Payment Details ──
   'GCCM-1013/UIF/TC-011': M(`Needs a tracking number from OneInc (Expedite / Certified delivery) — ${NO_ONEINC}`),
