@@ -180,6 +180,12 @@ async function runScenario(page, tc, recipe, ctx) {
         blockedWhy = e.message;
         // Evidence of WHY, taken before the wizard is cancelled (it used to be taken after, showing an empty claim).
         await capture('blocked', await readScreen(page).catch(() => null));
+      } else if (e.productFailure) {
+        // A product defect found by a setup/wait step (e.g. the ContactManager → ClaimCenter sync never arrived): FAIL, not an
+        // automation error and not BLOCKED (user direction 2026-11-12: the sync must work on TEST).
+        await capture('fail', await readScreen(page).catch(() => null));
+        await W.cancelWizard(page).catch(() => {});
+        return finish(res, started, 'FAIL', String(e.message).split(String.fromCharCode(10))[0]);
       } else {
         const screen = await readScreen(page).catch(() => null);
         await capture('error', screen);

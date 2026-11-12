@@ -272,7 +272,9 @@ async function waitContactAddress(page, name, re, timeoutMs = 300000) {
     if (claim) await W.openClaim(page, claim);
     row = await partiesRow(page, name);
     if (want.test(row)) break;
-    if (Date.now() - t0 > timeoutMs) throw new W.Blocked(`the Address Book change of ${name} did not reach ClaimCenter within ${Math.round(timeoutMs / 60000)} min (Parties Involved still shows: ${row || 'no such contact'})`);
+    // The ContactManager → ClaimCenter sync must work on TEST (user direction 2026-11-12): a change that never arrives is a
+    // product FAIL, not BLOCKED.
+    if (Date.now() - t0 > timeoutMs) throw Object.assign(new Error(`ContactManager sync failed: the Address Book change of ${name} did not reach ClaimCenter within ${Math.round(timeoutMs / 60000)} min (Parties Involved still shows: ${row || 'no such contact'})`), { productFailure: true });
     await page.waitForTimeout(15000);
   }
   return C.observe(page, 'Contact address in ClaimCenter', `${row} (after ${Math.round((Date.now() - t0) / 1000)} s)`);
