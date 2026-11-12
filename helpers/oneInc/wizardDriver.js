@@ -438,7 +438,12 @@ async function assignFromList(page) {
   const opts = ((await optionsOf(page, 'Select from list:')) || []).map((o) => o.t).filter((t) => t && !/automated assignment/i.test(t));
   if (!opts.length) throw new Blocked('Assign screen offers no named user');
   const want = (process.env.CC_ASSIGNEE_NAME || '').trim();
-  const pick = (want && opts.find((t) => t.includes(want))) || opts.find((t) => /Recovery Claims Team/i.test(t)) || opts[0];
+  // The assignee's GROUP matters: Benjamin Smith under "Branch Offices Georgia Unit" (offered first since 2026-11-12
+  // afternoon) has no valid examiner number there, so every payment was refused "Exposure owner … must have a valid
+  // examiner number" (PA-PA-01-26-0749396). Prefer his General Casualty Section / Recovery Claims Team entries.
+  const GROUPS = new RegExp(process.env.CC_ASSIGNEE_GROUP || 'General Casualty Section|Recovery Claims Team', 'i');
+  const mine = want ? opts.filter((t) => t.includes(want)) : [];
+  const pick = mine.find((t) => GROUPS.test(t)) || opts.find((t) => /Recovery Claims Team/i.test(t)) || mine[0] || opts[0];
   await select(page, 'Select from list:', pick);
   const btn = page.locator('[id^="AssignClaimsPopup-"][id$="_ButtonButton"], [id*="AssignmentPopup"][id$="_ButtonButton"]').first();
   if (await btn.isVisible().catch(() => false)) await btn.click(); else await page.getByRole('button', { name: 'Assign', exact: true }).last().click();
