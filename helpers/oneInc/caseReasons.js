@@ -48,6 +48,7 @@ const REASONS = {
   // screenshot Evidence/payee-portal) and the business note says there is no Venmo sandbox — covered by the PayPal case TC-025.
   ...Object.fromEntries(['023', '024'].map((n) => [`GCCM-787/TC/TC-${n}`, M('Venmo cannot be accepted on the OneInc UAT payee portal (refused 2026-11-12; business note: no Venmo sandbox, only PayPal, same setup) — covered by GCCM-787 TC-025 (PayPal Stopped → Voided)')])),
   // TC-026/027: after a ClaimCenter void OneInc UAT always answers Stopped (3 voids 2026-11-12) — the Issued / Success stop-failure replies need OneInc.
+  'GCCM-787/TC/TC-030': M('A multi-payee (joint) check defaults to ClaimsPay Type "Other / Mailed Check" — OneInc issues it as a mailed check with no payee e-mail, so no payee can reject it on the payee portal (PA-PA-01-26-0749348, check 8200007500, 2026-11-12). Needs a multi-payee DIGITAL payment, which ClaimCenter does not offer'),
   ...Object.fromEntries(['026', '027'].map((n) => [`GCCM-787/TC/TC-${n}`, M('Needs OneInc to answer a void with a stop FAILURE (Issued / Success) — OneInc UAT stopped every voided check on 2026-11-12; ask OneInc to send that status')])),
 
   // ── GCCM-1013 Full Check wizard / Check-Payment Details ──
