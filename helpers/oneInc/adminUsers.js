@@ -55,7 +55,8 @@ async function readContact(p) {
 // Observed "<username> email/phone" (read-only).
 async function userContact(page, username) {
   const c = await withAdmin(page, async (p) => { await openUserProfile(p, username); return readContact(p); });
-  return observe(page, `${username} email/phone`, FIELDS.map((f) => `${f}: ${c[f] || '(blank)'}`).join('; '));
+  // Short form (observed values are cut at ~60 characters, which hid "Mobile" — 2026-11-11): blank = "-".
+  return observe(page, `${username} email/phone`, FIELDS.map((f) => `${f.replace('Primary Phone', 'Phone')} ${c[f] || '-'}`).join(', '));
 }
 
 // Sets the user's Profile Email (only; phones untouched). Ledger first.

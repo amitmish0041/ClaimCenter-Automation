@@ -207,7 +207,7 @@ module.exports = (api) => {
   const OTHER_MAILED = /Other.*Mailed Check/i;
   const QUICK5 = [{ open: 'quick', needOpenReserve: true }, { payee: 'claimant' }, { step2: { transactionType: 'Partial Payment', amount: '5.00' } }, { next: true }, { expectStep: 2 }];
   const FULL5 = [{ open: 'full' }, { payee: 'claimant' }, { next: true }, { reserve: 'open' }, { step2: { transactionType: 'Partial Payment', amount: '5.00' } }, { next: true }, { expectStep: 3 }];
-  const NO_CONTACT = V(`${APPROVER} email/phone`, { value: /Email: (blank).*Primary Phone: (blank).*Work: (blank).*Mobile: (blank)/ });
+  const NO_CONTACT = V(`${APPROVER} email/phone`, { value: /^Email -, Phone -, Work -, Mobile -/ });
   const APN = 'New PA auto claim; claimant payee, $5.00 (over the standard user’s $1.00 authority, so the payment needs the approver Keith Eisenhart). ';
   add('GCCM-1003/CPD/TC-210', 'AUTO_PA', QUICK5, [V('ClaimsPay Type', { value: OTHER_MAILED }), V('ClaimsPay Method', { value: /check/i }), au('userContact', APPROVER), NO_CONTACT],
     APN + 'Approver has no email and no phone: ClaimsPay Type must default to Other / Mailed Check and Method to Check. Quick Payment.');
