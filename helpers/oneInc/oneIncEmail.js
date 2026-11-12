@@ -112,7 +112,7 @@ async function acceptPayment(page, method) {
   const seen = page.__oneIncPayeePortal;
   if (ctx) await ctx.close().catch(() => {});
   page.__oneIncPayee = null;
-  if (seen && /verification code/i.test(seen.text)) throw new W.Blocked(`Accept Payment with "${method}": the claim number was accepted, then OneInc wants a verification code sent by text / call to the payee's mobile ${(seen.text.match(/\(\d\*\*\) \*\*\*-\d{4}/) || ['(on file)'])[0]} — a test number nobody receives (screenshot ${seen.shot})`);
+  if (seen && /verification code/i.test(seen.text)) throw new W.Blocked(`Accept Payment with "${method}": the claim number was accepted, then OneInc wants a verification code sent by text / call to the payee's mobile ${(seen.text.match(/\(\d\*\*\) \*\*\*-\d{4}/) || ['(on file)'])[0]} (screenshot ${seen.shot})`);
   throw new W.Blocked(`Accept Payment with "${method}" is not automated yet — the payee portal showed: ${seen ? `${seen.url.slice(0, 80)} — ${seen.text.slice(0, 200)} (screenshot ${seen.shot})` : 'nothing (not opened)'}`);
 }
 

@@ -233,7 +233,7 @@ module.exports = (api) => {
   // Payment link opens the OneInc payee portal. The accept step itself is written once a live e-mail has been seen.
   const em = (fn, ...a) => ({ call: [`oneIncEmail.${fn}`, ...a] });
   add('GCCM-1013/UIF/TC-013', 'INT_CLEAN', [em('markStart'),
-    ...VAL([...FULL_PAYMENTS('claimant', 'open'), { step2: { transactionType: 'Partial Payment', amount: '1.71' } }], null),
+    ...VAL([...FULL_PAYMENTS('insured', 'open'), { step2: { transactionType: 'Partial Payment', amount: '1.71' } }], null),
     op('escalateChecks', '1.71'), pc('oneIncPayment', { fields: ['Payment Status', 'Payment Method'], amount: '1.71', waitMin: 20 }),
     em('waitEmail', { kind: 'issued', waitMin: 45 }), em('openAcceptPayment'), em('acceptPayment', 'Direct Deposit')],
   [V('OneInc issued e-mail', { value: /Accept Payment link present/ })],

@@ -58,7 +58,8 @@ async function createPendingInvoice(page, { amount = '1.00', vendorTaxId = '02-0
   if (!['test', 'dev'].includes(String(process.env.CC_TIER || 'test').toLowerCase())) throw new W.Blocked('bulk invoices are created on TEST/DEV only');
   const claim = await page.evaluate(() => ((document.body.innerText || '').match(/Claim:\s*([A-Z]{2,4}-[A-Z]{2}-[\d-]+)/) || [])[1] || '');
   if (!claim) throw new W.Blocked('no claim number on the screen');
-  const inv = `OI${Date.now().toString().slice(-9)}`;
+  // Invoice # = Payment #: digits only, at most 10 ("The check number must not be more than 10 digits", 2026-11-11).
+  const inv = `4${Date.now().toString().slice(-8)}`;
   await openList(page);
   await page.getByRole('button', { name: 'Create New', exact: true }).first().click();
   await W.settle(page, 4500);
@@ -80,7 +81,9 @@ async function createPendingInvoice(page, { amount = '1.00', vendorTaxId = '02-0
   await W.settle(page, 1500);
   await W.select(page, 'Default Cost Category', 'Other').catch(() => W.select(page, 'Default Cost Category', 1));
   await W.fill(page, 'Payment #', inv);
-  await W.select(page, 'Approval Workflow', 1);
+  // The standard user's own section: with the default ("Marietta - Bodily Injury") Submit answers "exceeds your authority,
+  // and no one could be found to approve it" (2026-11-11).
+  await W.select(page, 'Approval Workflow', process.env.ONEINC_BULK_WORKFLOW || 'Marietta - General Casualty');
   // Item: this claim, its first Claim Cost reserve line, the amount.
   await page.locator('[id$="BulkInvoiceItemsLV_tb-Add"]').first().click();
   await W.settle(page, 2500);
@@ -117,9 +120,18 @@ async function createPendingInvoice(page, { amount = '1.00', vendorTaxId = '02-0
     writeLedger(readLedger().filter((e) => e.invoice !== inv));
     throw new W.Blocked(`the bulk invoice was not saved: ${why || 'no message'}`);
   }
+  // A Draft invoice is not "pending" (a Full Check on its line went through, 2026-11-11): Submit → "In review" (pending
+  // approval — all bulk invoices require it); still deletable from the list in that state.
+  await W.clickButton(page, 'Submit');
+  await W.settle(page, 7000);
+  const status = await page.evaluate(() => ((document.querySelector('#gw-center-panel') || document.body).innerText.replace(/\s+/g, ' ').match(/Status Status ([A-Za-z ]+?) Date Approved/) || [])[1] || '');
+  if (!/in review|awaiting|pending/i.test(status)) {
+    const s = await require('./screenReader').readScreen(page);
+    throw new W.Blocked(`the bulk invoice ${inv} was not submitted (status ${status || '?'}): ${[...s.messages, s.south].join(' / ').slice(0, 300) || 'no message'}`);
+  }
   page.__bulkInvoice = { invoice: inv, exposure: expo, line: line.t };
   await W.openClaim(page, claim);
-  return observe(page, 'Pending bulk invoice', `${inv} — $${amount} to BAIKOW LEGAL LLC, item on ${claim} line "${line.t}" (exposure ${expo || '?'})`);
+  return observe(page, 'Pending bulk invoice', `${inv} (${status}) — $${amount} to BAIKOW LEGAL LLC, item on ${claim} line "${line.t}" (exposure ${expo || '?'})`);
 }
 
 // Deletes every bulk invoice in the ledger (Bulk Invoices list › its row › Delete); kept in the ledger if it cannot be.
@@ -133,8 +145,10 @@ async function deletePending(page) {
     const r = page.locator('tr', { hasText: e.invoice }).first();
     if (!await r.isVisible().catch(() => false)) { done.push(`${e.invoice} (not listed)`); writeLedger(readLedger().filter((x) => x.invoice !== e.invoice)); continue; }
     await r.getByRole('checkbox').first().click().catch(() => {});
-    await W.clickButton(page, 'Delete');
-    await W.settle(page, 2000);
+    await W.settle(page, 1500);
+    const accept = (d) => d.accept().catch(() => {}); // Delete asks in a native confirm, which Playwright dismisses unanswered (2026-11-11)
+    page.on('dialog', accept);
+    try { await W.clickButton(page, 'Delete'); await W.settle(page, 2500); } finally { page.off('dialog', accept); }
     const ok = page.getByRole('button', { name: /^(OK|Yes)$/ }).first();
     if (await ok.isVisible().catch(() => false)) await ok.click();
     await W.settle(page, 3000);
