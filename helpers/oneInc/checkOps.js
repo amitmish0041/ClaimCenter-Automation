@@ -111,17 +111,20 @@ async function openCheck(page, spec = {}) {
   return `opened ${pick.number ? `check ${pick.number}` : 'check (no number yet)'} — ${pick.payee} ${pick.amount}, ${pick.status}`;
 }
 const openNewestCheck = (page) => openCheck(page, {});
+// Void is enabled on Requested AND Issued OneInc checks (CONFIRMED 2026-11-12: three Issued checks voided → Pending void →
+// Voided / OneInc Stopped). Quick Payments now come out Issued (mailed check) within minutes.
+const VOIDABLE_STATUS = '^(Requested|Issued)$';
 
 // A "Requested" (non-OneInc) check to act on: the newest one already on the claim that is still Requested, else a new
 // $1.4x Quick Payment from an open Claim Cost reserve row (that is what creates them on TEST).
 async function ensureVoidableCheck(page, { create = true, txn = 'Partial Payment' } = {}) {
   try {
-    return await openCheck(page, { status: '^Requested$' });
+    return await openCheck(page, { status: VOIDABLE_STATUS });
   } catch (e) {
     if (!(e instanceof W.Blocked) || !create) throw e;
   }
   const made = await createQuickCheck(page, { txn, requireVoidable: true });
-  return `${made}; ${await openCheck(page, { status: '^Requested$', amount: page.__createdCheck.amount })}`;
+  return `${made}; ${await openCheck(page, { status: VOIDABLE_STATUS, amount: page.__createdCheck.amount })}`;
 }
 
 // Quick Payment from a Claim Cost reserve row with remaining reserve, finished (warnings-only pages pressed through).
@@ -180,7 +183,7 @@ async function createQuickCheck(page, { txn = 'Partial Payment', costType = 'cla
     row = (await checkRows(page)).filter((r) => String(r.amount).replace(/[^0-9.]/g, '') === amt).slice(-1)[0];
   }
   page.__createdCheck = { amount: amt, txn, status: row ? row.status : '' };
-  if (requireVoidable && (!row || !/^Requested$/i.test(row.status))) {
+  if (requireVoidable && (!row || !new RegExp(VOIDABLE_STATUS, 'i').test(row.status))) {
     throw new W.Blocked(`the ${amt} ${txn} Quick Payment made as test data came out "${row ? row.status : 'not listed'}", not "Requested", so it cannot be voided on this claim (needs a claim whose Quick Payments are not sent to OneInc, and a user with the authority)`);
   }
   return `created a ${amt} ${txn} Quick Payment as test data (status ${row ? row.status : '?'})`;
