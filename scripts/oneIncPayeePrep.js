@@ -33,7 +33,20 @@ const SLOTS = [
   { slot: 'reject-single', accept: 'Reject', then: 'OneInc Cancelled (PM_Selection Customer) → Voided + Payee Rejected Payment activity', cases: ['GCCM-787/TC/TC-029'], amount: '1.86' },
   { slot: 'reject-joint', accept: 'Reject', joint: true, then: 'as reject-single, multi-payee check', cases: ['GCCM-787/TC/TC-030'], amount: '1.87' },
   { slot: 'expedite', accept: 'Physical check', delivery: /expedite|overnight|certified/i, then: 'wait for the Expedite / Certified tracking number', cases: ['GCCM-1013/UIF/TC-011'], amount: '1.88' },
+  // Stored-token recurrences (CPD.003/004/007/008, added 2026-11-12): a Weekly set of 8 checks whose FIRST check (Payment
+  // Date today) goes to OneInc now; the payee accepts it as Direct Deposit with the texted code, which stores the token the
+  // later (scheduled) checks of the set default to. The cases then open those scheduled checks (recipes/y_recurrenceToken.js).
+  { slot: 'recur-wc', profile: 'WCA_LW', payee: 'claimant', wc: true, recur: { every: 'Weekly', checks: '8' }, accept: 'Direct Deposit',
+    then: 'stored token → open the next scheduled check of the set', amount: '1.91',
+    cases: ['GCCM-759/CPD/TC-038', 'GCCM-759/CPD/TC-043', 'GCCM-759/CPD/TC-044', 'GCCM-759/CPD/TC-046', 'GCCM-759/CPD/TC-047',
+      'GCCM-1003/CPD/TC-215', 'GCCM-1003/CPD/TC-220', 'GCCM-1003/CPD/TC-221', 'GCCM-1003/CPD/TC-223', 'GCCM-1003/CPD/TC-224'] },
+  { slot: 'recur-pa', payee: 'insured', recur: { every: 'Weekly', checks: '8' }, accept: 'Direct Deposit',
+    then: 'stored token → open the next scheduled check of the set', amount: '1.92',
+    cases: ['GCCM-759/CPD/TC-036', 'GCCM-759/CPD/TC-045', 'GCCM-1003/CPD/TC-213', 'GCCM-1003/CPD/TC-222'] },
 ];
+const today = () => { const d = new Date(); return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`; };
+// WC indemnity (Lost Wages) payment, as recipes/existingClaims.js LW: wages on the exposure, Indemnity line, category 05.
+const WC_EXPO = { 'Average Weekly Wage': '800.00', 'Disability Weekly Rate': '500.00', 'Disability Type': 'TTD', 'Benefit Offset Code': 'None', 'Reason TTD or TPD Ended': '<none>' };
 
 const arg = (n, d) => { const i = process.argv.indexOf(`--${n}`); return i < 0 ? d : (process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : true); };
 const TIER = (process.env.CC_TIER || 'test').toLowerCase();
@@ -45,17 +58,37 @@ const log = (m) => console.log(`[PayeePrep] ${m}`);
 async function payOne(page, claim, s) {
   page.__oneIncParties = null; // getParties caches per page — this is a new claim
   await W.openClaim(page, claim);
-  const who = (await W.getParties(page)).insured || 'insured';
+  const parties = await W.getParties(page);
+  const c0 = (parties.claimants || [])[0];
+  const who = (s.payee === 'claimant' ? (c0 && (c0.name || c0.claimant || String(c0))) : parties.insured) || s.payee || 'insured';
+  const A = require('../helpers/oneInc/setupA');
+  if (s.wc) await A.setIndemnityExposure(page, WC_EXPO);
   await W.openPayment(page, 'actions');
-  await W.selectPayee(page, 'insured');
-  if (s.joint) await W.addJointPayees(page, [{ who: process.env.PREP_JOINT_WHO || 'other', type: 'Additional Claimant' }]) // type Other needs a Tax ID + Address Book payee.catch((e) => log(`${s.slot}: joint payee not added (${e.message.split('\n')[0]})`));
+  await W.selectPayee(page, s.payee || 'insured');
+  // type Other needs a Tax ID + Address Book payee, so the joint payee is an Additional Claimant.
+  if (s.joint) await W.addJointPayees(page, [{ who: process.env.PREP_JOINT_WHO || 'other', type: 'Additional Claimant' }]).catch((e) => log(`${s.slot}: joint payee not added (${e.message.split('\n')[0]})`));
   await W.nextFillingServicePeriod(page);
-  await W.selectReserveLine(page, 'open');
-  await W.answer(page, 'Payment for a total loss?', 'No').catch(() => {});
+  if (s.wc) {
+    await W.select(page, 'Reserve Line', /Indemnity/);
+    await W.select(page, 'Transaction Type', 'Partial Payment');
+    await A.selectLineCategory(page, '^05');
+  } else {
+    await W.selectReserveLine(page, 'open');
+    await W.answer(page, 'Payment for a total loss?', 'No').catch(() => {});
+  }
   await W.completePaymentsStep(page, { transactionType: 'Partial Payment', amount: s.amount });
-  if (s.delivery) {
-    await W.nextFillingServicePeriod(page).catch(() => {});
-    await W.select(page, 'Delivery Method', s.delivery).catch((e) => log(`${s.slot}: Delivery Method not set (${e.message.split('\n')[0]})`));
+  if (s.wc) {
+    await A.fillRequired(page);
+    await W.fill(page, 'Average Weekly Wage', '800.00').catch(() => {});
+    await W.fill(page, 'Disability Weekly Rate', '500.00').catch(() => {});
+  }
+  if (s.delivery || s.recur) await W.nextFillingServicePeriod(page).catch(() => {});
+  if (s.delivery) await W.select(page, 'Delivery Method', s.delivery).catch((e) => log(`${s.slot}: Delivery Method not set (${e.message.split('\n')[0]})`));
+  if (s.recur) {
+    await W.select(page, 'Recurrence', s.recur.every);
+    await W.fill(page, 'Payment Date', today());
+    await W.fill(page, 'Total Number of Checks', s.recur.checks).catch((e) => log(`${s.slot}: Total Number of Checks not set (${e.message.split('\n')[0]})`));
+    if (s.wc) await A.fillRequired(page);
   }
   const outcome = (await X.finishObserve(page)) || (page.__observed && page.__observed['Finish outcome']) || '';
   const sent = await checkOps.escalateChecks(page, s.amount).catch((e) => `escalation: ${e.message.split('\n')[0]}`);
@@ -70,14 +103,22 @@ async function payOne(page, claim, s) {
   const todo = SLOTS.filter((s) => (!only || only.includes(s.slot)) && !ledger.some((e) => e.slot === s.slot && e.status !== 'failed'));
   if (!todo.length) { log('nothing to prepare — every slot is in the ledger'); return; }
   const runId = `PayeePrep_${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}`;
-  log(`${todo.length} slot(s): ${todo.map((s) => s.slot).join(', ')} — filing ${todo.length} new INT_CLEAN claim(s)`);
+  const prof = (s) => s.profile || 'INT_CLEAN';
+  log(`${todo.length} slot(s): ${todo.map((s) => `${s.slot} (${prof(s)})`).join(', ')}`);
   const given = Object.fromEntries(String(arg('claim', '') || '').split(',').filter(Boolean).map((x) => x.split('=')));
-  const toFile = todo.filter((t) => !given[t.slot]);
-  if (toFile.length) await testClaims.provision('INT_CLEAN', toFile.length, { log: (m) => console.log(m), headless: !!arg('headless', false), runId });
-  const fresh = toFile.length ? (claimPicker.readPool().INT_CLEAN || []).filter((e) => e.usable && e.status === 'Unused' && e.reservedFor === runId).map((e) => e.claim) : [];
-  const made = todo.map((t) => given[t.slot] || fresh.shift());
+  const fresh = {};
+  for (const p of [...new Set(todo.filter((t) => !given[t.slot]).map(prof))]) {
+    const n = todo.filter((t) => !given[t.slot] && prof(t) === p).length;
+    log(`filing ${n} new ${p} claim(s)`);
+    await testClaims.provision(p, n, { log: (m) => console.log(m), headless: !!arg('headless', false), runId });
+    fresh[p] = (claimPicker.readPool()[p] || []).filter((e) => e.usable && e.status === 'Unused' && e.reservedFor === runId).map((e) => e.claim);
+  }
+  const made = todo.map((t) => given[t.slot] || (fresh[prof(t)] || []).shift());
   log(`claims: ${made.join(', ') || 'none'}`);
-  testClaims.markUsed('INT_CLEAN', made.filter(Boolean), { runId, scenarios: todo.slice(0, made.length).map((s, i) => ({ claim: made[i], id: `payee-prep:${s.slot}` })) });
+  for (const p of [...new Set(todo.map(prof))]) {
+    const idx = todo.map((t, i) => i).filter((i) => prof(todo[i]) === p && made[i]);
+    if (idx.length) testClaims.markUsed(p, idx.map((i) => made[i]), { runId, scenarios: idx.map((i) => ({ claim: made[i], id: `payee-prep:${todo[i].slot}` })) });
+  }
   const browser = await chromium.launch({ headless: !!arg('headless', false) });
   const page = await (await browser.newContext({ viewport: { width: 1600, height: 1000 } })).newPage();
   page.setDefaultTimeout(20000);
@@ -90,7 +131,7 @@ async function payOne(page, claim, s) {
     if (!claim) { Object.assign(entry, { status: 'failed', problem: 'no new claim' }); }
     else {
       try { Object.assign(entry, await payOne(page, claim, s)); // finishObserve records its outcome on the page (no return value): judge by the check the escalation found.
-        entry.check = (/check(s) now: (d+)/.exec(entry.sent) || [])[1] || null;
+        entry.check = (/check\(s\) now: (\d+)/.exec(entry.sent) || [])[1] || null;
         entry.status = entry.check ? 'awaiting acceptance' : 'failed'; }
       catch (e) { Object.assign(entry, { status: 'failed', problem: e.message.split('\n')[0].slice(0, 300) }); await W.cancelWizard(page).catch(() => {}); }
     }

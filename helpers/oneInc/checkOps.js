@@ -95,7 +95,9 @@ async function openCheck(page, spec = {}) {
   const want = String(spec.amount || '').replace(/[^0-9.]/g, '');
   const hits = rows.filter((r) => (!st || st.test(r.status)) && (!py || py.test(r.payee || r.text))
     && (!want || String(r.amount).replace(/[^0-9.]/g, '') === want) && (!spec.number || r.number === String(spec.number)));
-  const pick = hits.slice(-1)[0];
+  // spec.pick 'first' = the OLDEST match (the next scheduled check of a recurring set — recurrence.js), a number = that
+  // position (negative from the end), default newest.
+  const pick = typeof spec.pick === 'number' ? hits.at(spec.pick) : spec.pick === 'first' ? hits[0] : hits.slice(-1)[0];
   if (!pick) {
     const seen = [...new Set(rows.map((r) => r.status))].join(', ') || 'no checks';
     throw new W.Blocked(`no check${spec.status ? ` with status /${st.source}/` : ''}${spec.payee ? ` to /${py.source}/` : ''}${want ? ` for $${want}` : ''} on this claim (statuses on the claim: ${seen})`);

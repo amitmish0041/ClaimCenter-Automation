@@ -81,7 +81,8 @@ async function prepareAgedPip(page, claim, out = {}) {
 // "Adjuster Expense - Unallocated"), then the leaf cost-category row ("Other USD") that carries the options button.
 // reserve: 'any' | 'open' (remaining > 0) | 'zero' | a number (remaining >= it).
 // exposureSource: optional regex on the "(n) Exposure name" heading row, to pick a row under a given exposure.
-async function openQuickOnRow(page, costTypeSource = 'expense', reserve = 'any', exposureSource = '') {
+// item: 'quick' (Quick Payment) | 'create' (Create Payment — the full wizard on that row; priorPayments, 2026-11-12).
+async function openQuickOnRow(page, costTypeSource = 'expense', reserve = 'any', exposureSource = '', item = 'quick') {
   const costRe = new RegExp(costTypeSource, 'i');
   await W.navigate(page, 'financials');
   await page.getByRole('button', { name: 'options', exact: true }).first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
@@ -118,8 +119,8 @@ async function openQuickOnRow(page, costTypeSource = 'expense', reserve = 'any',
   if (found.pick < 0) throw new W.Blocked(`no ${typeof reserve === 'number' ? `>= ${reserve} ` : reserve === 'any' ? '' : reserve + ' '}reserve line (Financials row) of cost type /${costTypeSource}/ on this claim (rows: ${found.seen.join(', ') || 'none'})`);
   await page.locator('tr[data-reuseb-row="pick"]').getByRole('button', { name: 'options', exact: true }).first().click();
   await W.settle(page, 1200);
-  const mi = page.getByRole('menuitem', { name: /^Quick (Payment|Check)$/ }).first();
-  if (!await mi.isVisible().catch(() => false)) { await W.closeMenus(page); throw new W.Blocked('the reserve row menu has no Quick Payment item'); }
+  const mi = page.getByRole('menuitem', { name: item === 'create' ? /^Create (Payment|Check)$/ : /^Quick (Payment|Check)$/ }).first();
+  if (!await mi.isVisible().catch(() => false)) { await W.closeMenus(page); throw new W.Blocked(`the reserve row menu has no ${item === 'create' ? 'Create' : 'Quick'} Payment item`); }
   await mi.click();
   const ready = await Promise.race([
     page.getByRole('button', { name: 'Next', exact: true }).first().waitFor({ state: 'visible', timeout: 20000 }).then(() => 'wizard').catch(() => null),
