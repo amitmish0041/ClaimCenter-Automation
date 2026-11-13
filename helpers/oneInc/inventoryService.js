@@ -28,8 +28,9 @@ const HEADER = ['test case id', 'test case name', 'description', 'pre-condition'
   'expected result', 'test case type', 'test case status', 'test case priority', 'test case assigned to'];
 
 // Sheets a later sheet in the same workbook replaces. Both workbooks keep the old sheet next to a "... New" one
-// after JRM feedback ("Changes Incorporated" tab); the old cases are still inventoried, but marked superseded so
-// they are reported as NOT EXECUTED with that reason rather than silently dropped or run twice.
+// after JRM feedback ("Changes Incorporated" tab). The old sheet's cases are LEFT OUT of the inventory (user direction
+// 2026-11-13: the new cases are already shown, so the replaced ones only cluttered the app, reports and totals);
+// ONEINC_KEEP_SUPERSEDED=1 keeps them, marked supersededBy (classified SUPERSEDED, reported NOT EXECUTED).
 const SUPERSEDED_SHEETS = {
   'Additional Payment Details TCs': 'Additional Payment Details_New',
   'INT.001 Test Cases': 'INT.001 Test Cases New',
@@ -178,6 +179,9 @@ function loadInventory({ dir = ONEINC_DIR } = {}) {
       if (usedCodes.has(sheetCode)) sheetCode += '-' + ((/(\d{3})/.exec(sheet) || [])[1] || String(usedCodes.size + 1));
       usedCodes.add(sheetCode);
       const parsed = parseCaseRows(rows);
+      const replacedBy = SUPERSEDED_SHEETS[sheet.trim()] && wb.SheetNames.some((s) => s.trim() === SUPERSEDED_SHEETS[sheet.trim()])
+        ? SUPERSEDED_SHEETS[sheet.trim()] : null;
+      if (replacedBy && process.env.ONEINC_KEEP_SUPERSEDED !== '1') { wbInfo.sheets.push({ name: sheet, code: sheetCode, cases: 0, supersededBy: replacedBy, left: parsed.length }); continue; }
       wbInfo.sheets.push({ name: sheet, code: sheetCode, cases: parsed.length });
       const seen = {};
       for (const c of parsed) {
@@ -191,8 +195,7 @@ function loadInventory({ dir = ONEINC_DIR } = {}) {
           storyTitle: wbInfo.meta.description || '',
           sheet,
           sheetCode,
-          supersededBy: SUPERSEDED_SHEETS[sheet.trim()] && wb.SheetNames.some((s) => s.trim() === SUPERSEDED_SHEETS[sheet.trim()])
-            ? SUPERSEDED_SHEETS[sheet.trim()] : null,
+          supersededBy: replacedBy,
           ...c,
         });
       }
