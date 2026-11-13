@@ -15,10 +15,10 @@ module.exports = (api) => {
   const op = (fn, ...a) => ({ call: [`checkOps.${fn}`, ...a] });
 
   // ── VBR.019 — a VOIDED First and Final does not count: a new First and Final on the same exposure is allowed ──────
-  const FF = 'Builds a First and Final on a new Claim Cost line of exposure (1), waits for OneInc to issue it, voids it (Repost No) and waits for "Voided"; then';
-  add('GCCM-763/VBR/TC-055', 'PRIOR_PA', VAL([pp('voidedFirstAndFinal'), ...FULL_PAYMENTS('claimant', 'new'), { select: ['Cost Type', 'Claim Cost'] }, { select: ['Exposure', /^\(1\)/] },
+  const FF = 'Builds a First and Final to a vendor on a new Adjuster Expense line of exposure (1) (a Claim Cost one is refused by PMS PL08 on fresh claims), waits for OneInc to issue it, voids it (Repost No) and waits for "Voided"; then';
+  add('GCCM-763/VBR/TC-055', 'PRIOR_PA', VAL([pp('voidedFirstAndFinal'), ...FULL_PAYMENTS('vendor', 'new'), { select: ['Cost Type', 'Adjuster Expense'] }, { select: ['Exposure', /^\(1\)/] },
     { step2: { transactionType: 'First and Final', amount: '1.37' } }], null), [],
-  `${FF} a $1.37 First and Final on a new Claim Cost line of the same exposure must Finish with no error (TEST).`);
+  `${FF} a $1.37 vendor First and Final on a new Adjuster Expense line of the same exposure must Finish with no error (TEST).`);
   add('GCCM-1003/VBR/TC-138', 'PRIOR_PA', VAL([pp('voidedFirstAndFinal'), pp('openQuickOnVoidedLine'), { step2: { transactionType: 'First and Final', amount: '1.37' } }], null), [],
     `${FF} a $1.37 First and Final Quick Payment on that exposure must Finish with no error (TEST).`);
 

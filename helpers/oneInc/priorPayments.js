@@ -74,7 +74,7 @@ async function finish(page, what) {
 // One payment, finished. via 'quick' opens Quick Payment from the Financials row of cost type `cost` (regex source) with
 // remaining `reserve` ('open' | 'zero' | 'any'); via 'full' runs the Full Check wizard (Actions › New Payment) on line
 // `line` ('open' | 'new' — new: Cost Type `costType`, Exposure (1)); via 'row' opens Create Payment from that Financials row.
-async function pay(page, { via = 'quick', txn = 'Partial Payment', amount = odd(), cost = 'claim cost', reserve = 'open', line = 'open', costType = 'Claim Cost', payee } = {}) {
+async function pay(page, { via = 'quick', txn = 'Partial Payment', amount = odd(), cost = 'claim cost', reserve = 'open', line = 'open', costType = 'Claim Cost', payee, joint } = {}) {
   gate(`A ${txn}`);
   if (!page.__oneIncParties) await W.getParties(page).catch(() => {});
   if (via === 'quick' || via === 'row') {
@@ -83,6 +83,7 @@ async function pay(page, { via = 'quick', txn = 'Partial Payment', amount = odd(
   } else {
     await W.openPayment(page, 'actions');
     await W.selectPayee(page, payee || 'claimant');
+    if (joint) await W.addJointPayees(page, joint);
     await W.nextFillingServicePeriod(page);
     await W.selectReserveLine(page, line);
     if (line === 'new') { await W.select(page, 'Cost Type', costType); await W.select(page, 'Exposure', /^\(1\)/); }
@@ -113,7 +114,10 @@ const VOIDABLE = /^(Requested|Issued)$/i;
 
 // ── VBR.019 — an earlier First and Final in status Voided ────────────────────────────────────────────────────────
 async function voidedFirstAndFinal(page) {
-  const { amount } = await pay(page, { via: 'full', txn: 'First and Final', line: 'new', amount: odd() });
+  // A Claim Cost F&F is refused on fresh claims ("PMS PL08 : First and Final payment not allowed with established reserve":
+  // every exposure is reserved at FNOL and the new line merges into its only cost category, Other — 2026-11-13), so the
+  // earlier F&F is an Adjuster Expense one to a vendor on exposure (1) (VBR.019 is per exposure).
+  const { amount } = await pay(page, { via: 'full', txn: 'First and Final', line: 'new', costType: 'Adjuster Expense', payee: 'vendor', amount: odd() });
   await waitStatus(page, amount, VOIDABLE, 15, 'First and Final');
   await K.openCheck(page, { amount });
   await K.openVoid(page);
@@ -125,9 +129,10 @@ async function voidedFirstAndFinal(page) {
 // Quick Payment needs a Financials row: the voided First and Final's line (remaining $0 after the void), else any line of
 // exposure (1).
 async function openQuickOnVoidedLine(page) {
-  try { await X.openQuickOnRow(page, 'claim cost', 'zero', '^\\(1\\)'); return 'Quick Payment opened on the $0 Claim Cost line of exposure (1)'; } catch (e) { if (!(e instanceof W.Blocked)) throw e; }
-  await X.openQuickOnRow(page, 'claim cost', 'any', '^\\(1\\)');
-  return 'Quick Payment opened on a Claim Cost line of exposure (1)';
+  // The voided First and Final's line is an Adjuster Expense line (see voidedFirstAndFinal); expense payments go to a vendor.
+  await X.openQuickOnRow(page, 'expense', 'any', '^\\(1\\)');
+  await W.selectPayee(page, 'vendor');
+  return 'Quick Payment opened on the Adjuster Expense line of exposure (1), payee vendor';
 }
 
 // ── VBR.022 — an earlier Final Payment in status Rejected (exposure keeps its open reserve) ──────────────────────
@@ -184,15 +189,19 @@ async function partialWithFinalAwaiting(page, cost = 'claim cost') {
 
 // TC-013 / TC-014: close the line (Final ≤ $1 / the expense line's First and Final), issue a Supplemental on it, reserve it
 // back, then a $1.4x Final that is held "Pending approval". Leaves the Supplemental's Check/Payment Details showing.
+const SNI = [{ who: 'sni', type: 'Secondary Named Insured' }];
 async function supplementalWithFinalPending(page, cost = 'claim cost') {
   let notes = '';
   if (/expense/i.test(cost)) notes += await expenseLine(page, { open: false });
   else {
     await reopenLine(page, cost);
-    const closing = await pay(page, { via: 'quick', txn: 'Final Payment', cost, reserve: 'open' });
+    // On a first-party exposure the claimant IS the insured, so the Secondary Named Insured rule holds any insured-only payment
+    // (787 TC-013, PA-PA-01-26-0749421, 2026-11-13): the line-closing Final and the Supplemental name the SNI as joint payee.
+    const closing = await pay(page, { via: 'full', txn: 'Final Payment', line: 'open', payee: 'insured', joint: SNI });
     notes += `$${closing.amount} Final closed the line; `;
   }
-  const supp = await pay(page, { via: 'quick', txn: 'Supplemental Payment', cost, reserve: 'zero' });
+  const supp = /expense/i.test(cost) ? await pay(page, { via: 'quick', txn: 'Supplemental Payment', cost, reserve: 'zero', payee: 'vendor' })
+    : await pay(page, { via: 'full', txn: 'Supplemental Payment', line: 'zero', payee: 'insured', joint: SNI });
   await waitStatus(page, supp.amount, VOIDABLE, 15, 'Supplemental');
   notes += await reopenLine(page, cost);
   const final = await pay(page, { via: 'quick', txn: 'Final Payment', cost, reserve: 'open', payee: 'insured', amount: odd(1) }); // SNI rule → Pending approval
