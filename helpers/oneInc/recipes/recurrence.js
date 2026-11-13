@@ -16,9 +16,9 @@ module.exports = (api) => {
   const TOO_FAR = /(more than two|greater than 2) years/i;
   // Full Check: Payees → Payments → Instructions, then the recurrence + date on the Instructions step.
   const FULL = (pre, recurrence, date) => [...pre, ...FULL_PAYMENTS('claimant', 'open'), { step2: { transactionType: 'Partial Payment', amount: '1.37' } }, REQ,
-    { next: true }, { expectStep: 3 }, { select: ['Recurrence', recurrence] }, { fill: ['Payment Date', date] }, REQ];
+    { next: true }, { expectStep: 3 }, { select: ['Recurrence', recurrence] }, { call: ['recurrence.revealRecurrence', date] }, REQ];
   // Quick Payment: both fields are on the payment basics step.
-  const QUICK = (pre, recurrence, date) => [...pre, ...QUICK_DETAILS({ transactionType: 'Partial Payment', amount: '1.37' }), REQ, { select: ['Recurrence', recurrence] }, { fill: ['Payment Date', date] }, REQ];
+  const QUICK = (pre, recurrence, date) => [...pre, ...QUICK_DETAILS({ transactionType: 'Partial Payment', amount: '1.37' }), REQ, { select: ['Recurrence', recurrence] }, { call: ['recurrence.revealRecurrence', date] }, REQ];
   const WC = [NO_DENY];
   const SUB = ' Submits a $1.37 recurring check set on TEST (Finish).';
   const NOTE_WC = 'Recurring check set on the automation WC claim (Claim Denied? = No).';

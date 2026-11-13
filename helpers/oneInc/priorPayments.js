@@ -74,15 +74,15 @@ async function finish(page, what) {
 // One payment, finished. via 'quick' opens Quick Payment from the Financials row of cost type `cost` (regex source) with
 // remaining `reserve` ('open' | 'zero' | 'any'); via 'full' runs the Full Check wizard (Actions › New Payment) on line
 // `line` ('open' | 'new' — new: Cost Type `costType`, Exposure (1)); via 'row' opens Create Payment from that Financials row.
-async function pay(page, { via = 'quick', txn = 'Partial Payment', amount = odd(), cost = 'claim cost', reserve = 'open', line = 'open', costType = 'Claim Cost', payee = 'claimant' } = {}) {
+async function pay(page, { via = 'quick', txn = 'Partial Payment', amount = odd(), cost = 'claim cost', reserve = 'open', line = 'open', costType = 'Claim Cost', payee } = {}) {
   gate(`A ${txn}`);
   if (!page.__oneIncParties) await W.getParties(page).catch(() => {});
   if (via === 'quick' || via === 'row') {
     await X.openQuickOnRow(page, cost, reserve, '', via === 'row' ? 'create' : 'quick');
-    if (via === 'row') { await W.selectPayee(page, payee); await W.nextFillingServicePeriod(page); }
+    if (via === 'row') { await W.selectPayee(page, payee || 'claimant'); await W.nextFillingServicePeriod(page); } else if (payee) await W.selectPayee(page, payee);
   } else {
     await W.openPayment(page, 'actions');
-    await W.selectPayee(page, payee);
+    await W.selectPayee(page, payee || 'claimant');
     await W.nextFillingServicePeriod(page);
     await W.selectReserveLine(page, line);
     if (line === 'new') { await W.select(page, 'Cost Type', costType); await W.select(page, 'Exposure', /^\(1\)/); }
@@ -134,7 +134,9 @@ async function openQuickOnVoidedLine(page) {
 async function rejectedFinal(page) {
   const cn = await claimNo(page);
   if (!process.env.CC_TEAM_PASS) throw new W.Blocked('rejecting the Final Payment needs the approver\'s login — pass CC_TEAM_PASS inline (shared TEST password, never stored)');
-  const { amount, status } = await pay(page, { via: 'quick', txn: 'Final Payment', amount: odd(1) });
+  // "Pending approval" comes from CC's rule "Approval Required because 'Secondary Named Insured' … not selected for this Insured
+  // payment" (CONFIRMED 2026-11-13, policy 1002231610 / VI QUAN) — the adjuster's $100,000 authority never holds a small check.
+  const { amount, status } = await pay(page, { via: 'quick', txn: 'Final Payment', payee: 'insured', amount: odd(1) });
   if (!/Pending approval/i.test(status)) throw new W.Blocked(`the $${amount} Final Payment made as test data came out "${status}", not "Pending approval" — the adjuster has the authority, so it cannot be rejected`);
   const FR = require('../financialRules');
   const r = await FR.approveAsAssignee(page, cn, /approv/i, { action: 'Reject' });
@@ -193,7 +195,7 @@ async function supplementalWithFinalPending(page, cost = 'claim cost') {
   const supp = await pay(page, { via: 'quick', txn: 'Supplemental Payment', cost, reserve: 'zero' });
   await waitStatus(page, supp.amount, VOIDABLE, 15, 'Supplemental');
   notes += await reopenLine(page, cost);
-  const final = await pay(page, { via: 'quick', txn: 'Final Payment', cost, reserve: 'open', amount: odd(1) });
+  const final = await pay(page, { via: 'quick', txn: 'Final Payment', cost, reserve: 'open', payee: 'insured', amount: odd(1) }); // SNI rule → Pending approval
   if (!/Pending approval/i.test(final.status)) throw new W.Blocked(`the $${final.amount} Final Payment came out "${final.status}", not "Pending approval" (the adjuster has the authority)`);
   page.__finalDue = final.amount;
   await K.openCheck(page, { amount: supp.amount });

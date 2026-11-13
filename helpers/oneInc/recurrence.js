@@ -38,8 +38,10 @@ async function openScheduled(page, amount, { edit = true, which = 'first' } = {}
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const opened = await K.openCheck(page, { amount, status: `^(${[...new Set(scheduled.map((r) => esc(r.status)))].join('|')})$`, pick: at });
   if (!edit) return opened;
-  const b = page.getByRole('button', { name: /^Edit( Check| Payment)?$/ }).first();
-  if (!await b.isVisible().catch(() => false)) throw new W.Blocked(`the scheduled check has no Edit button on Check/Payment Details (${opened})`);
+  // Edit (Payees / Instructions) has no ClaimsPay fields on a scheduled check; "Edit Recurrence" step 2 has ClaimsPay Type /
+  // ClaimsPay Method with the recurrence (CONFIRMED 2026-11-13 on PA-PA-01-26-0749407).
+  const b = page.getByRole('button', { name: 'Edit Recurrence', exact: true }).first();
+  if (!await b.isVisible().catch(() => false)) throw new W.Blocked(`the scheduled check has no Edit Recurrence button on Check/Payment Details (${opened})`);
   await b.click();
   await W.settle(page, 3500);
   return `${opened}; Edit opened — ${await toClaimsPay(page)}`;
@@ -83,7 +85,34 @@ async function noteScheduledMethod(page, as, which = 'last') {
   const amount = setAmount(page).amount;
   await W.cancelWizard(page).catch(() => {});
   await openScheduled(page, amount, { edit: false, which });
-  return require('./portalChecks').noteField(page, 'ClaimsPay Method', as);
+  // Check/Payment Details labels it "Requested ClaimsPay Method" (2026-11-13).
+  return require('./portalChecks').noteField(page, 'Requested ClaimsPay Method', as);
 }
 
-module.exports = { openScheduled, toClaimsPay, saveEdit, noteScheduledMethod };
+// After Recurrence = Weekly / Monthly: the step's recurrence fields (Due Date of First Check, Day of Week, Total Number of
+// Checks, Total Recurrence Amount — replacing Payment Date) render only after another postback; a ClaimsPay Method change
+// does it and they stay when it is set back (CONFIRMED 2026-11-13). Without them Finish ended in a server error (1003 VBR
+// TC-133/141, 763 TC-050/058). date: 'TODAY+N' or MM/DD/YYYY → the first check's date; checks = Total Number of Checks.
+async function revealRecurrence(page, date, checks = '2') {
+  const has = async (l) => !!findField(await readScreen(page), l);
+  if (!await has('Total Number of Checks')) {
+    if (await has('ClaimsPay Method')) {
+      const was = (findField(await readScreen(page), 'ClaimsPay Method') || {}).value || 'Customer Choice';
+      await W.select(page, 'ClaimsPay Method', /Mailed Check/i.test(was) ? 'Customer Choice' : 'Mailed Check').catch(() => {});
+      await W.settle(page, 2500);
+      await W.select(page, 'ClaimsPay Method', was).catch(() => {});
+      await W.settle(page, 2500);
+    }
+    for (let t = 0; t < 10 && !await has('Total Number of Checks'); t++) await page.waitForTimeout(1000);
+  }
+  const m = /^TODAY([+-]\d+)?$/.exec(String(date));
+  let d = date;
+  if (m) { const b = new Date(); b.setDate(b.getDate() + Number(m[1] || 0)); d = `${String(b.getMonth() + 1).padStart(2, '0')}/${String(b.getDate()).padStart(2, '0')}/${b.getFullYear()}`; }
+  const dateField = await has('Due Date of First Check') ? 'Due Date of First Check' : 'Payment Date';
+  await W.fill(page, dateField, d);
+  if (await has('Total Number of Checks')) await W.fill(page, 'Total Number of Checks', checks);
+  await W.settle(page, 1500);
+  return `recurrence fields: ${dateField} ${d}${await has('Total Number of Checks') ? `, Total Number of Checks ${checks}` : ' (Total Number of Checks not shown)'}`;
+}
+
+module.exports = { openScheduled, toClaimsPay, saveEdit, noteScheduledMethod, revealRecurrence };

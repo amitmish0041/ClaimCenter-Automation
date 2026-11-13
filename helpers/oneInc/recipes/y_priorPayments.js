@@ -23,10 +23,10 @@ module.exports = (api) => {
     `${FF} a $1.37 First and Final Quick Payment on that exposure must Finish with no error (TEST).`);
 
   // ── VBR.022 — a REJECTED Final Payment does not count: a new Final Payment the same day is allowed ──────────────────
-  const REJ = 'Builds a $1.4x Final Payment held "Pending approval" and has its approver Reject it (approver login, CC_TEAM_PASS passed inline); then';
-  add('GCCM-763/VBR/TC-062', 'PRIOR_PA', VAL([pp('rejectedFinal'), ...FULL_PAYMENTS('claimant', 'open'), { step2: { transactionType: 'Final Payment', amount: '0.62' } }], null), [],
+  const REJ = 'Builds a $1.4x Final Payment to the INSURED without the Secondary Named Insured (policy 1002231610), which CC holds "Pending approval" and has its approver Reject it (approver login, CC_TEAM_PASS passed inline); then';
+  add('GCCM-763/VBR/TC-062', 'PRIOR_PA_SNI', VAL([pp('rejectedFinal'), ...FULL_PAYMENTS('claimant', 'open'), { step2: { transactionType: 'Final Payment', amount: '0.62' } }], null), [],
     `${REJ} a $0.62 Final Payment on the same exposure (Full Check) must Finish with no error (TEST).`);
-  add('GCCM-1003/VBR/TC-145', 'PRIOR_PA', VAL([pp('rejectedFinal'), { open: 'quick', needOpenReserve: true }, { step2: { transactionType: 'Final Payment', amount: '0.63' } }], null), [],
+  add('GCCM-1003/VBR/TC-145', 'PRIOR_PA_SNI', VAL([pp('rejectedFinal'), { open: 'quick', needOpenReserve: true }, { step2: { transactionType: 'Final Payment', amount: '0.63' } }], null), [],
     `${REJ} a $0.63 Final Payment Quick Payment on the same exposure must Finish with no error (TEST).`);
 
   // ── 787 VBR.002 — void refused while a Final Payment on the same line is not submitted yet ─────────────────────────
@@ -36,9 +36,8 @@ module.exports = (api) => {
   const AWAIT = (cost) => `Issued Partial Payment and a Final Payment left "Awaiting submission" (Create Payment from the same row, not escalated) on the ${cost} line; voiding the Partial must be refused. Afterwards the Final is deleted.`;
   const PEND = (cost) => `${cost} line closed (Final ≤ $1 / the expense line's First and Final), an issued Supplemental on it, reserve added back, then a $1.4x Final Payment held "Pending approval"; voiding the Supplemental must be refused. Afterwards the Final is deleted.`;
   add('GCCM-787/TC/TC-011', 'PRIOR_PA', [pp('partialWithFinalAwaiting', 'claim cost'), ...VOID], CHECKS, AWAIT('Claim Cost'));
-  add('GCCM-787/TC/TC-012', 'PRIOR_PA', [pp('partialWithFinalAwaiting', 'expense'), ...VOID], CHECKS, AWAIT('Adjuster Expense'));
-  add('GCCM-787/TC/TC-013', 'PRIOR_PA', [pp('supplementalWithFinalPending', 'claim cost'), ...VOID], CHECKS, PEND('Claim Cost'));
-  add('GCCM-787/TC/TC-014', 'PRIOR_PA', [pp('supplementalWithFinalPending', 'expense'), ...VOID], CHECKS, PEND('Adjuster Expense'));
+  add('GCCM-787/TC/TC-013', 'PRIOR_PA_SNI', [pp('supplementalWithFinalPending', 'claim cost'), ...VOID], CHECKS, PEND('Claim Cost'));
+  // TC-012 / TC-014 (Expense line) stay manual — see caseReasons.js (no open expense reserve can be made on cloud TEST).
 
   // ── 1008 APD (UIF.001–032) — Mortgagee/lienholder payment, Monitored = Yes → Mailed Check ──────────────────────────
   // Same check as 1008 APD TC-010 (lienholder named on the vehicle loan, payee Type Lienholder/Mortgagee), now waited on

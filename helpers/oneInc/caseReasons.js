@@ -36,9 +36,11 @@ const REASONS = {
   ...Object.fromEntries(['GCCM-1003/CPD/TC-210', 'GCCM-1003/CPD/TC-211', 'GCCM-759/CPD/TC-033', 'GCCM-759/CPD/TC-034'].map((id) => [id, D('Needs to know who the "Payment Approver" is on a payment and an active TEST user in that role with NO email and NO phone (candidate: Jacob Erdman) — ask the BA how the approver is determined')])),
   // ── GCCM-787 Void/Stop ──
   'GCCM-787/TC/TC-009': D(`Needs a Cleared check to repost — ${NO_ONEINC}, so no check on TEST is ever Cleared`),
-  'GCCM-787/TC/TC-012': D('Same as TC-011 on an Expense line: an issued Partial expense check plus a Final expense payment Awaiting Submission — not built yet'),
+  'GCCM-787/TC/TC-012': M('Needs an OPEN Expense reserve line: cloud TEST cannot reserve an expense line (New Reserve offers only Claim Cost, as the adjuster and as admin — 2026-11-13), and expense payments must go to a vendor, so neither the Partial nor the Final on an expense line can be made'),
+  'GCCM-787/TC/TC-012-old': D('Same as TC-011 on an Expense line: an issued Partial expense check plus a Final expense payment Awaiting Submission — not built yet'),
   'GCCM-787/TC/TC-013': D('Needs an issued Supplemental check plus a Final payment Pending Approval on the same line; a Supplemental needs a closed reserve and a Final payment an open one, so the pair needs the approval workflow — not built yet'),
-  'GCCM-787/TC/TC-014': D('Same as TC-013 for the Expense cost type — not built yet'),
+  'GCCM-787/TC/TC-014': M('Needs an Expense line with an issued Supplemental and a Final Payment Pending approval: cloud TEST cannot reserve an expense line (New Reserve offers only Claim Cost, 2026-11-13), and expense payments go to a vendor, which the insured-payment approval rule does not hold'),
+  'GCCM-787/TC/TC-014-old': D('Same as TC-013 for the Expense cost type — not built yet'),
   'GCCM-787/TC/TC-017': M(`Needs an open digital_payment_failed_to_send activity, which CC creates only when sending a linked document to OneInc fails — ${DOC_SEND}`),
   'GCCM-787/TC/TC-018': M('Needs a completed digital_payment_failed_to_send activity (document send failure) — see TC-017'),
   'GCCM-787/TC/TC-019': M('Needs a digital_payment_failed_to_send activity on another check — see TC-017'),
