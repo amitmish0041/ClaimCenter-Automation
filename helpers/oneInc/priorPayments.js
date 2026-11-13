@@ -74,11 +74,11 @@ async function finish(page, what) {
 // One payment, finished. via 'quick' opens Quick Payment from the Financials row of cost type `cost` (regex source) with
 // remaining `reserve` ('open' | 'zero' | 'any'); via 'full' runs the Full Check wizard (Actions › New Payment) on line
 // `line` ('open' | 'new' — new: Cost Type `costType`, Exposure (1)); via 'row' opens Create Payment from that Financials row.
-async function pay(page, { via = 'quick', txn = 'Partial Payment', amount = odd(), cost = 'claim cost', reserve = 'open', line = 'open', costType = 'Claim Cost', payee, joint } = {}) {
+async function pay(page, { via = 'quick', txn = 'Partial Payment', amount = odd(), cost = 'claim cost', reserve = 'open', line = 'open', costType = 'Claim Cost', payee, joint, expo = '' } = {}) {
   gate(`A ${txn}`);
   if (!page.__oneIncParties) await W.getParties(page).catch(() => {});
   if (via === 'quick' || via === 'row') {
-    await X.openQuickOnRow(page, cost, reserve, '', via === 'row' ? 'create' : 'quick');
+    await X.openQuickOnRow(page, cost, reserve, expo, via === 'row' ? 'create' : 'quick');
     if (via === 'row') { await W.selectPayee(page, payee || 'claimant'); await W.nextFillingServicePeriod(page); } else if (payee) await W.selectPayee(page, payee);
   } else {
     await W.openPayment(page, 'actions');
@@ -190,21 +190,28 @@ async function partialWithFinalAwaiting(page, cost = 'claim cost') {
 // TC-013 / TC-014: close the line (Final ≤ $1 / the expense line's First and Final), issue a Supplemental on it, reserve it
 // back, then a $1.4x Final that is held "Pending approval". Leaves the Supplemental's Check/Payment Details showing.
 const SNI = [{ who: 'sni', type: 'Secondary Named Insured' }];
+const LINE1 = String.raw`match:^\(1\)`;
 async function supplementalWithFinalPending(page, cost = 'claim cost') {
   let notes = '';
   if (/expense/i.test(cost)) notes += await expenseLine(page, { open: false });
   else {
-    await reopenLine(page, cost);
+    // All three payments sit on exposure (1)'s Claim Cost line: with other exposures still reserved, "the open line" was
+    // another exposure's (787 TC-013 on PA-PA-01-26-0749422 voided fine — wrong line, 2026-11-13).
     // On a first-party exposure the claimant IS the insured, so the Secondary Named Insured rule holds any insured-only payment
     // (787 TC-013, PA-PA-01-26-0749421, 2026-11-13): the line-closing Final and the Supplemental name the SNI as joint payee.
-    const closing = await pay(page, { via: 'full', txn: 'Final Payment', line: 'open', payee: 'insured', joint: SNI });
+    const closing = await pay(page, { via: 'full', txn: 'Final Payment', line: LINE1, payee: 'insured', joint: SNI });
     notes += `$${closing.amount} Final closed the line; `;
   }
   const supp = /expense/i.test(cost) ? await pay(page, { via: 'quick', txn: 'Supplemental Payment', cost, reserve: 'zero', payee: 'vendor' })
-    : await pay(page, { via: 'full', txn: 'Supplemental Payment', line: 'zero', payee: 'insured', joint: SNI });
+    : await pay(page, { via: 'full', txn: 'Supplemental Payment', line: LINE1, payee: 'insured', joint: SNI });
   await waitStatus(page, supp.amount, VOIDABLE, 15, 'Supplemental');
-  notes += await reopenLine(page, cost);
-  const final = await pay(page, { via: 'quick', txn: 'Final Payment', cost, reserve: 'open', payee: 'insured', amount: odd(1) }); // SNI rule → Pending approval
+  if (/expense/i.test(cost)) notes += await reopenLine(page, cost);
+  else {
+    const err = await X.addReserve(page, await claimNo(page), { costType: 'Claim Cost', amount: 500, exposure: '1st Party Vehicle' } /* letters-only match → the first, exposure (1) */);
+    if (err) throw new W.Blocked(`could not reserve exposure (1)'s Claim Cost line back: ${err}`);
+    notes += 'reserved $500 back on exposure (1); ';
+  }
+  const final = await pay(page, { via: 'quick', txn: 'Final Payment', cost, reserve: 'open', expo: /expense/i.test(cost) ? '' : String.raw`^\(1\)`, payee: 'insured', amount: odd(1) }); // SNI rule → Pending approval
   if (!/Pending approval/i.test(final.status)) throw new W.Blocked(`the $${final.amount} Final Payment came out "${final.status}", not "Pending approval" (the adjuster has the authority)`);
   page.__finalDue = final.amount;
   await K.openCheck(page, { amount: supp.amount });
