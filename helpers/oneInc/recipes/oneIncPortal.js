@@ -212,7 +212,8 @@ module.exports = (api) => {
   add('GCCM-1003/CPD/TC-210', 'AUTO_PA', QUICK5, [V('ClaimsPay Type', { value: OTHER_MAILED }), V('ClaimsPay Method', { value: /check/i }), au('userContact', APPROVER), NO_CONTACT],
     APN + 'Approver has no email and no phone: ClaimsPay Type must default to Other / Mailed Check and Method to Check. Quick Payment.');
   // QA review 2026-11-13: CPD.002 Full Check reworked — a NEW claimant contact with no phone / e-mail, paid as Additional Insured.
-  const NOPHONE = { first: 'NORA', last: 'NOCONTACT', role: 'Claimant' };
+  // CC refuses a hand-added 'Claimant' role ("You cannot add the role 'Claimant' to Claim", 2026-11-13: it comes from an exposure) — Covered Party.
+  const NOPHONE = { first: 'NORA', last: 'NOCONTACT', role: 'Covered Party' };
   add('GCCM-759/CPD/TC-033', 'AUTO_PA', [{ call: ['wizardDriver.addClaimPersonContact', NOPHONE] }, { open: 'full' }, { select: ['Name', 'NORA NOCONTACT'] }, { select: ['Type', 'Additional Insured'] },
     { next: true }, { reserve: 'open' }, { step2: { transactionType: 'Partial Payment', amount: '1.33' } }, { next: true }, { expectStep: 3 }],
   [V('ClaimsPay Type', { value: OTHER_MAILED }), V('ClaimsPay Method', { value: /check/i })],
