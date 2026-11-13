@@ -32,7 +32,7 @@ const SLOTS = [
   { slot: 'issued-mailed', accept: 'Physical check', then: 'wait for print date / Stop Pending from OneInc', cases: ['GCCM-787/TC/TC-033', 'GCCM-1013/INT/TC-128', 'GCCM-1013/APD/TC-135', 'GCCM-1013/UIF/TC-023'], amount: '1.85' },
   { slot: 'reject-single', accept: 'Reject', then: 'OneInc Cancelled (PM_Selection Customer) → Voided + Payee Rejected Payment activity', cases: ['GCCM-787/TC/TC-029'], amount: '1.86' },
   { slot: 'reject-joint', accept: 'Reject', joint: true, then: 'as reject-single, multi-payee check', cases: ['GCCM-787/TC/TC-030'], amount: '1.87' },
-  { slot: 'expedite', accept: 'Physical check', delivery: /expedite|overnight|certified/i, then: 'wait for the Expedite / Certified tracking number', cases: ['GCCM-1013/UIF/TC-011'], amount: '1.88' },
+  { slot: 'expedite', accept: 'Physical check', delivery: /^Expedite Mail$/, then: 'wait for the Expedite / Certified tracking number', cases: ['GCCM-1013/UIF/TC-011'], amount: '1.88' },
   // Stored-token recurrences (CPD.003/004/007/008, added 2026-11-12): a Weekly set of 8 checks whose FIRST check (Payment
   // Date today) goes to OneInc now; the payee accepts it as Direct Deposit with the texted code, which stores the token the
   // later (scheduled) checks of the set default to. The cases then open those scheduled checks (recipes/y_recurrenceToken.js).
@@ -83,7 +83,7 @@ async function payOne(page, claim, s) {
     await W.fill(page, 'Disability Weekly Rate', '500.00').catch(() => {});
   }
   if (s.delivery || s.recur) await W.nextFillingServicePeriod(page).catch(() => {});
-  if (s.delivery) await W.select(page, 'Delivery Method', s.delivery).catch((e) => log(`${s.slot}: Delivery Method not set (${e.message.split('\n')[0]})`));
+  if (s.delivery) await W.select(page, 'Payment Delivery', s.delivery).catch((e) => log(`${s.slot}: Payment Delivery not set (${e.message.split('\n')[0]})`));
   if (s.recur) {
     await W.select(page, 'Recurrence', s.recur.every);
     await W.fill(page, 'Payment Date', today());

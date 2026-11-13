@@ -27,11 +27,11 @@ module.exports = (api) => {
 
   // 1013 UIF.084 — Account Number on a Direct Deposit check.
   add('GCCM-1013/UIF/TC-016', 'PAYEE_DD', [OIC('1.71')], [V('Confirmed Payment Method', { value: /direct deposit/i }), V('Account Number', { value: /\S/ })],
-    'Payee accepted the $1.71 payment as Direct Deposit (bank account) on the OneInc payee portal.' + RO);
+    'Payee accepted the $1.71 payment as Direct Deposit (bank account) on the OneInc payee portal. OneInc HOLDS the account (portal 2026-11-12: Payment Method Last 4 3298, JPMORGAN CHASE BANK, Personal_Checking) — a blank Account Number in ClaimCenter is a ClaimCenter-side (feedback mapping) defect.' + RO);
 
   // 1013 UIF.089 / UIF.081 — print date / tracking number come back from OneInc once the mailed check is printed / shipped.
   add('GCCM-1013/UIF/TC-023', 'PAYEE_MAILED', [OIC('1.85')], [V('Check Print Date', { value: /\S/, unlessBlocked: 'OneInc has not reported a print date for this mailed check yet (it arrives once OneInc prints it)' })],
     'Payee accepted the $1.85 payment as a Physical (mailed) check on the OneInc payee portal; the print date arrives when OneInc prints it.' + RO);
   add('GCCM-1013/UIF/TC-011', 'PAYEE_EXPEDITE', [OIC('1.88')], [V('Expedite / Certified Tracking No.', { value: /\S/, unlessBlocked: 'OneInc has not reported a tracking number for this expedited check yet (it arrives once OneInc ships it)' })],
-    'Mailed check with an expedited Delivery Method, issued by OneInc as Mailed Check ($1.88); the tracking number arrives when OneInc ships it.' + RO);
+    'Mailed check with Payment Delivery = Expedite Mail, issued by OneInc; the tracking number arrives when OneInc ships it.' + RO);
 };
