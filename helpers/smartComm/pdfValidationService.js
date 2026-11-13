@@ -551,7 +551,9 @@ function evaluateOne(req, haystack, context) {
       if (addr) {
         const flat = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
         const hay = ` ${flat(haystack)} `;
-        if (addr.slice(1).every((part) => hay.includes(` ${flat(part)} `))) {
+        // Neighbouring boxes can print glued ("IN46545" for state + ZIP).
+        const [street, city, st, zip] = addr.slice(1).map(flat);
+        if ([street, city].every((part) => hay.includes(` ${part} `)) && (hay.includes(` ${st}${zip} `) || (hay.includes(` ${st} `) && hay.includes(` ${zip} `)))) {
           return { expected: req.expectedValue, actual: addr.slice(1).join(' | '), result: 'PASS', reason: 'The form prints this address in separate boxes (street, city, state, ZIP) - every part is printed.' };
         }
       }
