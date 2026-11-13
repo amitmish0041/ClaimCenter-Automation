@@ -140,7 +140,7 @@ async function assignExposuresTo(page, who = 'Benjamin Smith', group = 'Recovery
   await W.navigate(page, 'exposures');
   await page.locator('tr[id*="ExposuresLV-0-"]').first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
   const rows = await page.evaluate(() => [...document.querySelectorAll('[id*="ExposuresLV-"][id$="-Assignee"]')].map((e) => e.innerText.trim()));
-  if (rows.length && rows.every((r) => norm(r) === norm(who))) return `exposures already owned by ${who}`;
+  if (rows.length && rows.every((r) => norm(r).startsWith(norm(who)))) return `exposures already owned by ${who}`;
   await page.locator('[id$="ExposuresLV-_Checkbox"]:visible').first().click();
   await page.waitForTimeout(800);
   // Assign stays DISABLED for the adjuster on claims assigned to "General Casualty Section" (CONFIRMED 2026-11-04,
@@ -190,7 +190,7 @@ async function assignExposuresTo(page, who = 'Benjamin Smith', group = 'Recovery
   }
   await W.navigate(page, 'exposures');
   const after = await page.evaluate(() => [...document.querySelectorAll('[id*="ExposuresLV-"][id$="-Assignee"]')].map((e) => e.innerText.trim()));
-  if (!after.length || !after.every((r) => norm(r) === norm(who))) throw new W.Blocked(`exposure owner did not change to ${who} (shows ${after.join(', ')})`);
+  if (!after.length || !after.every((r) => norm(r).startsWith(norm(who)))) throw new W.Blocked(`exposure owner did not change to ${who} (shows ${after.join(', ')})`);
   return `exposures assigned to ${who}`;
 }
 

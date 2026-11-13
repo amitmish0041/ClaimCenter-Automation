@@ -70,7 +70,8 @@ function isPaymentRecipe(recipe) {
     // checkOps steps that void / delete / create a check change TEST data like Finish does — same sequential phase.
     // (openOrCreateCheck is not one: it makes at most one check that the run's screen checks then share.)
     // needsData.clear*: breaks the claim on purpose (claimant address cleared → Ability to Pay fails), so it needs its own.
-    || (Array.isArray(s.call) && /finish|void|deleteCheck|\.create\w*Check|ensureOpenReserve|escalate|needsData\.clear/i.test(String(s.call[0])))
+    // priorPayments.* / recurrence.saveEdit / openNewCheck submit TEST payments too (2026-11-12).
+    || (Array.isArray(s.call) && /finish|void|deleteCheck|\.create\w*Check|ensureOpenReserve|escalate|needsData\.clear|^priorPayments\.|recurrence\.saveEdit|openNewCheck/i.test(String(s.call[0])))
     || (typeof s.click === 'string' && /^finish$/i.test(s.click))));
 }
 
@@ -156,6 +157,19 @@ async function runScenario(page, tc, recipe, ctx) {
         page.__oneIncParties = null;
         ctx.lastClaim = claim;
         await W.getParties(page);
+      }
+      // Exposure owner for paying cases (2026-11-13): since 2026-11-12 ~2 PM TEST refuses every payment whose exposure owner
+      // is Benjamin Smith / Kevin Burke ("Exposure owner … must have a valid examiner number"); Stephanie Varga (GC Team 2,
+      // stepvarg) passes — CONFIRMED on PA-PA-01-26-0749396 ($1.05 saved, Pending approval). ONEINC_EXPOSURE_OWNER =
+      // "Name|Group" (default that), "0" = off. Only on claims the suite built (claim pool), once per claim per run.
+      const ownerSpec = process.env.ONEINC_EXPOSURE_OWNER === undefined ? 'Stephanie Varga|GC Team 2' : process.env.ONEINC_EXPOSURE_OWNER;
+      ctx.ownerSet = ctx.ownerSet || {};
+      if (ownerSpec && ownerSpec !== '0' && isPaymentRecipe(recipe) && !ctx.ownerSet[claim]
+        && Object.values(require('./claimPicker').readPool()).some((v) => Array.isArray(v) && v.some((e) => e && e.claim === claim))) {
+        const [who, group] = ownerSpec.split('|');
+        ctx.ownerSet[claim] = await require('./setupA').assignExposuresTo(page, who, group).catch((e) => `exposure owner not changed: ${e.message.split('\n')[0]}`);
+        ctx.log(`[OneInc] ${tc.scenarioId}: ${ctx.ownerSet[claim]}`);
+        await W.openClaim(page, claim, ctx.log);
       }
       // Test-data preconditions (helpers/oneInc/testData.js): the profile's declared data is checked once per claim per
       // run, a recipe's own `needs` before every case. Missing data → BLOCKED naming it (next claim tried first), never
