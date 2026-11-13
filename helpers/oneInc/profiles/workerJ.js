@@ -21,5 +21,6 @@ module.exports = {
 Object.defineProperty(module.exports.J_DE_PIP, 'data', data((D) => [
   D.vehicleExposure({ coverage: 'PIP', leaf: 'Wage Loss Benefits', cause: 'Personal Injury Protection', match: /Wage/i }),
   D.reserve({ exposure: /Wage/i, amount: 2500 }),
-  D.pendingTransaction({ expo: 3, via: 'payment', row: 'Wage', payee: 'MATTHEW SPONG', payAmount: '1.37' }),
+  // Exposure (2) since 2026-11-13: the $1.37 on (3) was approved; (2) still carries two $1.09 payments "Pending approval".
+  D.pendingTransaction({ expo: 2, via: 'payment', row: '^\\(2\\) ', payee: 'MATTHEW SPONG', payAmount: '1.37' }),
 ]));

@@ -193,6 +193,8 @@ function candidates(profile, limit = 4, { ignorePinned = false } = {}) {
   if (pinned && !ignorePinned) return [pinned];
   const out = [];
   const push = (c) => { if (c && !out.includes(c)) out.push(c); };
+  // seedFirst: the seed is the live answer (read from a ledger) and beats a remembered claim (PAYEE_EXPEDITE, 2026-11-13).
+  if (p.seedFirst) (p.seed || []).forEach(push);
   poolClaims(profile).forEach(push);
   push(readCache()[profile]);
   (p.seed || []).forEach(push);

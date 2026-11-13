@@ -21,10 +21,11 @@
 
 const data = (fn) => ({ enumerable: true, get: () => fn(require('../testData').D) });
 const NO_FNOL = (state) => ({ policyType: 'Personal Auto', state, lossCauseCode: 'LC50', lossDescription: 'not used (pool-only claim)', incidents: [], exposures: [] });
-// CONFIRMED 2026-11-12: on policy 1002239819 the added Medical Expense exposure stays unreserved (PA-PA-01-26-0749303);
-// on 1002239222 it came with a $2,500 reserve (PA-PA-01-26-0749296 / 0749298) — so the policy is pinned and the claim is
-// only usable when the exposure really has no reserve (NO_RESERVE below).
-const NORES_POLICIES = ['1002239819'];
+// CONFIRMED 2026-11-12: on policy 1002233505 the added Medical Expense exposure stays unreserved (PA-PA-01-26-0749303);
+// on 1002239222 it came with a $2,500 reserve (PA-PA-01-26-0749296 / 0749298); 1002239819 has no vehicle with Medical
+// Expense coverage (0749301 / 0749304-0749306 — corrected 2026-11-13) — so the policy is pinned and the claim is only
+// usable when the exposure really has no reserve (NO_RESERVE below).
+const NORES_POLICIES = ['1002233505'];
 const NO_RESERVE = { id: 'noreserve:Medical Expense', label: 'The Medical Expense exposure has no reserve (no reserve history)', build: null,
   manual: 'a claim whose Medical Expense exposure never had a reserve',
   check: async (page) => {

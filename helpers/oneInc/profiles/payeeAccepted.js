@@ -11,7 +11,7 @@ module.exports = {
   PAYEE_PAYPAL_VOIDED: one('Payee accepted as PayPal, then voided in ClaimCenter → OneInc Stopped ($1.81, 11/12)', 'PA-PA-01-26-0749343'),
   PAYEE_REJECTED: one('Payee rejected the OneInc payment ($1.86, 11/12)', 'PA-PA-01-26-0749347'),
   PAYEE_MAILED: one('Payee accepted as Physical (mailed) check ($1.85, 11/12)', 'PA-PA-01-26-0749346'),
-  PAYEE_EXPEDITE: one('Expedite Mail check issued by OneInc ($1.88; claim from the payee-prep ledger, slot expedite)', null),
+  PAYEE_EXPEDITE: { ...one('Expedite Mail check issued by OneInc ($1.89; claim from the payee-prep ledger, slot expedite)', null), seedFirst: true },
 };
 // The first expedite check (PA-PA-01-26-0749349) went out Standard — prep set no Payment Delivery (OneInc: Expedite=N, 2026-11-12);
 // the slot is re-prepared, so the claim is read from the ledger each time.

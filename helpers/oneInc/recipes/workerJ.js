@@ -27,9 +27,11 @@ module.exports = (api) => {
   // Positives + Partial negatives — J_DE_PIP: PIP Wage line (3) of PA-DE-01-25-0746526 carries a payment in "Pending
   // approval" (gate: Financials › Transactions, right before the case). Payee MATTHEW SPONG.
   const PIP = 'MATTHEW SPONG';
-  const PFULL = (transactionType, amount) => [G('requirePending', 3, true), { open: 'full' }, { payee: PIP }, { next: true }, { reserve: 'match:Wage' }, { step2: { transactionType, amount } }];
-  const PQUICK = (transactionType, amount) => [G('requirePending', 3, true), X('openQuickOnRow', 'claim cost', 'open', 'Wage'), { payee: PIP }, { step2: { transactionType, amount } }];
-  const N = 'J_DE_PIP claim PA-DE-01-25-0746526: exposure (3) "1st Party Wage Benefits - MATTHEW SPONG - PIP" has a $1.37 payment by the adjuster in "Pending approval" (benjsmit cannot change reserves on cloud; his PIP payments pend).';
+  // Moved 2026-11-13 from the PIP Wage line (3) to the 1st Party Vehicle line (2): the $1.37 on (3) has since been approved,
+  // while two $1.09 payments on (2) by benjsmit (11/06) are still "Pending approval".
+  const PFULL = (transactionType, amount) => [G('requirePending', 2, true), { open: 'full' }, { payee: PIP }, { next: true }, { reserve: 'match:^\\(2\\)' }, { step2: { transactionType, amount } }];
+  const PQUICK = (transactionType, amount) => [G('requirePending', 2, true), X('openQuickOnRow', 'claim cost', 'open', '^\\(2\\)'), { payee: PIP }, { step2: { transactionType, amount } }];
+  const N = 'J_DE_PIP claim PA-DE-01-25-0746526: exposure (2) "1st Party Vehicle - MATTHEW SPONG" has payments by the adjuster in "Pending approval" (two $1.09, 11/06).';
   add('GCCM-803/TC/TC-032', 'J_DE_PIP', VAL(PFULL('Final Payment', '1.31'), MSG032), [], N + ' Final Payment on that line.');
   add('GCCM-1003/VBR/TC-177', 'J_DE_PIP', VAL(PQUICK('Final Payment', '1.32'), MSG032), [], N + ' Quick Payment, Final Payment on that line.');
   add('GCCM-803/TC/TC-034', 'J_DE_PIP', VAL(PFULL('Partial Payment', '1.33'), null), [], N + ' Partial Payment on that line (itself held for approval).' + SUB('1.33'));

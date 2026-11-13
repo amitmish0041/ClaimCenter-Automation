@@ -164,7 +164,8 @@ async function runScenario(page, tc, recipe, ctx) {
       // "Name|Group" (default that), "0" = off. Only on claims the suite built (claim pool), once per claim per run.
       const ownerSpec = process.env.ONEINC_EXPOSURE_OWNER === undefined ? 'Stephanie Varga|GC Team 2' : process.env.ONEINC_EXPOSURE_OWNER;
       ctx.ownerSet = ctx.ownerSet || {};
-      if (ownerSpec && ownerSpec !== '0' && isPaymentRecipe(recipe) && !ctx.ownerSet[claim]
+      // openOrCreateCheck may submit a check too (1013 UIF TC-007 was refused for the examiner number, 2026-11-13).
+      if (ownerSpec && ownerSpec !== '0' && (isPaymentRecipe(recipe) || (recipe.steps || []).some((st) => st && Array.isArray(st.call) && /openOrCreateCheck/.test(String(st.call[0])))) && !ctx.ownerSet[claim]
         && Object.values(require('./claimPicker').readPool()).some((v) => Array.isArray(v) && v.some((e) => e && e.claim === claim))) {
         const [who, group] = ownerSpec.split('|');
         ctx.ownerSet[claim] = await require('./setupA').assignExposuresTo(page, who, group).catch((e) => `exposure owner not changed: ${e.message.split('\n')[0]}`);

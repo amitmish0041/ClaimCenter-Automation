@@ -206,7 +206,10 @@ async function acceptPayment(page, method = 'Check') {
   try {
     const how = METHODS.find((m) => m.re.test(method));
     if (!how) throw new W.Blocked(`Accept Payment with "${method}" is not automated (only Direct Deposit / Bank account and Check so far)`);
-    if (!/verification code/i.test(seen.text)) throw new W.Blocked(`Accept Payment: the payee portal did not ask for a verification code — it showed: ${seen.text.slice(0, 200)} (screenshot ${seen.shot})`);
+    // The text captured when the portal opened can stop at "Quick security check. We just" (still rendering, 1013 UIF
+    // TC-013, 2026-11-13): read the live page again before giving up.
+    for (let t = 0; t < 10 && !/verification code|TEXT ME/i.test(seen.text); t++) { await p.waitForTimeout(1500); seen.text = await payeeText(p).catch(() => seen.text); }
+    if (!/verification code|TEXT ME/i.test(seen.text)) throw new W.Blocked(`Accept Payment: the payee portal did not ask for a verification code — it showed: ${seen.text.slice(0, 200)} (screenshot ${seen.shot})`);
     const masked = (seen.text.match(/\(\d\*\*\) \*\*\*-\d{4}/) || ['the mobile on file'])[0];
     stage = 'verification code';
     await passVerification(p, masked);
