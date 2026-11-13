@@ -32,7 +32,7 @@ const SLOTS = [
   { slot: 'issued-mailed', accept: 'Physical check', then: 'wait for print date / Stop Pending from OneInc', cases: ['GCCM-787/TC/TC-033', 'GCCM-1013/INT/TC-128', 'GCCM-1013/APD/TC-135', 'GCCM-1013/UIF/TC-023'], amount: '1.85' },
   { slot: 'reject-single', accept: 'Reject', then: 'OneInc Cancelled (PM_Selection Customer) → Voided + Payee Rejected Payment activity', cases: ['GCCM-787/TC/TC-029'], amount: '1.86' },
   { slot: 'reject-joint', accept: 'Reject', joint: true, then: 'as reject-single, multi-payee check', cases: ['GCCM-787/TC/TC-030'], amount: '1.87' },
-  { slot: 'expedite', accept: 'Physical check', delivery: /^Expedite Mail$/, then: 'wait for the Expedite / Certified tracking number', cases: ['GCCM-1013/UIF/TC-011'], amount: '1.88' },
+  { slot: 'expedite', accept: 'Physical check', delivery: /^Expedite Mail$/, then: 'wait for the Expedite / Certified tracking number', cases: ['GCCM-1013/UIF/TC-011'], amount: '1.89' },
   // Stored-token recurrences (CPD.003/004/007/008, added 2026-11-12): a Weekly set of 8 checks whose FIRST check (Payment
   // Date today) goes to OneInc now; the payee accepts it as Direct Deposit with the texted code, which stores the token the
   // later (scheduled) checks of the set default to. The cases then open those scheduled checks (recipes/y_recurrenceToken.js).
@@ -62,6 +62,13 @@ async function payOne(page, claim, s) {
   const c0 = (parties.claimants || [])[0];
   const who = (s.payee === 'claimant' ? (c0 && (c0.name || c0.claimant || String(c0))) : parties.insured) || s.payee || 'insured';
   const A = require('../helpers/oneInc/setupA');
+  // Examiner-number workaround (2026-11-13), as scenarioRunner: the exposure owner must not be Benjamin Smith / Kevin Burke.
+  const owner = process.env.ONEINC_EXPOSURE_OWNER === undefined ? 'Stephanie Varga|GC Team 2' : process.env.ONEINC_EXPOSURE_OWNER;
+  if (owner && owner !== '0') {
+    const [o, g] = owner.split('|');
+    log(`${s.slot}: ${await A.assignExposuresTo(page, o, g).catch((e) => `exposure owner not changed: ${e.message.split('\n')[0]}`)}`);
+    await W.openClaim(page, claim);
+  }
   if (s.wc) await A.setIndemnityExposure(page, WC_EXPO);
   await W.openPayment(page, 'actions');
   await W.selectPayee(page, s.payee || 'insured');
@@ -83,14 +90,35 @@ async function payOne(page, claim, s) {
     await W.fill(page, 'Disability Weekly Rate', '500.00').catch(() => {});
   }
   if (s.delivery || s.recur) await W.nextFillingServicePeriod(page).catch(() => {});
-  if (s.delivery) await W.select(page, 'Payment Delivery', s.delivery).catch((e) => log(`${s.slot}: Payment Delivery not set (${e.message.split('\n')[0]})`));
+  // Payment Delivery shows only once ClaimsPay Method = Mailed Check, which also asks for a Reason for Check (2026-11-13).
+  if (s.delivery) {
+    await W.select(page, 'ClaimsPay Method', 'Mailed Check');
+    await W.settle(page, 2500);
+    await W.select(page, 'Reason for Check', /No ability to access portal/).catch((e) => log(`${s.slot}: Reason for Check not set (${String(e.message).split(String.fromCharCode(10))[0]})`));
+    await W.select(page, 'Payment Delivery', s.delivery);
+  }
+  // Recurrence Weekly re-renders the step with Due Date of First Check / Subsequent Checks / Frequency / Day of Week /
+  // Total Number of Checks / Total Recurrence Amount (replacing Payment Date) — wait for them before filling (2026-11-13).
   if (s.recur) {
     await W.select(page, 'Recurrence', s.recur.every);
-    await W.fill(page, 'Payment Date', today());
-    await W.fill(page, 'Total Number of Checks', s.recur.checks).catch((e) => log(`${s.slot}: Total Number of Checks not set (${e.message.split('\n')[0]})`));
+    const { readScreen: rs, findField: ff } = require('../helpers/oneInc/screenReader');
+    // Choosing Weekly alone does not redraw the step; a ClaimsPay Method change does, and the recurrence fields then stay
+    // when it is set back to Customer Choice (CONFIRMED 2026-11-13 on PA-PA-01-26-0749407) — so toggle it.
+    if (!ff(await rs(page), 'Total Number of Checks')) {
+      await W.select(page, 'ClaimsPay Method', 'Mailed Check').catch(() => {});
+      await W.settle(page, 2500);
+      await W.select(page, 'ClaimsPay Method', 'Customer Choice').catch(() => {});
+      await W.settle(page, 2500);
+    }
+    for (let t = 0; t < 15 && !ff(await rs(page), 'Total Number of Checks'); t++) await page.waitForTimeout(1000);
+    if (ff(await rs(page), 'Due Date of First Check')) await W.fill(page, 'Due Date of First Check', today()).catch(() => {});
+    await W.fill(page, 'Total Number of Checks', s.recur.checks);
+    await W.settle(page, 1500);
+    await W.fillRequiredEmpties(page).catch(() => {});
     if (s.wc) await A.fillRequired(page);
   }
-  const outcome = (await X.finishObserve(page)) || (page.__observed && page.__observed['Finish outcome']) || '';
+  let outcome = (await X.finishObserve(page)) || (page.__observed && page.__observed['Finish outcome']) || '';
+  if (await W.inWizard(page)) { const sc = await require('../helpers/oneInc/screenReader').readScreen(page); outcome = `Finish refused: ${[...sc.messages, sc.south].filter(Boolean).join(' / ')}`; await W.cancelWizard(page).catch(() => {}); }
   const sent = await checkOps.escalateChecks(page, s.amount).catch((e) => `escalation: ${e.message.split('\n')[0]}`);
   return { payee: who, outcome: String(outcome).slice(0, 300), sent: String(sent).slice(0, 300) };
 }
@@ -116,7 +144,7 @@ async function payOne(page, claim, s) {
   const made = todo.map((t) => given[t.slot] || (fresh[prof(t)] || []).shift());
   log(`claims: ${made.join(', ') || 'none'}`);
   for (const p of [...new Set(todo.map(prof))]) {
-    const idx = todo.map((t, i) => i).filter((i) => prof(todo[i]) === p && made[i]);
+    const idx = todo.map((t, i) => i).filter((i) => prof(todo[i]) === p && made[i] && !given[todo[i].slot]); // given claims: already in the pool, not re-marked
     if (idx.length) testClaims.markUsed(p, idx.map((i) => made[i]), { runId, scenarios: idx.map((i) => ({ claim: made[i], id: `payee-prep:${todo[i].slot}` })) });
   }
   const browser = await chromium.launch({ headless: !!arg('headless', false) });

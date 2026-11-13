@@ -138,8 +138,14 @@ async function passVerification(p, masked) {
     if (code) {
       await p.fill('#verificationCode', code);
       await btn(p, 'NEXT').click();
-      await p.waitForTimeout(6000);
-      if (/Is this information correct/i.test(await payeeText(p))) return n;
+      // Payment Details can take well over 6 s to load after a valid code (2026-11-13: it came up after the old 6 s check
+      // gave up, and the retry then looked for TEXT ME on Payment Details). Wait up to 30 s, stopping early on a code error.
+      for (let t = 0; t < 15; t++) {
+        await p.waitForTimeout(2000);
+        const now = await payeeText(p);
+        if (/Is this information correct/i.test(now)) return n;
+        if (/invalid|incorrect|expired/i.test(now) && await p.locator('#verificationCode').isVisible().catch(() => false)) break;
+      }
     }
     if (n < texts) { await btn(p, 'BACK').click().catch(() => {}); await p.waitForTimeout(3000); } // back to TEXT ME / CALL ME
   }
@@ -155,11 +161,29 @@ const METHODS = [
       await (await firstVisible(p, 'Bank account')).click();
       await p.waitForTimeout(3000);
       const eft = W.DUMMY_EFT; // the test bank account the suite already uses for ClaimCenter EFT
-      await p.locator('mat-radio-button', { hasText: eft.BankAccountType }).first().locator('label').first().click();
-      await p.fill('#acc_number', eft.BankAccountNumber);
-      await p.fill('#repeat_acc_number', eft.BankAccountNumber);
-      await p.fill('#routing_num', eft.BankRoutingNumber);
-      await p.locator('#routing_num').press('Tab');
+      // Account type radios: click the VISIBLE "Checking" text (the mat-radio-button label click timed out, 2026-11-13 —
+      // a hidden copy, as with the method cards); fall back to the radio role.
+      const typeText = await firstVisible(p, eft.BankAccountType);
+      if (typeText) await typeText.click({ timeout: 10000 });
+      else await p.getByRole('radio', { name: new RegExp(eft.BankAccountType, 'i') }).first().check({ force: true, timeout: 10000 });
+      // The ids (#acc_number …) were gone on 2026-11-13 — find each box by id, else by its floating label, else by order.
+      const inputs = async () => p.evaluate(() => [...document.querySelectorAll('input')].filter((i) => i.offsetParent && i.type !== 'radio' && i.type !== 'checkbox')
+        .map((i) => `${i.id || '-'}/${i.name || '-'}/${i.getAttribute('formcontrolname') || '-'}/${i.getAttribute('aria-label') || i.placeholder || '-'}`));
+      const box = async (id, label, nth) => {
+        if (await p.locator(id).isVisible().catch(() => false)) return p.locator(id);
+        const byLabel = p.getByLabel(label).first();
+        if (await byLabel.isVisible().catch(() => false)) return byLabel;
+        const byPh = p.getByPlaceholder(label).first();
+        if (await byPh.isVisible().catch(() => false)) return byPh;
+        const vis = p.locator('input:visible:not([type=radio]):not([type=checkbox])');
+        if (await vis.count() > nth) return vis.nth(nth);
+        throw new Error(`no "${label.source || label}" box (inputs: ${(await inputs()).join(', ')})`);
+      };
+      await (await box('#acc_number', /^Account number/i, 0)).fill(eft.BankAccountNumber);
+      await (await box('#repeat_acc_number', /^Confirm account number/i, 1)).fill(eft.BankAccountNumber);
+      const routing = await box('#routing_num', /^Routing number/i, 2);
+      await routing.fill(eft.BankRoutingNumber);
+      await routing.press('Tab');
       await p.waitForTimeout(3000);
     } },
   { re: /check|mail/i, name: 'Physical check',
@@ -178,16 +202,22 @@ async function acceptPayment(page, method = 'Check') {
   const { ctx, p } = page.__oneIncPayee || {};
   const seen = page.__oneIncPayeePortal;
   if (!p) throw new W.Blocked('Accept Payment: the payee portal was not opened earlier in this case');
+  let stage = 'start';
   try {
     const how = METHODS.find((m) => m.re.test(method));
     if (!how) throw new W.Blocked(`Accept Payment with "${method}" is not automated (only Direct Deposit / Bank account and Check so far)`);
     if (!/verification code/i.test(seen.text)) throw new W.Blocked(`Accept Payment: the payee portal did not ask for a verification code — it showed: ${seen.text.slice(0, 200)} (screenshot ${seen.shot})`);
     const masked = (seen.text.match(/\(\d\*\*\) \*\*\*-\d{4}/) || ['the mobile on file'])[0];
+    stage = 'verification code';
     await passVerification(p, masked);
+    stage = 'Payment Details agree checkbox';
     await p.locator('mat-checkbox label').first().click(); // "I have read and agree to the Payment Authorization…"
+    stage = 'Payment Details YES';
     await btn(p, 'YES').click();
     await p.waitForTimeout(5000);
+    stage = `Payment Options › ${how.name}`;
     await how.pick(p);
+    stage = 'SUBMIT';
     for (let i = 0; i < 2 && !/on its way/i.test(await payeeText(p)); i++) { // Bank account may confirm once more
       const submit = btn(p, 'SUBMIT');
       if (!await submit.isEnabled().catch(() => false)) break;
@@ -200,6 +230,10 @@ async function acceptPayment(page, method = 'Check') {
     await btn(p, 'FINISH').click().catch(() => {});
     await p.waitForTimeout(3000);
     return observe(page, 'OneInc payee acceptance', `${how.name}: ${(text.match(/Your payment is on its way.*?(?= FINISH|$)/) || [text.slice(0, 200)])[0]}`);
+  } catch (e) {
+    if (e instanceof W.Blocked) throw e;
+    // Which step failed and what the payee portal showed (2026-11-13: a click timed out after the code with no evidence).
+    throw new W.Blocked(`Accept Payment failed at "${stage}": ${String(e.message).split(String.fromCharCode(10))[0].slice(0, 150)} — the payee portal showed: ${(await payeeText(p)).replace(/^person /, '').slice(0, 300)} (screenshot ${await payeeShot(p)})`);
   } finally {
     if (ctx) await ctx.close().catch(() => {});
     page.__oneIncPayee = null;

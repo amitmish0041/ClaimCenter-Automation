@@ -44,6 +44,13 @@ async function finish(page, what) {
   for (let r = 0; r < 2; r++) if (!(await W.fillRequiredEmpties(page)).length) break;
   const inv = findField(await readScreen(page), 'Invoice Number/Remarks');
   if (inv && !inv.value) await W.fill(page, 'Invoice Number/Remarks', `ONEINC-${Date.now()}`).catch(() => {});
+  // Next refused (a step-1/2 rule): say what CC said instead of "Finish button is not on the screen" (2026-11-13).
+  if (!await page.getByRole('button', { name: 'Finish', exact: true }).first().isEnabled().catch(() => false)) {
+    const s = await readScreen(page);
+    const step = await W.currentStep(page).catch(() => null);
+    await W.cancelWizard(page).catch(() => {});
+    throw new W.Blocked(`${what} (test data) stopped on step ${step ? `${step.n} "${step.title}"` : '?'}: ${[...s.messages, s.south].filter(Boolean).join(' / ').slice(0, 300) || 'no message'}`);
+  }
   await W.clickButton(page, 'Finish');
   let msgs = '';
   for (let t = 0; t < 40 && await W.inWizard(page); t++) {
