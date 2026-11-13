@@ -709,6 +709,12 @@ function buildRequirementsFromComments(paragraphs, anchors, comments) {
       conditional: isConditional,
       conditionReason: isConditional ? `Conditional per template author's note: "${fieldName}"` : undefined,
     });
+    // An empty comment names no field (DIG190 R196 'A text-shaped value must appear for ""', 2026-11-12 - the only
+    // BLOCKED check, so the whole template reported BLOCKED): nothing to check.
+    if (!String(fieldName || '').trim() && req.type === 'dynamicShape' && req.shape === 'text') {
+      req.enabled = false;
+      req.disabledReason = 'The mapping doc comment on this text is empty — it names no field, so there is nothing to check.';
+    }
     req.docOrder = startIdx;
     requirements.push(req);
   }

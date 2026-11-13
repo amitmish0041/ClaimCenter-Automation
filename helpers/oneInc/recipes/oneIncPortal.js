@@ -211,8 +211,12 @@ module.exports = (api) => {
   const APN = 'New PA auto claim; claimant payee, $5.00 (over the standard user’s $1.00 authority, so the payment needs the approver Keith Eisenhart). ';
   add('GCCM-1003/CPD/TC-210', 'AUTO_PA', QUICK5, [V('ClaimsPay Type', { value: OTHER_MAILED }), V('ClaimsPay Method', { value: /check/i }), au('userContact', APPROVER), NO_CONTACT],
     APN + 'Approver has no email and no phone: ClaimsPay Type must default to Other / Mailed Check and Method to Check. Quick Payment.');
-  add('GCCM-759/CPD/TC-033', 'AUTO_PA', FULL5, [V('ClaimsPay Type', { value: OTHER_MAILED }), V('ClaimsPay Method', { value: /check/i }), au('userContact', APPROVER), NO_CONTACT],
-    APN + 'Approver has no email and no phone: ClaimsPay Type must default to Other / Mailed Check and Method to Check. Full Check.');
+  // QA review 2026-11-13: CPD.002 Full Check reworked — a NEW claimant contact with no phone / e-mail, paid as Additional Insured.
+  const NOPHONE = { first: 'NORA', last: 'NOCONTACT', role: 'Claimant' };
+  add('GCCM-759/CPD/TC-033', 'AUTO_PA', [{ call: ['wizardDriver.addClaimPersonContact', NOPHONE] }, { open: 'full' }, { select: ['Name', 'NORA NOCONTACT'] }, { select: ['Type', 'Additional Insured'] },
+    { next: true }, { reserve: 'open' }, { step2: { transactionType: 'Partial Payment', amount: '1.33' } }, { next: true }, { expectStep: 3 }],
+  [V('ClaimsPay Type', { value: OTHER_MAILED }), V('ClaimsPay Method', { value: /check/i })],
+  'New PA auto claim; a new claimant contact NORA NOCONTACT is added in Parties Involved without phone or e-mail, picked as the payee with Type Additional Insured, $1.33 Partial Payment to Step 3: ClaimsPay Type must default to Other / Mailed Check and Method to Check.');
   add('GCCM-1003/CPD/TC-211', 'AUTO_PA', [au('restoreUsers'), au('setUserEmail', APPROVER, 'approver@example.com'), ...QUICK5],
     [V('ClaimsPay Type', { value: /^(?![sS]*Other.*Mailed Check)/i }), au('restoreUsers')],
     APN + 'Approver given the email approver@example.com for the check (blanked again after): ClaimsPay Type must NOT default to Other / Mailed Check by this rule. Quick Payment.');

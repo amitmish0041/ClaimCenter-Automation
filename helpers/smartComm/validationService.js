@@ -170,6 +170,20 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
           const again = await run();
           scenarioResults[i] = again.status === 'ERROR' ? again : { ...again, retriedAfter: scenarioResults[i].reason };
         }
+        // "Data required to create document not found" is about the claim, not the template (PA-PA-01-26-0748059 and
+        // -0748058 gave it on DIG12, DIG38, DIG51, DIG129 and DIG194, 2026-11-12/13, while other PA auto claims
+        // generated) - run the scenario on its backup claims of the same LOB/State instead.
+        const firstReason = scenarioResults[i].reason || '';
+        if (scenarioResults[i].status === 'ERROR' && /Data required to create document not found/i.test(firstReason)) {
+          const failedClaim = scenarios[i].testData.claimNumber;
+          for (const alt of (scenarios[i].alternates || []).slice(0, 2)) {
+            console.log(`[SmartComm] ${scenarios[i].scenarioId}: claim ${failedClaim} cannot create this document ("Data required to create document not found") — trying backup claim ${alt.claimNumber}.`);
+            const again = await runScenario(workerPage, { template, scenario: { ...scenarios[i], testData: alt }, requirements, recipientEmail, variant, mentionsFraudLanguage, freeFormFields, interactive, s3Session, sourceFile, printPlan });
+            if (again.status === 'ERROR' && /Data required to create document not found/i.test(again.reason || '')) continue;
+            scenarioResults[i] = { ...again, originalClaimNumber: failedClaim, retriedAfter: firstReason };
+            break;
+          }
+        }
       }
     }
     await Promise.all(pages.map(worker));

@@ -47,7 +47,9 @@ module.exports = (api) => {
   const VEN = 'Opens the newest OneInc check to ADJUSTMENT SERVICES INC (an Address Book vendor) on the claim.';
   add('GCCM-1013/UIF/TC-006', 'AUTO_PA', [VENDOR_CHECK], [H('Cell Phone')], VEN);
   add('GCCM-1013/UIF/TC-008', 'AUTO_PA', [VENDOR_CHECK], [H('Email')], VEN);
-  // Non-vendor payee with e-mail + phone (the HO insured; joint Secondary Named Insured so the check is not held)
+  // Non-vendor payee with e-mail + phone (the HO insured; joint Secondary Named Insured so the check is not held). QA review
+  // 2026-11-13 (UIF.078 / UIF.079): Payment Contact Details set up on the contact in Parties Involved, then added as a joint
+  // payee — the claim prepare step sets them up on the insured and the Secondary Named Insured of every new claim.
   const RC_CHECK = op('openOrCreateCheck', { status: '^(Requesting|Awaiting submission)$', payee: '@insured' }, { payee: 'insured', type: 'Insured', joint: [{ who: 'sni' }] });
   const RC = 'HO claim: opens the newest OneInc check to the insured (who has e-mail and phone in Parties Involved), or creates one (insured + the Secondary Named Insured as joint payee, $1.4x) when there is none.';
   add('GCCM-1013/UIF/TC-005', 'HO_SNI', [RC_CHECK], [V('Cell Phone', { readonly: true, required: false })], RC);
@@ -90,13 +92,11 @@ module.exports = (api) => {
   // VBR.045 / VBR.046 / VBR.068 — Pay To The Order Of
   const EDIT_WARN = /When the 'pay to the order of' field is edited please ensure additional payees are added to the joint payee table/i;
   add('GCCM-1013/VBR/TC-054', 'AUTO_PA', [...FULL_PAYEES('claimant'), { click: 'Edit' }], [msg(EDIT_WARN)], 'Edit pressed on "Pay To The Order Of" with no additional payee.');
-  const LONG = 'A'.repeat(201);
-  add('GCCM-1013/VBR/TC-055', 'AUTO_PA', [...FULL_PAYEES('claimant'), { click: 'Edit' }, { fill: ['Pay To The Order Of', LONG] }, op('fieldLength', 'Pay To The Order Of'), NEXT], [V('Pay To The Order Of length', { value: /d/ }), msg(/Pay To may only contain 200 characters/i)], '201 characters entered.');
-  add('GCCM-1013/VBR/TC-084', 'AUTO_PA', [...FULL_PAYEES('claimant'), { click: 'Edit' }, { fill: ['Pay To The Order Of', LONG] }, op('fieldLength', 'Pay To The Order Of'), NEXT], [V('Pay To The Order Of length', { value: /d/ }), msg(/"?Pay to the Order Of"? may not exceed 200 characters/i)], '201 characters entered.');
-  // VBR.062 — Edit Mailing Address with a required part blank
-  add('GCCM-1013/VBR/TC-079', 'AUTO_PA', [...FULL_PAYEES('claimant'), op('toggle', 'Do you want to edit the Mailing Address?'), { fill: ['Address 1', ''] }, NEXT],
-    [msg(/Required fields on Address missing/i), msg(/Missing required field "Address 1"/i)],
-    '"Do you want to edit the Mailing Address?" ticked and Address 1 cleared. The design expects "Required fields on Address missing." for the edited address and the per-field messages for a New address; both are checked.');
+  // VBR.046 / VBR.068 (TC-055 / TC-084, 201 characters in Pay To The Order Of) deleted by QA review 2026-11-13.
+  // VBR.062 — Edit Mailing Address ticked with the Mailing Address set to None (QA review 2026-11-13): per-field messages at Next.
+  add('GCCM-1013/VBR/TC-079', 'AUTO_PA', [...FULL_PAYEES('claimant'), op('toggle', 'Do you want to edit the Mailing Address?'), sa('selectByLabel', 'Mailing Address', /^(<none>|None)$/i), NEXT],
+    [msg(/Missing required field "Address 1"/i), msg(/Missing required field "City"/i), msg(/Missing required field "State"/i), msg(/Missing required field "Zip Code"/i)],
+    '"Do you want to edit the Mailing Address?" ticked and Mailing Address set to None, then Next: the design expects Missing required field "Address 1" / "City" / "State" / "Zip Code".');
 
   // ── Payment amount rules on Next from Step 2 (AUTO_PA; never Finish) ──────────────────────────────────────────
   const PAY = (step2, pre = []) => [...FULL_PAYMENTS('claimant', 'open'), ...pre, { step2 }, NEXT];
@@ -157,7 +157,8 @@ module.exports = (api) => {
 
   // ── Delete a check → history event (VBR.067 / CHE.001) ──────────────────────────────────────────────────────
   const OTHER_VENDOR = VAL([op('ensureOpenReserve'), { open: 'full' }, { payee: 'vendor' }, { select: ['Type', 'Other'] }, { next: true }, { reserve: 'open' }, { step2: {} }, { next: true }, { expectStep: 3 }], null);
-  const DELETED = /Check to .+ for \$[\d,.]+ deleted\.? \(Check Number:/i;
+  // CHE.001 wording per QA review 2026-11-13: "Payment to <payee> for <amount> deleted. (Payment Number: <number>)".
+  const DELETED = /Payment to .+ for \$[\d,.]+ deleted\.? \(Payment Number:/i;
   const DEL_NOTE = 'Payment to an Address Book vendor with payee Type "Other", submitted ($1.37, Finish), then deleted from Check/Payment Details (confirm accepted); Claim History is read afterwards.';
   // History is noted after the payment, before the delete; only rows that are new after the delete count.
   const DEL = [op('historyMark'), op('openNewestCheck'), op('deleteCheck'), V('Delete outcome', { value: /^deleted/i }), op('historySince')];

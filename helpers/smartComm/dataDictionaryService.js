@@ -308,6 +308,11 @@ function matchAttributeForField(digNumber, { labelContext, technicalName } = {})
     const needle = normalizeForMatch(technicalName);
     const exact = candidates.find((r) => r.templateAttributeName && normalizeForMatch(r.templateAttributeName) === needle);
     if (exact) return { row: exact, matchedOn: 'technicalName' };
+    // The editor abbreviates "Employer" ("empLocationAddress" for the dictionary's "EmployerLocationAddress" - DIG34401
+    // 2026-11-13: unmatched by name, then judged as the locked "To Street Address" because the two addresses were the same).
+    const expanded = normalizeForMatch(String(technicalName).replace(/^emp(?=[A-Z])/, 'employer'));
+    const abbreviated = expanded !== needle && candidates.find((r) => r.templateAttributeName && normalizeForMatch(r.templateAttributeName) === expanded);
+    if (abbreviated) return { row: abbreviated, matchedOn: 'technicalName' };
     // CONFIRMED live 2026-10-05 (DIG122B): the live editor's own technical name sometimes carries an extra
     // business-context prefix the dictionary's own Column B doesn't ("claimantDOB" in the DOM vs just "DOB"
     // in the dictionary, for the row the dictionary itself names "Injured Person Date of Birth" — yet

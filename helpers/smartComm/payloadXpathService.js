@@ -125,7 +125,10 @@ function pathMatchesAny(node, segments, targetValue) {
 function evalCondition(root, item, arrayPrefixSegments, condText) {
   const m = condText.match(/^(.*?)\s*(!=|==|=)\s*(.*)$/);
   if (!m) return { ok: false, reason: `Could not parse condition "${condText}"` };
-  const [, leftRaw, op, rightRaw] = m;
+  let [, leftRaw, op, rightRaw] = m;
+  // The per-item path can be written on the right ("claim.locationCode.id == claim.policy.locations.locations.id",
+  // DIG34401 Employer Location Number 2026-11-13: every location matched, expected "1, 2, 3") - put it on the left.
+  if (!/^\s*['"]/.test(rightRaw) && !segmentsStartWith(toSegments(leftRaw.trim()), arrayPrefixSegments) && segmentsStartWith(toSegments(rightRaw.trim()), arrayPrefixSegments)) [leftRaw, rightRaw] = [rightRaw, leftRaw];
   const rightTrim = rightRaw.trim();
   const rightIsLiteral = /^'.*'$/.test(rightTrim) || /^".*"$/.test(rightTrim);
   const rightValue = rightIsLiteral ? rightTrim.slice(1, -1) : resolvePath(root, rightTrim);

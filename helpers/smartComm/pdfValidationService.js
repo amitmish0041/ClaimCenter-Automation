@@ -288,7 +288,13 @@ function closeWording(haystack, expected) {
   };
   for (const line of lines) {
     const got = tok(line);
+    // A short phrase (4 words or fewer) only counts as close when a word is misspelled, or when a short line swaps one
+    // word ("DIG 193" for "DIG 49DE") - dropping a word matched unrelated lines ("Employee's Name and Address" reported
+    // as "...HOSPITAL'S NAME AND ADDRESS", "From: Through:" as a question containing "from" - DIG192/DIG194 2026-11-12).
+    const short = want.length <= 4;
+    if (short && got.length === want.length && want.filter((w, k) => w !== got[k]).length === 1) return line.trim();
     for (let n = want.length - 1; n <= want.length + 1; n++) {
+      if (short && n !== want.length) continue;
       for (let st = 0; st + n <= got.length; st++) {
         const win = got.slice(st, st + n);
         // Same words in order, allowing exactly one difference (insert, delete or near-spelling substitution).
@@ -537,6 +543,16 @@ function evaluateOne(req, haystack, context) {
         if (printed) {
           const sameDay = Date.parse(printed.replace(/, \d{1,2}:\d{2}.*$/, '')) === want;
           return { expected: req.expectedValue, actual: printed, result: 'FAIL', reason: `The document prints this date as "${printed}" instead of "${req.expectedValue}" — ${sameDay ? 'a different date format' : 'a different format and one day off (likely a time-zone shift)'}.` };
+        }
+      }
+      // A one-line address the form prints in separate boxes (street | city | state | ZIP - DIG34401 Claimant Address,
+      // 2026-11-13, reported as "missing entirely" with every part printed).
+      const addr = /^(.+?),\s*([^,]+),\s*([A-Z]{2})\s+(\d{5})(?:-\d{4})?$/.exec(String(req.expectedValue).trim());
+      if (addr) {
+        const flat = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        const hay = ` ${flat(haystack)} `;
+        if (addr.slice(1).every((part) => hay.includes(` ${flat(part)} `))) {
+          return { expected: req.expectedValue, actual: addr.slice(1).join(' | '), result: 'PASS', reason: 'The form prints this address in separate boxes (street, city, state, ZIP) - every part is printed.' };
         }
       }
       return {

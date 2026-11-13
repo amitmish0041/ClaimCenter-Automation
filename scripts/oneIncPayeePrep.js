@@ -38,11 +38,11 @@ const SLOTS = [
   // later (scheduled) checks of the set default to. The cases then open those scheduled checks (recipes/y_recurrenceToken.js).
   { slot: 'recur-wc', profile: 'WCA_LW', payee: 'claimant', wc: true, recur: { every: 'Weekly', checks: '8' }, accept: 'Direct Deposit',
     then: 'stored token → open the next scheduled check of the set', amount: '1.91',
-    cases: ['GCCM-759/CPD/TC-038', 'GCCM-759/CPD/TC-043', 'GCCM-759/CPD/TC-044', 'GCCM-759/CPD/TC-046', 'GCCM-759/CPD/TC-047',
+    cases: ['GCCM-759/CPD/TC-043', 'GCCM-759/CPD/TC-046',
       'GCCM-1003/CPD/TC-215', 'GCCM-1003/CPD/TC-220', 'GCCM-1003/CPD/TC-221', 'GCCM-1003/CPD/TC-223', 'GCCM-1003/CPD/TC-224'] },
   { slot: 'recur-pa', payee: 'insured', recur: { every: 'Weekly', checks: '8' }, accept: 'Direct Deposit',
     then: 'stored token → open the next scheduled check of the set', amount: '1.92',
-    cases: ['GCCM-759/CPD/TC-036', 'GCCM-759/CPD/TC-045', 'GCCM-1003/CPD/TC-213', 'GCCM-1003/CPD/TC-222'] },
+    cases: ['GCCM-1003/CPD/TC-213', 'GCCM-1003/CPD/TC-222'] },
 ];
 const today = () => { const d = new Date(); return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`; };
 // WC indemnity (Lost Wages) payment, as recipes/existingClaims.js LW: wages on the exposure, Indemnity line, category 05.
