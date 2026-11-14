@@ -12,13 +12,16 @@ module.exports = (api) => {
   const cm = (fn, ...a) => ({ call: [`cmCreate.${fn}`, ...a] });
   const NOTE = 'Creates a new company in ContactManager (Name "ONEINC AUTO …", random Tax ID 99-xxxxxxx), adds it to a TEST claim from Address Book / 1099 Contacts (role Other), then reads OneInc\'s Business/Vendor Report by that Tax ID. ';
 
+  // 2026-11-14: ContactManager → OneInc vendor sync is not working on TEST (see cmCreate.SYNC_DEFECT) — TC-002 fails on it;
+  // the negatives first check the route (syncWorking) and fail with the defect while it is down.
+  const DEFECT = ' Known defect (11/14): nothing created or changed in ContactManager since 11/12 reaches OneInc; ContactManager has no OneInc message destination.';
   add('GCCM-795/INT/TC-002', 'ONEINC_ISSUED', [cm('createCompany', { vendor: true, address: true, tag: 'VENDOR' }), cm('addToClaim'), cm('onOneInc', { expect: 'present', waitMin: 20 })],
     [V('OneInc Vendor', { value: /^on the report/i }), V('OneInc Vendor BillingStreet', { value: /1103 RICHMONT/i }), V('OneInc Vendor City', { value: /SCRANTON/i })],
-    NOTE + 'Vendor (Company) with a primary address (1103 Richmont St, Scranton PA 18509): CreateVendor must bring it to OneInc with that name and address (waits up to 20 min).');
-  add('GCCM-795/INT/TC-003', 'ONEINC_ISSUED', [cm('createCompany', { vendor: false, address: true, tag: 'NONVENDOR' }), cm('addToClaim'), cm('onOneInc', { expect: 'absent', waitMin: 20 })],
+    NOTE + 'Vendor (Company) with a primary address (1103 Richmont St, Scranton PA 18509): CreateVendor must bring it to OneInc with that name and address (waits up to 20 min).' + DEFECT);
+  add('GCCM-795/INT/TC-003', 'ONEINC_ISSUED', [cm('syncWorking'), cm('createCompany', { vendor: false, address: true, tag: 'NONVENDOR' }), cm('addToClaim'), cm('onOneInc', { expect: 'absent', waitMin: 20 })],
     [V('OneInc Vendor', { value: /^not on the report/i })],
-    NOTE + 'Company NOT tagged Vendor (New Company › Company: tags Client / Company) with a primary address: no CreateVendor — it must not appear on OneInc within 20 min.');
-  add('GCCM-795/INT/TC-004', 'ONEINC_ISSUED', [cm('createCompany', { vendor: true, address: false, tag: 'NOADDR' }), cm('addToClaim'), cm('onOneInc', { expect: 'absent', waitMin: 20 })],
+    NOTE + 'Company NOT tagged Vendor (New Company › Company: tags Client / Company) with a primary address: no CreateVendor — it must not appear on OneInc within 20 min. First checks that ContactManager → OneInc works at all (a TC-002 vendor is on OneInc); fails with the defect when it does not.' + DEFECT);
+  add('GCCM-795/INT/TC-004', 'ONEINC_ISSUED', [cm('syncWorking'), cm('createCompany', { vendor: true, address: false, tag: 'NOADDR' }), cm('addToClaim'), cm('onOneInc', { expect: 'absent', waitMin: 20 })],
     [V('OneInc Vendor', { value: /^not on the report/i })],
-    NOTE + 'Vendor (Company) WITHOUT a primary address: no CreateVendor — it must not appear on OneInc within 20 min.');
+    NOTE + 'Vendor (Company) WITHOUT a primary address: no CreateVendor — it must not appear on OneInc within 20 min. First checks that ContactManager → OneInc works at all (a TC-002 vendor is on OneInc); fails with the defect when it does not.' + DEFECT);
 };

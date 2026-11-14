@@ -132,4 +132,26 @@ async function onOneInc(page, { expect = 'present', waitMin = 20 } = {}) {
   return R.observe(page, 'OneInc Vendor', `on the report after ${mins} min: ${v.BusinessName} (${v.BusinessID}), modified ${v.DateModified || '?'}`);
 }
 
-module.exports = { createCompany, addToClaim, onOneInc, LEDGER };
+// Test step for the NEGATIVE cases (TC-003 / TC-004): "not on OneInc" only means something while ContactManager → OneInc
+// works. Looks the latest vendors-with-address from the ledger (created by TC-002 runs) up on OneInc; if none of them is
+// there, the route is down and the case fails with the defect (user direction 2026-11-14: "fail the test case with
+// appropriate comment"). Observation "CM → OneInc vendor sync".
+const SYNC_DEFECT = 'DEFECT: ContactManager → OneInc vendor sync not working on TEST — no vendor created or changed in ContactManager since 11/12 has reached OneInc\'s Business/Vendor Report (new vendors ONEINC AUTO VENDOR 99-9890558 etc. missing; BAIKOW LEGAL LLC address change not applied, OneInc last modified 11/12). ContactManager › Message Queues has no OneInc destination (only Email, PC/CC/BC Contact Broadcast, Document Store); ClaimCenter Contact Message Transport and OneIncMessageTransport show nothing pending for contacts (checked 11/14). ContactManager → ClaimCenter sync works. The negative case cannot be verified until CreateVendor reaches OneInc.';
+async function syncWorking(page) {
+  const P = require('./portal');
+  let l = [];
+  try { l = JSON.parse(fs.readFileSync(LEDGER, 'utf8')); } catch (_) { /* none yet */ }
+  const probes = l.filter((e) => e.vendor && e.address).slice(-3);
+  const found = [];
+  for (const e of probes) {
+    let rows;
+    try { rows = await P.vendors({ tin: e.taxId.replace(/-/g, '') }); } catch (err) { throw new W.Blocked(err.message); }
+    if (rows.length) found.push(`${e.name} (${e.taxId})`);
+  }
+  const R = require('./checkOps');
+  if (found.length) return R.observe(page, 'CM → OneInc vendor sync', `working: ${found.join(', ')} on OneInc`);
+  await R.observe(page, 'CM → OneInc vendor sync', `not working: none of ${probes.map((e) => e.taxId).join(', ') || '(no test vendor yet)'} on OneInc`);
+  throw new Error(SYNC_DEFECT);
+}
+
+module.exports = { createCompany, addToClaim, onOneInc, syncWorking, SYNC_DEFECT, LEDGER };
