@@ -27,8 +27,9 @@ async function underwritingCompany(page) {
 
 // The claim's ClaimCenter payment on the OneInc portal (CR Tracking cc-…), newest first, optionally the one for `amount`;
 // waits up to `waitMin` minutes for a just-sent payment to appear. Each of `fields` (portal labels, e.g. "Additional Text
-// Field 13") becomes an observed field "OneInc <label>"; "OneInc payment" summarises which payment was read.
-async function oneIncPayment(page, { fields = [], amount = '', waitMin = 0 } = {}) {
+// Field 13") becomes an observed field "OneInc <label>"; "OneInc payment" summarises which payment was read. `as` names
+// the payment in those labels ("OneInc $1.73 Insured's Email") when a case reads more than one.
+async function oneIncPayment(page, { fields = [], amount = '', waitMin = 0, as = '' } = {}) {
   const claim = await claimNo(page);
   if (!claim) throw new W.Blocked('no claim number on the screen');
   const want = String(amount || '').replace(/[^0-9.]/g, '');
@@ -47,8 +48,9 @@ async function oneIncPayment(page, { fields = [], amount = '', waitMin = 0 } = {
   try { info = await P.payment({ crTracking: row['CR TRACKING NUMBER'] }); } catch (e) { throw new W.Blocked(e.message); }
   if (!info) throw new W.Blocked(`OneInc portal: payment ${row['CR TRACKING NUMBER']} could not be opened`);
   page.__oneIncPayment = info;
-  await observe(page, 'OneInc payment', `${info['CR Tracking Number']} — ${info.Amount}, ${info.Status}, created ${info['Created Date']}, claim ${info['Claim Number']}`);
-  for (const f of fields) await observe(page, `OneInc ${f}`, info[f] || '(blank)');
+  const pre = as ? `${as} ` : '';
+  await observe(page, `OneInc ${pre}payment`, `${info['CR Tracking Number']} — ${info.Amount}, ${info.Status}, created ${info['Created Date']}, claim ${info['Claim Number']}`);
+  for (const f of fields) await observe(page, `OneInc ${pre}${f}`, info[f] || '(blank)');
   return `OneInc payment ${info['CR Tracking Number']} (${info.Status})`;
 }
 

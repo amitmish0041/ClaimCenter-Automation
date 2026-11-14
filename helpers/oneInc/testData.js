@@ -314,7 +314,8 @@ const D = {
     // The payload-cleansing payees (portalChecks.DIRTY) are claim-only people the suite creates itself (fresh claims only).
     build: (() => {
       const PC = require('./portalChecks');
-      const spec = Object.values(PC.DIRTY).find((d) => `${d.first} ${d.last}`.toUpperCase() === name.toUpperCase());
+      // … and the e-mail / phone payees of paymentContact.js (INT.024 / INT.033), role Other.
+      const spec = [...Object.values(PC.DIRTY), ...Object.values(require('./paymentContact').PEOPLE)].find((d) => `${d.first} ${d.last}`.toUpperCase() === name.toUpperCase());
       if (spec) return async (page) => { await require('./wizardDriver').addClaimPersonContact(page, spec); return `added claim-only contact "${name}"`; };
       const co = Object.values(PC.COMPANIES).find((c) => c.name.toUpperCase() === name.toUpperCase());
       return co ? async (page) => { await require('./wizardDriver').addClaimCompanyContact(page, co); return `added claim-only company "${name}"`; } : null;

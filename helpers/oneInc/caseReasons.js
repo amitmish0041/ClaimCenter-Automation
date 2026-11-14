@@ -76,9 +76,9 @@ const REASONS = {
   'GCCM-1013/INT/TC-110': M(DOC_SEND),
   'GCCM-1013/INT/TC-111': M(DOC_SEND),
   'GCCM-1013/INT/TC-112': M(DOC_SEND),
-  ...Object.fromEntries(['113', '114', '115', '116', '117', '118', '119', '120', '121', '122', '123', '124', '125', '126', '127'].map((n) => [`GCCM-1013/INT/TC-${n}`, M(PAYLOAD)])),
+  ...Object.fromEntries(['113', '114', '115', '116', '117', '118', '119', '120', '122', '123', '124', '125', '126', '127'].map((n) => [`GCCM-1013/INT/TC-${n}`, M(PAYLOAD)])),
   'GCCM-1013/INT/TC-128': M(WEBHOOK.replace('a status', 'a ClaimsPay Data Change webhook')),
-  'GCCM-1013/INT/TC-129': M('Compares the e-mail / phone sent to OneInc on new vs existing payments after editing the payment contact details — ' + PAYLOAD),
+  // TC-121 / TC-129 (e-mail cleansing / e-mail + phone updates) are read on the OneInc portal — recipes/y_payloadContact.js (2026-11-14).
   'GCCM-1013/APD/TC-134': M(`"Get Payment Status" must pull the latest status from OneInc — ${NO_ONEINC} (and Cloud shows a "Refresh" button instead, see TC-133)`),
   'GCCM-1013/APD/TC-135': M(WEBHOOK.replace('a status', 'a ClaimsPay Data Change webhook')),
 
