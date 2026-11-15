@@ -849,8 +849,36 @@ async function completeDocument(page, { log = console.log, scenarioId = 'scenari
   const completeBtn = page.getByRole('button', { name: 'Complete Document', exact: true });
   if (!(await completeBtn.isVisible().catch(() => false))
     && await page.getByRole('button', { name: 'Request Approval', exact: true }).isVisible().catch(() => false)) {
-    // Discovery (SMARTCOMM_APPROVAL_DISCOVERY=1): press Request Approval once and record what ClaimCenter shows next.
-    if (process.env.SMARTCOMM_APPROVAL_DISCOVERY === '3') {
+    // Approve as the assignee (SMARTCOMM_APPROVAL_DISCOVERY=4, 2026-11-15): the requester can't approve its own request
+    // (Approve disabled, DIG179 2026-11-10), so the assigned approver logs in (shared TEST password CC_APPROVER_PASS) in
+    // a separate browser context and approves; then the requester's Documents page is recorded.
+    if (process.env.SMARTCOMM_APPROVAL_DISCOVERY === '4' && process.env.CC_APPROVER_PASS) {
+      const approval = require('./documentApprovalService');
+      const claimNumber = ((await page.locator('body').innerText().catch(() => '')).match(/Claim:\s*([A-Z]{2}-[A-Z]{2}-\d{2}-\d{2}-\d{7})/) || [])[1];
+      const req = await approval.requestApproval(page, { log, scenarioId });
+      // The people on the activity row, Assigned To first ("Bill Folmar" on DIG179 — login willfolm, per user 2026-11-15).
+      const names = await approval.assigneeOf(page, { description: req.description }).catch((e) => { log(`[Approval] assignee not read: ${e.message.split('\n')[0]}`); return []; });
+      const { loginIdFor } = require('../e2eSteps');
+      const ALIASES = { billfolm: 'willfolm' };
+      const users = [...new Set(names.map((n) => { const id = loginIdFor(n); return ALIASES[id] || id; }))].filter((u) => u && u !== 'keviburk');
+      log(`[Approval] claim ${claimNumber}; activity names ${names.join(' / ')} -> trying ${users.join(', ')}`);
+      for (const user of claimNumber ? users : []) {
+        const ctx2 = await page.context().browser().newContext();
+        try {
+          const p2 = await ctx2.newPage();
+          const B = require('../claimCenterBase');
+          await B.loginToClaimCenter(p2, { username: user, password: process.env.CC_APPROVER_PASS });
+          await B.openExistingClaim(p2, claimNumber);
+          await approval.approveFromWorkplan(p2, { description: req.description, log, scenarioId: `${scenarioId}_approver_${user}` });
+          log(`[Approval] approved as ${user}`);
+          break;
+        } catch (e) { log(`[Approval] approve as ${user} failed: ${e.message.split('\n')[0]}`); } finally { await ctx2.close().catch(() => {}); }
+      }
+      await page.getByRole('menuitem', { name: 'Documents', exact: true }).click().catch(() => {});
+      await page.waitForTimeout(6000);
+      const d4 = await saveDiagnostic(page, `${scenarioId}_documentsAfterApproval`).catch(() => null);
+      log(`[Approval] documents: ${d4 ? d4 + '.png' : ''} | ${((await page.locator('body').innerText().catch(() => '')) || '').replace(/\s+/g, ' ').slice(0, 2500)}`);
+    } else if (process.env.SMARTCOMM_APPROVAL_DISCOVERY === '3') {
       const approval = require('./documentApprovalService');
       const req = await approval.requestApproval(page, { assignToRe: /Bill Folmar \(System Admin Group\)/, log, scenarioId });
       await approval.approveFromWorkplan(page, { description: req.description, log, scenarioId }).catch((e) => log(`[Approval] approve failed: ${e.message.split('\n')[0]}`));

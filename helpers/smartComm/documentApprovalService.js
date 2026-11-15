@@ -65,6 +65,19 @@ async function approveFromWorkplan(page, { description, log = console.log, scena
   const approve = page.getByRole('button', { name: 'Approve', exact: true });
   if (!(await approve.isEnabled().catch(() => false))) {
     await saveDiagnostic(page, `${scenarioId}_approveDisabled`).catch(() => null);
+    // The list's Approve stays disabled even for the assignee (DIG179 as richshea, 2026-11-15): open the activity itself.
+    await row.getByText('Document Approval', { exact: true }).first().click().catch(() => {});
+    await wait(page, 4000);
+    const inner = page.getByRole('button', { name: /^Approve$/ }).first();
+    const d = await saveDiagnostic(page, `${scenarioId}_activityOpened`).catch(() => null);
+    log(`[Approval] activity opened: ${d ? d + '.png' : ''} | ${((await page.locator('body').innerText().catch(() => '')) || '').replace(/\s+/g, ' ').slice(0, 1200)}`);
+    if (await inner.isEnabled().catch(() => false)) {
+      await inner.click();
+      await wait(page, 5000);
+      await saveDiagnostic(page, `${scenarioId}_approved`).catch(() => null);
+      log(`[Approval] Approve pressed inside the activity: ${rowText}`);
+      return rowText;
+    }
     throw new Error(`APPROVAL_NOT_ALLOWED: the Approve button is disabled for the signed-in user on "${rowText}" - the activity must be assigned to the user who approves it.`);
   }
   await approve.click();
@@ -74,4 +87,20 @@ async function approveFromWorkplan(page, { description, log = console.log, scena
   return rowText;
 }
 
-module.exports = { requestApproval, approveFromWorkplan, openWorkplan };
+// The people named on this document's open "Document Approval" activity row, in column order: the cell after the
+// description is Assigned To ("Bill Folmar"), then Assigned By (DIG179 2026-11-15 — the header-index read gave the
+// wrong one, Richard Shearer).
+async function assigneeOf(page, { description } = {}) {
+  await openWorkplan(page).catch(() => {});
+  await lastPage(page);
+  return page.evaluate((desc) => {
+    const rows = [...document.querySelectorAll('tr')].filter((r) => r.offsetParent);
+    const row = rows.filter((r) => /Document Approval/.test(r.innerText) && (!desc || r.innerText.includes(desc)) && /\bOpen\b/.test(r.innerText)).pop();
+    if (!row) return [];
+    const cells = [...row.children].map((c) => (c.innerText || '').replace(/\s+/g, ' ').trim());
+    const after = cells.slice(cells.findIndex((c) => desc && c.includes(desc)) + 1);
+    return after.filter((c) => /^[A-Z][a-z]+(?: [A-Z][a-z'-]+)+$/.test(c));
+  }, description || '');
+}
+
+module.exports = { requestApproval, approveFromWorkplan, openWorkplan, assigneeOf };

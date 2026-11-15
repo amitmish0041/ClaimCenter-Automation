@@ -1102,8 +1102,20 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     // printed — same as its mapping doc's page images). Text checks can't say anything about such a document:
     // report them as not verifiable rather than as missing content.
     if (template.overlayMode && String(text || '').replace(/\s+/g, '').length < 50) {
+      // ...but OCR reads such pages well (DIG150MIC, 2026-11-15: 10,000 characters of the pamphlet read back): with a
+      // readable OCR text a value is judged on it — found = PASS, not printed = FAIL.
+      const ocr = validations.some((v) => v.result === 'FAIL') ? await require('./pdfOcrService').ocrPdfText(pdfPath).catch(() => null) : null;
+      const ocrReadable = ocr && ocr.replace(/\s+/g, '').length >= 500;
       for (const v of validations) {
         if (v.result !== 'FAIL') continue;
+        if (ocrReadable) {
+          if (require('./pdfOcrService').ocrContains(ocr, v.expected)) {
+            Object.assign(v, { result: 'PASS', actual: v.expected, reason: 'The overlay form is printed as page images; OCR of the pages reads this value.' });
+          } else {
+            v.reason = 'The overlay form is printed as page images; OCR reads the pages, but this value is not printed on them.';
+          }
+          continue;
+        }
         v.result = 'BLOCKED';
         v.reason = 'Overlay form printed as page images only (no text layer), so this value can\'t be read from the PDF — not verifiable, not a defect.';
       }

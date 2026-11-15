@@ -413,6 +413,16 @@ const COMMENT_NAME_SYNONYMS = {
   'from city state zip': 'From Address City',
 };
 
+function editDistance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
 function matchDictionaryRowByCommentFieldName(digNumber, fieldName) {
   const candidates = getAttributesForTemplate(digNumber);
   const name = normalizeForMatch(fieldName);
@@ -425,6 +435,13 @@ function matchDictionaryRowByCommentFieldName(digNumber, fieldName) {
   for (const col of ['attributeName', 'templateAttributeName']) {
     const exact = candidates.find((r) => r[col] && normalizeForMatch(r[col]) === name);
     if (exact) return { row: exact, matchedOn: col + 'Exact' };
+  }
+  // A mapping-doc typo ("Underwriting Compnay" — DIG244, 2026-11-15): one name within two letter edits of the field name
+  // (names of 10+ letters only, and only when exactly one row is that close).
+  if (name.length >= 10) {
+    const near = candidates.filter((r) => r.attributeName && Math.abs(normalizeForMatch(r.attributeName).length - name.length) <= 2
+      && editDistance(normalizeForMatch(r.attributeName), name) <= 2);
+    if (near.length === 1) return { row: near[0], matchedOn: 'attributeNameTypo' };
   }
   for (const col of ['attributeName', 'templateAttributeName']) {
     const hit = candidates

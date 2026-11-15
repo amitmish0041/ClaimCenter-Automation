@@ -187,6 +187,7 @@ function extractInlineLabelValues(line) {
 // will never match that sample text, so useLiteralText below must not fire for these; they're a guaranteed
 // FAIL otherwise regardless of whether the real recipient's own name/address correctly prints elsewhere.
 const RECIPIENT_DEPENDENT_RE = /\badditional recipient\b|\bcc\b.*\b(?:name|address|number)\b|^copy\b/i;
+const HARDCODED_RE = /\bhard[\s-]?coded\b|\balways (?:display|address|show|print)|^\s*default(?:s|ed)? to\b/i;
 
 // What's left of a "Dear <To Name>:" line once the name field is cut out — with or without the mock-up's sample
 // honorific. Checked as a salutation (see makeSalutationRequirement), never as literal text.
@@ -241,7 +242,11 @@ function makeDynamicRequirement(n, fieldName, value, { conditional = false, cond
   // field could still legitimately be an unrecognized per-claim-varying sample value, where a literal match
   // would be wrong. Additional-recipient-dependent content (see RECIPIENT_DEPENDENT_RE) is excluded even
   // though it's conditional and text-shaped — it's per-claim data, not boilerplate.
-  const useLiteralText = !field && conditional && shape === 'text' && value && value.trim().length > 3 && !RECIPIENT_DEPENDENT_RE.test(fieldName);
+  // A comment that says the text is fixed ("Hard Coded (always address this letter to this name and address)",
+  // "Will always display “…”", "Default to “…”" — DIG151INT, DIG243, DIG7, 2026-11-15, BLOCKED with no dictionary row):
+  // the anchored text itself prints, so it's checked as literal text.
+  const fixedText = !field && shape === 'text' && value && value.trim().length > 3 && HARDCODED_RE.test(String(fieldName || ''));
+  const useLiteralText = fixedText || (!field && conditional && shape === 'text' && value && value.trim().length > 3 && !RECIPIENT_DEPENDENT_RE.test(fieldName));
   const req = {
     id: `R${n}`,
     description: field
