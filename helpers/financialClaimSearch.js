@@ -10,7 +10,15 @@
 const W = require('./oneInc/wizardDriver');
 
 async function openAdvancedSearch(page) {
-  await page.locator('[id="TabBar-SearchTab"]').first().click();
+  // A menu / validation overlay or a busy screen (Claim Calendar) left the tab unclickable after a screen walk
+  // (Migrated RX024 / RX029, 2026-11-15): close menus, reload home, then click.
+  const tab = page.locator('[id="TabBar-SearchTab"]').first();
+  if (!await tab.click({ timeout: 8000 }).then(() => true).catch(() => false)) {
+    await W.closeMenus(page).catch(() => {});
+    await page.goto(require('./claimCenterBase').BASE_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await W.settle(page, 4000);
+    await tab.click({ timeout: 20000 });
+  }
   await W.settle(page, 3500);
   const adv = page.getByText(/^Advanced Search$/).first();
   if (await adv.isVisible().catch(() => false)) { await adv.click(); await W.settle(page, 3000); }

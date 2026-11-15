@@ -2911,5 +2911,424 @@
   ],
   "optional": [],
   "added": true
+ },
+ {
+  "id": "RX024",
+  "num": 124,
+  "feature": "Migrated Claims - integrity",
+  "name": "RX024_Every claim screen loads on migrated open claims (3 claims)",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX024\b",
+  "reuses": [
+   "regression/migratedClaims.pick (Advanced Search by group, claim year < 26)",
+   "migratedClaims.walk",
+   "financialClaimSearch.openClaimViaSearch"
+  ],
+  "data": [
+   "Migrated claims found on cloud (REG_MIGRATED_OPEN / REG_MIGRATED_CLOSED override)"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Read-only. Opens every top-level left-nav screen; header must carry policy, insured, loss date, status, adjuster.",
+  "requires": [],
+  "optional": [
+   "REG_MIGRATED_OPEN",
+   "REG_MIGRATED_CLOSED"
+  ],
+  "added": true
+ },
+ {
+  "id": "RX025",
+  "num": 125,
+  "feature": "Migrated Claims - integrity",
+  "name": "RX025_Every claim screen loads on migrated closed claims (2 claims)",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX025\b",
+  "reuses": [
+   "regression/migratedClaims.pick (Advanced Search by group, claim year < 26)",
+   "migratedClaims.walk"
+  ],
+  "data": [
+   "Migrated claims found on cloud (REG_MIGRATED_OPEN / REG_MIGRATED_CLOSED override)"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Read-only.",
+  "requires": [],
+  "optional": [
+   "REG_MIGRATED_OPEN",
+   "REG_MIGRATED_CLOSED"
+  ],
+  "added": true
+ },
+ {
+  "id": "RX026",
+  "num": 126,
+  "feature": "Migrated Claims - integrity",
+  "name": "RX026_Financials summary reconciles to the Transactions ledger on migrated open claims (4 claims)",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX026\b",
+  "reuses": [
+   "regression/migratedClaims.pick (Advanced Search by group, claim year < 26)",
+   "migratedClaims.financialSummary/transactions/reconcile"
+  ],
+  "data": [
+   "Migrated claims found on cloud (REG_MIGRATED_OPEN / REG_MIGRATED_CLOSED override)"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Read-only. Net = Remaining + Future + Paid \u2212 Recoveries; Claim Total = sum of exposure lines; Total Paid / Recoveries = posted ledger rows (every page); no negative remaining reserve.",
+  "requires": [],
+  "optional": [
+   "REG_MIGRATED_OPEN",
+   "REG_MIGRATED_CLOSED"
+  ],
+  "added": true
+ },
+ {
+  "id": "RX027",
+  "num": 127,
+  "feature": "Migrated Claims - integrity",
+  "name": "RX027_Financials reconcile on migrated closed claims; no open reserve, future payment or open exposure (4 claims)",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX027\b",
+  "reuses": [
+   "regression/migratedClaims.pick (Advanced Search by group, claim year < 26)",
+   "migratedClaims.reconcile"
+  ],
+  "data": [
+   "Migrated claims found on cloud (REG_MIGRATED_OPEN / REG_MIGRATED_CLOSED override)"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Read-only.",
+  "requires": [],
+  "optional": [
+   "REG_MIGRATED_OPEN",
+   "REG_MIGRATED_CLOSED"
+  ],
+  "added": true
+ },
+ {
+  "id": "RX028",
+  "num": 128,
+  "feature": "Migrated Claims - integrity",
+  "name": "RX028_Migrated claims (open and closed) are found by Claim # and by Policy #",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX028\b",
+  "reuses": [
+   "regression/migratedClaims.pick (Advanced Search by group, claim year < 26)",
+   "financialClaimSearch.searchClaims/openAdvancedSearch"
+  ],
+  "data": [
+   "Migrated claims found on cloud (REG_MIGRATED_OPEN / REG_MIGRATED_CLOSED override)"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Read-only.",
+  "requires": [],
+  "optional": [
+   "REG_MIGRATED_OPEN",
+   "REG_MIGRATED_CLOSED"
+  ],
+  "added": true
+ },
+ {
+  "id": "RX029",
+  "num": 129,
+  "feature": "Migrated Claims - integrity",
+  "name": "RX029_Migrated open claims pass Validate Claim + Exposures \u2014 Ability to pay (3 claims)",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX029\b",
+  "reuses": [
+   "regression/migratedClaims.pick (Advanced Search by group, claim year < 26)",
+   "e2eSteps.validateCloud"
+  ],
+  "data": [
+   "Migrated claims found on cloud (REG_MIGRATED_OPEN / REG_MIGRATED_CLOSED override)"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Read-only. Any validation error is reported with its screen.",
+  "requires": [],
+  "optional": [
+   "REG_MIGRATED_OPEN",
+   "REG_MIGRATED_CLOSED"
+  ],
+  "added": true
+ },
+ {
+  "id": "RX030",
+  "num": 130,
+  "feature": "Migrated Claims - integrity",
+  "name": "RX030_Every check on migrated claims carries a payee, amount and status",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX030\b",
+  "reuses": [
+   "regression/migratedClaims.pick (Advanced Search by group, claim year < 26)",
+   "oneInc/checkOps.checkRows"
+  ],
+  "data": [
+   "Migrated claims found on cloud (REG_MIGRATED_OPEN / REG_MIGRATED_CLOSED override)"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Read-only. Up to 6 claims; claims without checks are skipped.",
+  "requires": [],
+  "optional": [
+   "REG_MIGRATED_OPEN",
+   "REG_MIGRATED_CLOSED"
+  ],
+  "added": true
+ },
+ {
+  "id": "RX031",
+  "num": 131,
+  "feature": "Migrated Claims - operations",
+  "name": "RX031_A note can be added to a migrated open claim",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX031\b",
+  "reuses": [
+   "regression/migratedClaims.pick (Advanced Search by group, claim year < 26)",
+   "regressionSteps.action (Note)"
+  ],
+  "data": [
+   "Migrated claims found on cloud (REG_MIGRATED_OPEN / REG_MIGRATED_CLOSED override)"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Writes one note.",
+  "requires": [],
+  "optional": [
+   "REG_MIGRATED_OPEN",
+   "REG_MIGRATED_CLOSED"
+  ],
+  "added": true
+ },
+ {
+  "id": "RX032",
+  "num": 132,
+  "feature": "Migrated Claims - operations",
+  "name": "RX032_Loss Details saves unchanged (Edit \u2192 Update) on migrated open claims",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX032\b",
+  "reuses": [
+   "regression/migratedClaims.pick (Advanced Search by group, claim year < 26)",
+   "regressionSteps.editAndUpdate",
+   "oneInc/setupA.openLossDetailsGeneral"
+  ],
+  "data": [
+   "Migrated claims found on cloud (REG_MIGRATED_OPEN / REG_MIGRATED_CLOSED override)"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Edit \u2192 Update with no change on 2 claims: cloud validation over migrated values. A refusal is a finding (adjuster must fill fields on-prem never required).",
+  "requires": [],
+  "optional": [
+   "REG_MIGRATED_OPEN",
+   "REG_MIGRATED_CLOSED"
+  ],
+  "added": true
+ },
+ {
+  "id": "RX033",
+  "num": 133,
+  "feature": "Migrated Claims - operations",
+  "name": "RX033_An open exposure saves unchanged (Edit \u2192 Update) on migrated open claims",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX033\b",
+  "reuses": [
+   "regression/migratedClaims.pick (Advanced Search by group, claim year < 26)",
+   "regressionSteps.editAndUpdate",
+   "oneInc/needsData.openExposureMatching"
+  ],
+  "data": [
+   "Migrated claims found on cloud (REG_MIGRATED_OPEN / REG_MIGRATED_CLOSED override)"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Edit \u2192 Update with no change on 2 claims.",
+  "requires": [],
+  "optional": [
+   "REG_MIGRATED_OPEN",
+   "REG_MIGRATED_CLOSED"
+  ],
+  "added": true
+ },
+ {
+  "id": "RX034",
+  "num": 134,
+  "feature": "Migrated Claims - operations",
+  "name": "RX034_The insured contact saves unchanged (Edit \u2192 Update) on migrated open claims",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX034\b",
+  "reuses": [
+   "regression/migratedClaims.pick (Advanced Search by group, claim year < 26)",
+   "regressionSteps.editAndUpdate"
+  ],
+  "data": [
+   "Migrated claims found on cloud (REG_MIGRATED_OPEN / REG_MIGRATED_CLOSED override)"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Edit \u2192 Update with no change on 2 claims (Contact Manager-linked contacts).",
+  "requires": [],
+  "optional": [
+   "REG_MIGRATED_OPEN",
+   "REG_MIGRATED_CLOSED"
+  ],
+  "added": true
+ },
+ {
+  "id": "RX035",
+  "num": 135,
+  "feature": "Migrated Claims - operations",
+  "name": "RX035_An activity is created on a migrated open claim and completed",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX035\b",
+  "reuses": [
+   "regression/migratedClaims.pick (Advanced Search by group, claim year < 26)",
+   "e2eSteps.completeActivitiesCloud({ only })",
+   "financialRules.hasActivity"
+  ],
+  "data": [
+   "Migrated claims found on cloud (REG_MIGRATED_OPEN / REG_MIGRATED_CLOSED override)"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. New Activity \u203a General \u203a \"***Edit This Subject Line***\"; completes only its own activity.",
+  "requires": [],
+  "optional": [
+   "REG_MIGRATED_OPEN",
+   "REG_MIGRATED_CLOSED"
+  ],
+  "added": true
+ },
+ {
+  "id": "RX036",
+  "num": 136,
+  "feature": "Migrated Claims - operations",
+  "name": "RX036_A payment ($1.xx) is made on a migrated reserve line",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX036\b",
+  "reuses": [
+   "regression/migratedClaims.pick (Advanced Search by group, claim year < 26)",
+   "financialPayments.makePayment",
+   "migratedClaims.financialSummary"
+  ],
+  "data": [
+   "Migrated claims found on cloud (REG_MIGRATED_OPEN / REG_MIGRATED_CLOSED override)"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. TEST/DEV only (OneInc). Pays the line claimant from a line with $5+ remaining reserve; tries up to 6 claims.",
+  "requires": [],
+  "optional": [
+   "REG_MIGRATED_OPEN",
+   "REG_MIGRATED_CLOSED"
+  ],
+  "added": true
+ },
+ {
+  "id": "RX037",
+  "num": 137,
+  "feature": "Migrated Claims - operations",
+  "name": "RX037_A migrated closed claim reopens, then closes again",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX037\b",
+  "reuses": [
+   "regression/migratedClaims.pick (Advanced Search by group, claim year < 26)",
+   "regressionSteps.action (Reopen Claim)",
+   "e2eSteps.submitCloseScreen"
+  ],
+  "data": [
+   "Migrated claims found on cloud (REG_MIGRATED_OPEN / REG_MIGRATED_CLOSED override)"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Leaves the claim Closed; if the close is refused the case says which claim was left open.",
+  "requires": [],
+  "optional": [
+   "REG_MIGRATED_OPEN",
+   "REG_MIGRATED_CLOSED"
+  ],
+  "added": true
+ },
+ {
+  "id": "RX038",
+  "num": 138,
+  "feature": "Litigation",
+  "name": "RX038_A Matter (lawsuit details) is created on a claim and listed on Litigation",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX038\b",
+  "reuses": [
+   "regressionSteps.pooledClaim",
+   "regressionSteps.action (Matter)"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Shared PA claim from the pool.",
+  "requires": [
+   "POLICY_PA_AUTO"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX039",
+  "num": 139,
+  "feature": "Claim Lifecycle - reopen",
+  "name": "RX039_A closed claim reopens and closes again",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX039\b",
+  "reuses": [
+   "regressionSteps.fileClaim",
+   "e2eSteps.close",
+   "e2eSteps.submitCloseScreen"
+  ],
+  "data": [],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Files and closes its own PA claim.",
+  "requires": [
+   "POLICY_PA_AUTO",
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
  }
-]
+]

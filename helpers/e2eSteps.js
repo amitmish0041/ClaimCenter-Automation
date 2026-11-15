@@ -582,6 +582,36 @@ async function close(page, claimNumber) {
   await L.assertClaimStatus(page, 'Closed');
 }
 
+// Close Exposure / Close Claim screen: Note + Outcome (first option matching outcomeRe, else the first real one) › the
+// button; accepts the DMEC0002 warning; throws with CC's errors when the close is refused.
+async function submitCloseScreen(page, button, outcomeRe) {
+  await page.locator('textarea[name$="Note"], textarea').first().fill('Automated E2E close').catch(() => {});
+  const sel = page.locator('select[name$="Outcome"]').first();
+  const opt = await sel.locator('option').evaluateAll((os, re) => {
+    const real = os.filter(o => o.value && !/^<?none>?$/i.test(o.text.trim()));
+    return (real.find(o => new RegExp(re, 'i').test(o.text)) || real[0] || {}).value;
+  }, outcomeRe);
+  if (opt) await sel.selectOption(opt);
+  await page.waitForTimeout(1000);
+  await page.getByRole('button', { name: button, exact: true }).first().click();
+  await page.waitForTimeout(3500);
+  // DMEC0002 (warning): "open reserve of $X … If you want to set this reserve to $0 please click Close Exposure
+  // again" — accept it (the reserve is zeroed as part of the close).
+  if (await page.getByText(/DMEC0002/).first().isVisible().catch(() => false)) {
+    console.log(`close: DMEC0002 — clicking ${button} again to zero the open reserve`);
+    await page.getByRole('button', { name: button, exact: true }).first().click();
+    await page.waitForTimeout(3500);
+  }
+  // Refusals show as "Errors on current page" OR as "Errors located on another page" groups in the south panel.
+  const err = await page.evaluate((b) => {
+    if (!new RegExp(b).test(document.body.innerText.slice(0, 2500))) return '';
+    const p = document.getElementById('gw-south-panel');
+    const t = (p && p.offsetParent ? p.innerText : '') + ' ' + (document.body.innerText.split('Errors on current page:')[1] || '').slice(0, 400);
+    return /Errors/.test(t) ? t.replace(/\s+/g, ' ').slice(0, 700) : '';
+  }, button);
+  if (err) throw new Error(`${button} refused: ${err}`);
+}
+
 // Cloud close (2026-11-02, CA-PA-01-26-0748721). The on-prem pieces of drainAndCloseAllExposures read ExtJS grids and
 // silently find "no Open exposures" on cloud, so:
 //  1. drain: Final Payment per reserve line until none is payable. The cloud reserve reader can report a PAID amount
@@ -625,33 +655,7 @@ async function closeCloud(page, claimNumber) {
   await B.openExistingClaim(page, claimNumber);
   await completeActivitiesCloud(page);
   await B.openExistingClaim(page, claimNumber);
-  const closeScreen = async (button, outcomeRe) => {
-    await page.locator('textarea[name$="Note"], textarea').first().fill('Automated E2E close').catch(() => {});
-    const sel = page.locator('select[name$="Outcome"]').first();
-    const opt = await sel.locator('option').evaluateAll((os, re) => {
-      const real = os.filter(o => o.value && !/^<?none>?$/i.test(o.text.trim()));
-      return (real.find(o => new RegExp(re, 'i').test(o.text)) || real[0] || {}).value;
-    }, outcomeRe);
-    if (opt) await sel.selectOption(opt);
-    await page.waitForTimeout(1000);
-    await page.getByRole('button', { name: button, exact: true }).first().click();
-    await page.waitForTimeout(3500);
-    // DMEC0002 (warning): "open reserve of $X … If you want to set this reserve to $0 please click Close Exposure
-    // again" — accept it (the reserve is zeroed as part of the close).
-    if (await page.getByText(/DMEC0002/).first().isVisible().catch(() => false)) {
-      console.log(`close: DMEC0002 — clicking ${button} again to zero the open reserve`);
-      await page.getByRole('button', { name: button, exact: true }).first().click();
-      await page.waitForTimeout(3500);
-    }
-    // Refusals show as "Errors on current page" OR as "Errors located on another page" groups in the south panel.
-    const err = await page.evaluate((b) => {
-      if (!new RegExp(b).test(document.body.innerText.slice(0, 2500))) return '';
-      const p = document.getElementById('gw-south-panel');
-      const t = (p && p.offsetParent ? p.innerText : '') + ' ' + (document.body.innerText.split('Errors on current page:')[1] || '').slice(0, 400);
-      return /Errors/.test(t) ? t.replace(/\s+/g, ' ').slice(0, 700) : '';
-    }, button);
-    if (err) throw new Error(`${button} refused: ${err}`);
-  };
+  const closeScreen = (button, outcomeRe) => submitCloseScreen(page, button, outcomeRe);
   const n = await A.exposureCount(page).catch(() => 0);
   for (let i = 0; i < n; i++) {
     await A.openExposure(page, i);
@@ -676,7 +680,8 @@ async function closeCloud(page, claimNumber) {
 // Cloud Workplan sweep: select every open activity (header checkbox) › Complete; repeat while the count drops.
 // The on-prem completeAllWorkplanActivities reads ExtJS rows and does nothing on cloud, and open exposure activities
 // block Close Exposure ("There are open activities related to this exposure", 2026-11-02).
-async function completeActivitiesCloud(page) {
+// only: complete just the open activities whose subject matches (a case's own activity on a shared or migrated claim).
+async function completeActivitiesCloud(page, { only = null } = {}) {
   // The bulk Complete stays disabled once the selection holds anything not completable (2026-11-02), so each open
   // activity is opened (its subject link → detail in #gw-south-panel) and completed from its own Complete button.
   const openWorkplan = async () => {
@@ -696,7 +701,7 @@ async function completeActivitiesCloud(page) {
   const skipped = new Set();
   let done = 0;
   for (let guard = 0; guard < 40; guard++) {
-    const subjects = (await openWorkplan()).filter(s => !skipped.has(s));
+    const subjects = (await openWorkplan()).filter(s => !skipped.has(s) && (!only || only.test(s)));
     if (!subjects.length) break;
     const subject = subjects[0];
     // hasText matches textContent, where cells run together ("NormalOpen7 Day…") so /\bOpen\b/ matched no row and no
@@ -773,4 +778,4 @@ if (process.env.CC_E2E_POLICY_FROM_POOL === '1' && process.env.CC_E2E_LOB && pro
   } catch (e) { console.log('Claim inventory not readable (' + e.message.split('\n')[0] + ') — using the .env policy list'); }
 }
 
-module.exports = { IS_CLOUD, ALL, steps, on, existingClaim, stepOf, gate, recovery, close, pickFromInventory, receiptCloud, repairCloud, validateCloud, openSubrogationCloud, completeActivitiesCloud, TEAMS, LOB_TEAM, loginIdFor, teamUserFor, cannotView };
+module.exports = { IS_CLOUD, ALL, steps, on, existingClaim, stepOf, gate, recovery, close, pickFromInventory, receiptCloud, repairCloud, validateCloud, openSubrogationCloud, completeActivitiesCloud, submitCloseScreen, TEAMS, LOB_TEAM, loginIdFor, teamUserFor, cannotView };

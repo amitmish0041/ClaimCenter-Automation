@@ -56,7 +56,7 @@ function saveResult(ti) {
 
 // Standard hooks for every regression spec: cloud only, evidence saved, shared claims released.
 // Cases that poll (ISO, Hi Marley opt-in), run tier batches, or file several claims / close one: 40 minutes, not 20.
-const LONG = /RG-(TC0(29|35|37|40|45|53|54|55|56|57|62|63|69)|RX0(0[6-9]|1[7-9]))\b/;
+const LONG = /RG-(TC0(29|35|37|40|45|53|54|55|56|57|62|63|69)|RX0(0[6-9]|1[7-9]|2[4-9]|3[0-9]))\b/;
 function hooks(test) {
   test.setTimeout(1_200_000);
   test.skip(!E.IS_CLOUD, 'Regression suite runs on cloud ClaimCenter (CC_ENV=cloud)');
