@@ -725,7 +725,7 @@ async function listForKey(page, key, { log } = {}) {
 async function watchArchiveForMetadata(page, match, outDir, { log = console.log, maxMs = 180000, abort = () => false } = {}) {
   const fs = require('fs');
   const path = require('path');
-  const dir = path.join(outDir, '.archive-watch');
+  const dir = path.join(outDir, '.archive-watch', String(process.pid)); // per process: parallel runs each delete "someone else's" files, which removed the other run's own filing .json (META ENOENT, sweep 2026-11-14)
   fs.mkdirSync(dir, { recursive: true });
   await ensureTestPlanet(page, { log });
   const holder = await ensureApiAuth(page, { log });
@@ -768,7 +768,7 @@ async function watchArchiveForMetadata(page, match, outDir, { log = console.log,
 async function watchArchiveForIdentifier(page, identifierPromise, outDir, { log = console.log, maxMs = 120000, afterIdMs = 45000, intervalMs = 700 } = {}) {
   const fs = require('fs');
   const path = require('path');
-  const dir = path.join(outDir, '.archive-watch');
+  const dir = path.join(outDir, '.archive-watch', String(process.pid)); // per process: parallel runs each delete "someone else's" files, which removed the other run's own filing .json (META ENOENT, sweep 2026-11-14)
   fs.mkdirSync(dir, { recursive: true });
   let identifier;
   let idSettled = false;

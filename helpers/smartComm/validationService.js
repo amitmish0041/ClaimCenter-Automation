@@ -31,6 +31,9 @@ const { createS3SessionManager } = require('../s3Download/s3SessionManager');
 const { loginAsAdmin, loginAsUser, openExistingClaim } = require('../claimCenterBase');
 
 // printPlan (print test): { secondary, returnEnvelope, certifiedMail } - the Recipients-tab choices for this template's ONE scenario.
+// Claims that gave / did not give "Data required to create document not found" in this process (see the worker loop).
+const cannotCreateClaims = new Set();
+const canCreateClaims = new Set();
 async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOverride, interactive, singleScenario, s3Session, printPlan } = {}) {
   const dig = catalogService.normalizeDig(digNumber);
   let template = catalogService.getTemplate(dig);
@@ -158,8 +161,18 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
         const i = next++;
         if (i >= scenarios.length) return;
         const variant = scenarioVariants.getVariantForIndex(i);
+        // A claim that already gave "Data required to create document not found" in this run is not tried again when
+        // a backup claim is known to generate (full sweep 2026-11-14: PA-PA-01-26-0748059 and its first two backups
+        // failed on 105 templates while -0748055 generated) - the scenario starts on that backup instead.
+        const knownGood = cannotCreateClaims.has(scenarios[i].testData.claimNumber) && (scenarios[i].alternates || []).find((a) => canCreateClaims.has(a.claimNumber));
+        const swappedFrom = knownGood ? scenarios[i].testData.claimNumber : null;
+        if (knownGood) {
+          console.log(`[SmartComm] ${scenarios[i].scenarioId}: claim ${swappedFrom} could not create documents earlier in this run — using backup claim ${knownGood.claimNumber}.`);
+          scenarios[i] = { ...scenarios[i], testData: knownGood, alternates: scenarios[i].alternates.filter((a) => a !== knownGood) };
+        }
         const run = () => runScenario(workerPage, { template, scenario: scenarios[i], requirements, recipientEmail, variant, mentionsFraudLanguage, freeFormFields, interactive, s3Session, sourceFile, printPlan });
         scenarioResults[i] = await run();
+        if (swappedFrom) scenarioResults[i] = { ...scenarioResults[i], originalClaimNumber: swappedFrom };
         // ClaimCenter's own "changed by Integrations User ... Please cancel and retry your change" on Complete Document
         // (DIG168 and DIG122A scenario 3, 2026-11-10: the integration touched the draft document while the editor was
         // open) and its bare "Error occurred performing the operation" on opening the editor (DIG51, same day) are
@@ -176,14 +189,18 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
         const firstReason = scenarioResults[i].reason || '';
         if (scenarioResults[i].status === 'ERROR' && /Data required to create document not found/i.test(firstReason)) {
           const failedClaim = scenarios[i].testData.claimNumber;
-          for (const alt of (scenarios[i].alternates || []).slice(0, 2)) {
+          cannotCreateClaims.add(failedClaim);
+          const backups = (scenarios[i].alternates || []).filter((a) => !cannotCreateClaims.has(a.claimNumber))
+            .sort((a, b) => Number(canCreateClaims.has(b.claimNumber)) - Number(canCreateClaims.has(a.claimNumber)));
+          for (const alt of backups) {
             console.log(`[SmartComm] ${scenarios[i].scenarioId}: claim ${failedClaim} cannot create this document ("Data required to create document not found") — trying backup claim ${alt.claimNumber}.`);
             const again = await runScenario(workerPage, { template, scenario: { ...scenarios[i], testData: alt }, requirements, recipientEmail, variant, mentionsFraudLanguage, freeFormFields, interactive, s3Session, sourceFile, printPlan });
-            if (again.status === 'ERROR' && /Data required to create document not found/i.test(again.reason || '')) continue;
-            scenarioResults[i] = { ...again, originalClaimNumber: failedClaim, retriedAfter: firstReason };
+            if (again.status === 'ERROR' && /Data required to create document not found/i.test(again.reason || '')) { cannotCreateClaims.add(alt.claimNumber); continue; }
+            scenarioResults[i] = { ...again, originalClaimNumber: swappedFrom || failedClaim, retriedAfter: firstReason };
             break;
           }
         }
+        if (scenarioResults[i].status !== 'ERROR' && scenarioResults[i].status !== 'BLOCKED' && scenarioResults[i].claimNumber) canCreateClaims.add(scenarioResults[i].claimNumber);
       }
     }
     await Promise.all(pages.map(worker));
@@ -2709,7 +2726,11 @@ function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
   // name didn't come back counts when it's the DIRECT neighbour (DIG108's "storage charges starting QA-EDIT-11", where
   // INT12 had no technical name) — still only for placeholder pieces, never for a field that held a real value.
   const isFragment = (c) => /^\[?\s*(-+|-*<*<?\s*editable(\s*field)?\s*>*>?-*|-*<<.*|.*>>-*)\s*\]?$/i.test(String(c.before || '').trim());
-  const neighbourFound = (c) => isFragment(c) && foundPositions.some((p) => p.idx !== c.idx
+  // An EMPTY second span of a named field too (DIG88 editableField3 / DIG167 editableField1, 2026-11-14: the span after
+  // the edited one held nothing, its own edit was gone before Complete and the template was BLOCKED on it alone).
+  // ...and a PIECE of "--Editable--" ("Edi", "tabl", "e--" - DIG186's placeholders split into several spans).
+  const isPlaceholderPiece = (c) => { const b = String(c.before || '').trim().toLowerCase(); return b.length >= 2 && '--editable--'.includes(b); };
+  const neighbourFound = (c) => (isFragment(c) || isPlaceholderPiece(c) || (c.technicalName && !String(c.before || '').trim())) && foundPositions.some((p) => p.idx !== c.idx
     && ((p.tech === c.technicalName && c.technicalName && Math.abs(p.idx - c.idx) <= 2) || (!c.technicalName && Math.abs(p.idx - c.idx) === 1)));
   for (const c of interactiveChecks) {
     // Checks the raw observed fact (an edit genuinely took), not `result` — which, since the Data
