@@ -1014,8 +1014,11 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
       console.log(`[SmartComm] ${scenario.scenarioId}: loss date — test data "${effectiveTestData.lossDate}" differs from the claim's payload "${payload.lossDate}"; using the payload's.`);
       effectiveTestData.lossDate = payload.lossDate;
     }
+    // The text with drawn fill-in lines written in as "____" (forms draw their blanks as graphics — DIG214, 2026-11-15).
+    const blankLineText = await require('./pdfLayoutText').extractBlankLineText(pdfPath).catch(() => '');
     const context = {
       layoutText,
+      blankLineText,
       testData: effectiveTestData, scenario, template, recipient, additionalRecipient,
       // The SmartCOMM payload itself (ccDocumentCreationRequest) — "raw.*" sources (fieldLabelSynonyms) and the
       // exposure-table checks read it directly.
@@ -2834,9 +2837,14 @@ function annotateInteractiveEditFailures(validations, interactiveChecks) {
     }
     const desc = (v.description || '').toLowerCase();
     const expectedNorm = normForKnownValueMatch(v.expected);
+    // The same calendar date in the field's own format ("[09/09/1991]" for the payload's "September 09, 1991" — DIG4 Driver
+    // Date Of Birth, DIG209 Effective Date, 2026-11-15: reported missing after the test typed another date over it).
+    const expectedDates = pdfValidationService.dateVariants(v.expected).map(normForKnownValueMatch);
+    const sameDate = (b) => expectedDates.includes(normForKnownValueMatch(b));
     const hits = edited.filter((c) => {
       // A ticked checkbox ("[ ]" → "X") holds no value — never this row's field (DIG201/203/210 "Claimant Address", 2026-10-27).
       if (String(c.committedMarker || '') === 'X' && /^\[?\s*\]?$/.test(String(c.before || '').trim())) return false;
+      if (sameDate(c.before)) return true;
       if (c.label && desc.includes(c.label.toLowerCase())) return true;
       if (c.dictionaryField && desc.includes(`"${c.dictionaryField.toLowerCase()}"`)) return true;
       const beforeNorm = normForKnownValueMatch(c.before);
@@ -2872,6 +2880,7 @@ function annotateInteractiveEditFailures(validations, interactiveChecks) {
     const beforeValues = hits.map((h) => h.before).filter(Boolean);
     const beforeOk = beforeValues.some((b) => {
       const bn = normForKnownValueMatch(b);
+      if (sameDate(b)) return true;
       // A short value equal to what the field showed ("GMC" / "[GMC]" — DIG128 2026-10-29) is a match too.
       if (bn && bn === expectedNorm) return true;
       return expectedNorm.length >= minLen && bn.length >= minLen && (expectedNorm.includes(bn) || bn.includes(expectedNorm));

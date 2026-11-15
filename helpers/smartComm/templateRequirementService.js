@@ -425,7 +425,7 @@ function parseCommentAnchors(documentXml) {
     // ("Body Style (2 door, 4 door, SUV, truck etc.) ___2 door": the comment is on the SECOND "2 door", DIG37).
     const pStart = Math.max(documentXml.lastIndexOf('<w:p>', m.index), documentXml.lastIndexOf('<w:p ', m.index));
     const before = pStart >= 0 ? textOfRuns(documentXml.slice(pStart, m.index)) : '';
-    anchors.push({ id, startIdx: m.index, text, before });
+    anchors.push({ id, startIdx: m.index, endIdx, text, before });
   }
   anchors.sort((a, b) => a.startIdx - b.startIdx);
   return anchors;
@@ -457,7 +457,7 @@ function parseCommentAnchors(documentXml) {
 // "...if CC details <> Null else suppress" (DIG187) — the same "print only when present" condition, worded as
 // pseudo-code.
 // "Only display this paragraph is Policy State…" (DIG53's typo for "if", 2026-10-17) included.
-const CONDITIONAL_RE = /display only if|only\s+display\s+this\s+paragraph\b|only (?:visible|shown|displayed) if|\bonly\b[^.]{0,40}\bif\b|otherwise[^.]*(?:not[^.]*visible|will not|do not)|will not (?:be )?(?:visible|display|print|show)|if\b.*\b(?:is selected|is entered|is added)\b|if\b.*\bcheckbox|else\b.*\bdo not\b|^fraud language\b|if\b.*\bstate\s*=|^copy\b|\bif\b.*<>\s*null\b|\belse\s+suppress\b/i;
+const CONDITIONAL_RE = /display only if|only\s+display\s+this\s+paragraph\b|only (?:visible|shown|displayed) if|\bonly\b[^.]{0,40}\bif\b|otherwise[^.]*(?:not[^.]*visible|will not|do not)|will not (?:be )?(?:visible|display|print|show)|if\b.*\b(?:is selected|is entered|is added)\b|if\b.*\bcheckbox|else\b.*\bdo not\b|^fraud language\b|if\b.*\bstate\s*=|^copy\b|\bif\b.*<>\s*null\b|\belse\s+suppress\b|^\s*(?:policy\s+)?(?:base\s+)?state\s*(?:=|is\b)|^\s*all other\b[^.]*\bstates?\b/i;
 
 // Collapses whitespace to single spaces while recording, for each character
 // kept, its index in the ORIGINAL string — lets anchor text be located in
@@ -657,6 +657,16 @@ function buildRequirementsFromComments(paragraphs, anchors, comments) {
   for (const a of dynamicAnchors) {
     const needle = normalizeWs(a.text);
     if (!needle) continue;
+    // A comment INSIDE another comment's range (a "{0}" value within a state-specific block — DIG134, 2026-11-15) is
+    // looked up inside that block. Searched forward like the rest, it matched some later "{0}" and carried the cursor
+    // past every block in between, so their comments (the Maryland-only wording) were never applied.
+    const outer = matches.filter((mt) => !mt.outer && a.startIdx < mt.anchor.endIdx).pop();
+    if (outer) {
+      const at = normalized.indexOf(needle, outer.normStart);
+      if (at === -1 || at >= outer.normEnd) continue;
+      matches.push({ startIdx: map[at], endIdx: map[Math.min(at + needle.length - 1, map.length - 1)] + 1, anchor: a, outer });
+      continue;
+    }
     let foundAt = normalized.indexOf(needle, normCursor);
     if (foundAt === -1) continue; // not found from here on — leave as static downstream
     // Same words more than once: take the occurrence whose preceding text matches the anchor's own (Word anchors carry
@@ -670,7 +680,7 @@ function buildRequirementsFromComments(paragraphs, anchors, comments) {
     }
     const startIdx = map[foundAt];
     const endIdx = map[Math.min(foundAt + needle.length - 1, map.length - 1)] + 1;
-    matches.push({ startIdx, endIdx, anchor: a });
+    matches.push({ startIdx, endIdx, anchor: a, normStart: foundAt, normEnd: foundAt + needle.length });
     normCursor = foundAt + needle.length;
   }
 
@@ -702,8 +712,11 @@ function buildRequirementsFromComments(paragraphs, anchors, comments) {
 
   // Pass 2 — emit one requirement per match, then cut every matched range
   // out of fullText (reverse order, so earlier ranges' indices stay valid).
-  for (const { startIdx, anchor } of matches) {
+  for (const { startIdx, anchor, outer } of matches) {
     const fieldName = anchor.comment.fullText;
+    // A field inside a CONDITIONAL block prints only when that block does - the block's own check covers it. Inside
+    // any other comment's range only a conditional note of its own is kept (as before, when these were never located).
+    if (outer && (CONDITIONAL_RE.test(outer.anchor.comment.fullText) || !CONDITIONAL_RE.test(fieldName))) continue;
     const isConditional = CONDITIONAL_RE.test(fieldName);
     const req = makeDynamicRequirement(++n, fieldName, anchor.text, {
       conditional: isConditional,
@@ -731,7 +744,7 @@ function buildRequirementsFromComments(paragraphs, anchors, comments) {
   // is harmless — classifyResidualFragment already drops blank fragments,
   // and a lone leftover "." is caught by isNoiseLine.
   let residual = fullText;
-  for (const { startIdx, endIdx } of [...matches].sort((x, y) => y.startIdx - x.startIdx)) {
+  for (const { startIdx, endIdx } of matches.filter((mt) => !mt.outer).sort((x, y) => y.startIdx - x.startIdx)) {
     // A comment range that ends MID-WORD ("Policy Cancellation No|tice attached" — DIG74, 2026-10-17) takes the rest of
     // that word with it, so no "tice attached No" fragment is left to assert as fixed wording.
     let end = endIdx;
@@ -1361,5 +1374,5 @@ module.exports = {
   buildRequirements: buildRequirementsHeuristic, // back-compat name
   resolveLocalTemplatePath,
   convertDocToDocx,
-  _test: { setDocConverters: (list) => { docConverters = list || DEFAULT_DOC_CONVERTERS; }, DOC_CACHE_DIR },
+  _test: { setDocConverters: (list) => { docConverters = list || DEFAULT_DOC_CONVERTERS; }, DOC_CACHE_DIR, paragraphsFromDocumentXml, parseCommentAnchors, parseComments },
 };

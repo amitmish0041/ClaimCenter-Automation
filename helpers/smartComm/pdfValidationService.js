@@ -150,6 +150,13 @@ function dateVariants(value) {
   return [...new Set([`${p(m)}/${p(d)}/${y}`, `${m}/${d}/${y}`, `${p(m)}-${p(d)}-${y}`, `${MONTHS[m - 1]} ${p(d)}, ${y}`, `${MONTHS[m - 1]} ${d}, ${y}`])].filter((v) => v !== s);
 }
 
+// The time a printed date stands for; day-first ("15/11/2026" — DIG218 Date of Letter, 2026-11-15) is read too.
+function printedDate(d) {
+  const s = String(d).replace(/, \d{1,2}:\d{2}.*$/, '');
+  const dm = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+  return Date.parse(dm && +dm[1] > 12 ? `${dm[2]}/${dm[1]}/${dm[3]}` : s);
+}
+
 function shapeRegex(shape) {
   return UNANCHORED_PATTERNS[shape] || /\S+/;
 }
@@ -259,7 +266,8 @@ function dateLossPart(attributeName, value) {
   const note = `"${attributeName}" is one part of the loss date (${s}).`;
   if (/day/i.test(which)) { const day = d.getDate(); return { value: String(day), accept: [String(day), String(day).padStart(2, '0')], note }; }
   if (/month/i.test(which)) { const m = d.toLocaleString('en-US', { month: 'long' }); return { value: m, accept: [m, d.toLocaleString('en-US', { month: 'short' })], note }; }
-  return { value: String(d.getFullYear()), accept: [String(d.getFullYear())], note };
+  // A form that pre-prints the century ("20____") fills in only the last two digits (DIG53913, 2026-11-15).
+  return { value: String(d.getFullYear()), accept: [String(d.getFullYear()), String(d.getFullYear()).slice(2)], note };
 }
 
 // Every contact with the claimant role in the SmartCOMM payload (context.raw), by display name.
@@ -432,6 +440,11 @@ function evaluateOne(req, haystack, context) {
               && new RegExp(`(^|[^A-Za-z0-9])${String(c.committedMarker).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z])`).test(after.slice(fuzzy.length)));
             if (/_{3,}|\[|QA-EDIT-\d/.test(after) || typedHere) hasBlank = true;
           }
+          // A fill-in line drawn as a graphic (a stroke, not "____" text) right after the wording — DIG214, DIG47A, DIG109 2026-11-15.
+          if (!hasBlank && context && context.blankLineText) {
+            const tight = (t) => String(t).toLowerCase().replace(/_{3,}/g, '_').replace(/[^\p{L}\p{N}_]+/gu, '');
+            hasBlank = context.blankLineText.split('\n').some((line) => tight(line).includes(tight(req.expectedValue)));
+          }
           if (!hasBlank) {
             return {
               expected: req.expectedValue, actual: fuzzy, result: 'FAIL',
@@ -513,6 +526,13 @@ function evaluateOne(req, haystack, context) {
       if (captionless !== haystack && blanks(captionless).includes(blanks(req.expectedValue))) {
         return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Printed intact; a form caption from the line above sits inside it in the PDF text.' };
       }
+      //    The caption line can hold several captions and cut a word in two ("I / (Date of marking) / hereby certify…",
+      //    "th / (Name of injured employee) (Date of amputation) / e amputation(s)…" — DIG216, 2026-11-15): same letters, spacing ignored.
+      const captionFree = haystack.replace(/\n[ \t]*(?:\([^()\n]{2,40}\)[ \t]*)+(?=\n)/g, '');
+      const tight = (t) => String(t).toLowerCase().replace(/\s+/g, '').replace(/_{3,}/g, '___');
+      if (captionFree !== haystack && /_{3,}/.test(req.expectedValue) && tight(captionFree).includes(tight(req.expectedValue))) {
+        return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Printed intact; a form caption from the line above sits inside it in the PDF text.' };
+      }
       const near = findNearWording(haystack, req.expectedValue);
       // The "near" line swaps a real word for another ("Name of Purchaser(s)" vs the printed "Name of the Seller(s)" —
       // DIG128MI 2026-10-30, where Purchaser/Lessee/Lessor all "matched" the one Seller line): that's a DIFFERENT line,
@@ -539,9 +559,9 @@ function evaluateOne(req, haystack, context) {
       const want = Date.parse(String(req.expectedValue).trim());
       if (dateVariants(req.expectedValue).length && !Number.isNaN(want)) {
         const printed = (haystack.match(/\b[A-Z][a-z]{2,8}\.? \d{1,2}, \d{4}(?:, \d{1,2}:\d{2}(?::\d{2})? ?[AP]M)?|\b\d{1,2}\/\d{1,2}\/\d{4}\b/g) || [])
-          .find((d) => { const t = Date.parse(d.replace(/, \d{1,2}:\d{2}.*$/, '')); return !Number.isNaN(t) && Math.abs(t - want) <= 864e5; });
+          .find((d) => { const t = printedDate(d); return !Number.isNaN(t) && Math.abs(t - want) <= 864e5; });
         if (printed) {
-          const sameDay = Date.parse(printed.replace(/, \d{1,2}:\d{2}.*$/, '')) === want;
+          const sameDay = printedDate(printed) === want;
           return { expected: req.expectedValue, actual: printed, result: 'FAIL', reason: `The document prints this date as "${printed}" instead of "${req.expectedValue}" — ${sameDay ? 'a different date format' : 'a different format and one day off (likely a time-zone shift)'}.` };
         }
       }
@@ -843,4 +863,4 @@ function evaluateRequirements(requirements, text, context) {
   });
 }
 
-module.exports = { extractPdfText, evaluateRequirements, normalizeWs, dateLossPart, claimantsOf, wholeWord };
+module.exports = { extractPdfText, evaluateRequirements, normalizeWs, dateLossPart, claimantsOf, wholeWord, dateVariants, _evaluateOne: evaluateOne };

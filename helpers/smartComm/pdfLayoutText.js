@@ -89,4 +89,75 @@ async function extractPositionedItems(pdfPath) {
   return pages.map((p) => p || { viewW: 612, viewH: 792, items: [] });
 }
 
-module.exports = { extractLayoutText, extractPositionedItems };
+// The page's text row by row with every drawn fill-in line (a horizontal stroke or hairline rectangle on or just under a
+// text row) written in as "____" where it sits. Forms draw their blanks as graphics ("Signature of Employer
+// Representative" + a stroked line — DIG214, DIG47A "FROM: THROUGH:", DIG109, 2026-11-15); the text layer alone shows no blank.
+// pdf.js operator codes (stable across the versions pdf-parse bundles).
+const OPS = { save: 10, restore: 11, transform: 12, moveTo: 13, lineTo: 14, curveTo: 15, curveTo2: 16, curveTo3: 17, rectangle: 19, constructPath: 91 };
+async function extractBlankLineText(pdfPath) {
+  if (!pdfParse || !pdfPath || !fs.existsSync(pdfPath)) return '';
+  const out = [];
+  // pdf.js 2.0 directly, fonts off: pdf-parse's default 1.10 build loads fonts for getOperatorList and crashes on `document`.
+  let pdfjs;
+  try { pdfjs = require('pdf-parse/lib/pdf.js/v2.0.550/build/pdf.js'); } catch (_) { return ''; }
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(fs.readFileSync(pdfPath)), disableFontFace: true });
+  for (let pn = 1; pn <= doc.numPages; pn++) {
+    {
+      const pageData = await doc.getPage(pn);
+      const tc = await pageData.getTextContent({ normalizeWhitespace: false, disableCombineTextItems: false });
+      const items = tc.items.filter((it) => it.str && it.str.trim()).map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5], w: it.width || 0 }));
+      const segs = [];
+      try {
+        const ops = await pageData.getOperatorList();
+        let ctm = [1, 0, 0, 1, 0, 0]; const stack = [];
+        const mul = (m, n) => [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
+        const tp = (px, py) => [ctm[0] * px + ctm[2] * py + ctm[4], ctm[1] * px + ctm[3] * py + ctm[5]];
+        const add = (xa, xb, y) => { if (Math.abs(xb - xa) > 15) segs.push({ x: Math.min(xa, xb), xEnd: Math.max(xa, xb), y }); };
+        ops.fnArray.forEach((fn, k) => {
+          const a = ops.argsArray[k];
+          if (fn === OPS.save) stack.push(ctm);
+          else if (fn === OPS.restore) ctm = stack.pop() || ctm;
+          else if (fn === OPS.transform) ctm = mul(ctm, a);
+          else if (fn === OPS.constructPath) {
+            let ai = 0; let cur = null;
+            for (const op of a[0]) {
+              if (op === OPS.moveTo) { cur = tp(a[1][ai], a[1][ai + 1]); ai += 2; } else if (op === OPS.lineTo) {
+                const n = tp(a[1][ai], a[1][ai + 1]); ai += 2;
+                if (cur && Math.abs(n[1] - cur[1]) < 1) add(cur[0], n[0], n[1]);
+                cur = n;
+              } else if (op === OPS.rectangle) {
+                const [rx, ry, w, h] = a[1].slice(ai, ai + 4); ai += 4;
+                const p0 = tp(rx, ry); const p1 = tp(rx + w, ry + h);
+                if (Math.abs(p1[1] - p0[1]) < 2.5) add(p0[0], p1[0], Math.min(p0[1], p1[1]));
+              } else if (op === OPS.curveTo) ai += 6; else if (op === OPS.curveTo2 || op === OPS.curveTo3) ai += 4;
+            }
+          }
+        });
+      } catch (_) { /* no operator list: text only */ }
+      // A line counts for the text row whose baseline it sits on or just under (0–8 pt), and only where no text covers it
+      // (an underlined heading or a table border with words on it is not a blank).
+      const rows = [];
+      for (const it of items.sort((a, b) => b.y - a.y || a.x - b.x)) {
+        const row = rows.find((r) => Math.abs(r.y - it.y) <= 2.5);
+        if (row) row.items.push(it); else rows.push({ y: it.y, items: [it] });
+      }
+      const seen = new Set();
+      for (const s of segs) {
+        const key = `${Math.round(s.x)}|${Math.round(s.xEnd)}|${Math.round(s.y)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const row = rows.find((r) => r.y - s.y >= -1 && r.y - s.y <= 8);
+        if (!row || row.items.some((it) => it.x < s.xEnd - 4 && it.x + it.w > s.x + 4)) continue;
+        row.items.push({ str: '____', x: s.x, y: row.y, w: s.xEnd - s.x });
+      }
+      for (const r of rows) {
+        r.items.sort((a, b) => a.x - b.x);
+        out.push(r.items.map((it) => it.str).join(' ').replace(/(?:_{4}\s*)+/g, '____ ').trim());
+      }
+    }
+  }
+  doc.destroy();
+  return out.join('\n');
+}
+
+module.exports = { extractLayoutText, extractPositionedItems, extractBlankLineText };
