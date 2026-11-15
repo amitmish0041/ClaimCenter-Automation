@@ -3330,5 +3330,185 @@
   ],
   "optional": [],
   "added": true
+ },
+ {
+  "id": "RX040",
+  "num": 140,
+  "feature": "Migrated Claims - lifecycle",
+  "name": "RX040_A reserve is raised (+$100) on a migrated exposure and posts to Financials",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX040\b",
+  "reuses": [
+   "regression/migratedClaims.pickRecent (Advanced Search: loss date 2023+, Remaining Reserves)",
+   "financialsHelper.createReserve",
+   "migratedClaims.reconcile"
+  ],
+  "data": [
+   "Newest migrated open claims with open reserves, found on cloud"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Admin. Newest migrated open claim with reserves (2025 first); summary must still reconcile to the ledger.",
+  "requires": [
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX041",
+  "num": 141,
+  "feature": "Migrated Claims - lifecycle",
+  "name": "RX041_A new exposure is added to a migrated claim",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX041\b",
+  "reuses": [
+   "regression/migratedClaims.pickRecent (Advanced Search: loss date 2023+, Remaining Reserves)",
+   "oneInc/claimCheck.addExposures (fnolHelper post-FNOL walk)"
+  ],
+  "data": [
+   "Newest migrated open claims with open reserves, found on cloud"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. First coverage the migrated policy offers.",
+  "requires": [
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX042",
+  "num": 142,
+  "feature": "Migrated Claims - lifecycle",
+  "name": "RX042_A payment on a migrated line goes to OneInc and its check is voided",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX042\b",
+  "reuses": [
+   "regression/migratedClaims.pickRecent (Advanced Search: loss date 2023+, Remaining Reserves)",
+   "financialPayments.makePayment",
+   "oneInc/checkOps.escalateChecks/openCheck/openVoid/submitVoid",
+   "oneInc/paymentContact.setPaymentContact"
+  ],
+  "data": [
+   "Newest migrated open claims with open reserves, found on cloud"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. TEST/DEV. Newest migrated claims with a person claimant (OneInc pays people), a ZIP on the payee address and Payment Contact Details set; exposures reassigned to the case user. Up to 15 candidates; every skipped claim is noted. A check the integration voids on its own is reported as a OneInc refusal.",
+  "requires": [
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX043",
+  "num": 143,
+  "feature": "Migrated Claims - lifecycle",
+  "name": "RX043_A recovery reserve and receipt ($150) post on a migrated claim",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX043\b",
+  "reuses": [
+   "regression/migratedClaims.pickRecent (Advanced Search: loss date 2023+, Remaining Reserves)",
+   "e2eSteps.recovery (recoveryCloud)"
+  ],
+  "data": [
+   "Newest migrated open claims with open reserves, found on cloud"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Admin.",
+  "requires": [
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX044",
+  "num": 144,
+  "feature": "Migrated Claims - lifecycle",
+  "name": "RX044_An open migrated claim is drained, its exposures closed and the claim closed",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX044\b",
+  "reuses": [
+   "regression/migratedClaims.pickRecent (Advanced Search: loss date 2023+, Remaining Reserves)",
+   "e2eSteps.close (Final Payments, activities, exposures, claim)",
+   "oneInc/paymentContact.setPaymentContact"
+  ],
+  "data": [
+   "Newest migrated open claims with open reserves, found on cloud"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Admin. Claims with $5-$1,500 open reserves; closes a migrated claim for good (TEST). Sets up Payment Contact Details (QA mailbox, 555 mobile) for the payee first \u2014 migrated payees have none. Exposures are reassigned to the case user first (migrated owner records can block payments \u2014 RX046).",
+  "requires": [
+   "CC_ADMIN_USER",
+   "CC_ADMIN_PASS"
+  ],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX045",
+  "num": 145,
+  "feature": "Migrated Claims - lifecycle",
+  "name": "RX045_Payees on recent migrated claims carry a complete address (street, city, state, ZIP)",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX045\b",
+  "reuses": [
+   "regression/migratedClaims.pickRecent"
+  ],
+  "data": [
+   "Newest migrated open claims with open reserves, found on cloud"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. Read-only, 5 recent migrated claims: claimants / check payees / insured on Parties Involved. A payee without ZIP is refused at the payment payee step.",
+  "requires": [],
+  "optional": [],
+  "added": true
+ },
+ {
+  "id": "RX046",
+  "num": 146,
+  "feature": "Migrated Claims - lifecycle",
+  "name": "RX046_Recent migrated claims can be paid as they came across ($1.xx to the line claimant, 5 claims)",
+  "priority": "Added",
+  "steps": 0,
+  "status": "AUTOMATED",
+  "spec": "tests/Regression/Migrated.regression.test.js",
+  "grep": "RG-RX046\\b",
+  "reuses": [
+   "regression/migratedClaims.pickRecent",
+   "oneInc/paymentContact.setPaymentContact",
+   "financialPayments.makePayment"
+  ],
+  "data": [
+   "Newest migrated open claims with open reserves, found on cloud"
+  ],
+  "manualSteps": [],
+  "limitation": "Added beyond V1.0. TEST/DEV. Payment Contact Details set first (cloud-only requirement); every refusal names the migrated data cloud cannot pay on (payee address, exposure owner user record, pending approvals).",
+  "requires": [],
+  "optional": [],
+  "added": true
  }
 ]

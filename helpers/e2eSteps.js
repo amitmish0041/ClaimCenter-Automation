@@ -593,8 +593,15 @@ async function submitCloseScreen(page, button, outcomeRe) {
   }, outcomeRe);
   if (opt) await sel.selectOption(opt);
   await page.waitForTimeout(1000);
-  await page.getByRole('button', { name: button, exact: true }).first().click();
-  await page.waitForTimeout(3500);
+  // A same-day drain payment still "awaiting submission" makes CC ask (native confirm) "This exposure has one or more
+  // awaiting submission payments that will no longer be editable if it is closed. Do you wish to continue?" —
+  // Playwright dismisses unhandled dialogs, which silently cancelled the close (CPP-MD-01-24-0745149, 2026-11-15).
+  const accept = (d) => { if (/awaiting submission payments|Do you wish to continue/i.test(d.message())) d.accept().catch(() => {}); };
+  page.on('dialog', accept);
+  try {
+    await page.getByRole('button', { name: button, exact: true }).first().click();
+    await page.waitForTimeout(3500);
+  } finally { page.off('dialog', accept); }
   // DMEC0002 (warning): "open reserve of $X … If you want to set this reserve to $0 please click Close Exposure
   // again" — accept it (the reserve is zeroed as part of the close).
   if (await page.getByText(/DMEC0002/).first().isVisible().catch(() => false)) {

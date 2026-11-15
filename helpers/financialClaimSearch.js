@@ -51,12 +51,44 @@ async function searchClaims(page, criteria = {}) {
     await page.locator('[id$="IndicatorSearch_add"]').click();
     await W.settle(page, 1200);
   }
+  // date: { type: 'Loss date' | 'Reported date' | 'Closed date' | 'Creation date', from, to } (MM/DD/YYYY);
+  // money: { type: 'Remaining Reserves' | 'Total Paid' | …, from, to } — the "Optional parameters" ranges (2026-11-15).
+  const N = 'ClaimSearch-ClaimSearchScreen-ClaimSearchDV-ClaimSearchAddOptionalInputSet-';
+  const box = async (name, v) => { if (v == null || v === '') return; const b = page.locator(`input[name="${N}${name}"]`).first(); await b.fill(String(v)); await b.press('Tab').catch(() => {}); await W.settle(page, 800); };
+  const pick = async (name, label) => { await page.locator(`select[name="${N}${name}"]`).first().selectOption({ label }); await W.settle(page, 1500); };
+  if (criteria.date) {
+    await pick('ArchiveDateSearch-ArchiveDateSearchChosenOption', criteria.date.type || 'Loss date');
+    // From/To stay disabled until the second "date search type" radio (a range, not "Since …") is chosen; a forced
+    // Playwright check() did not take, a DOM click does (2026-11-15).
+    await page.locator('input[name="ClaimSearchCriteria.DateCriterionChoice.DateSearchType_Radio"]').nth(1).evaluate((r) => r.click());
+    await W.settle(page, 1500);
+    await box('ArchiveDateSearch-ArchiveDateSearchStartDate', criteria.date.from);
+    await box('ArchiveDateSearch-ArchiveDateSearchEndDate', criteria.date.to);
+  }
+  if (criteria.money) {
+    await pick('Financial-FinancialCriterionMultiCurrencyChoiceInputSet-FinancialChosenOption', criteria.money.type);
+    await box('Financial-FinancialCriterionMultiCurrencyChoiceInputSet-FinancialAmountStart', criteria.money.from);
+    await box('Financial-FinancialCriterionMultiCurrencyChoiceInputSet-FinancialAmountEnd', criteria.money.to);
+  }
   await page.getByRole('button', { name: 'Search', exact: true }).last().click();
   await W.settle(page, 6000);
-  return page.evaluate(() => [...document.querySelectorAll('tr')].filter((r) => r.offsetParent && !r.querySelector('tr'))
+  const read = () => page.evaluate(() => [...document.querySelectorAll('tr')].filter((r) => r.offsetParent && !r.querySelector('tr'))
     .map((r) => (r.innerText || '').replace(/\s+/g, ' ').trim())
     .map((t) => ({ claim: (t.match(/\b[A-Z]{2,4}-[A-Z]{2}-\d{2}-\d{2}-\d{7}\b/) || [])[0], text: t.slice(0, 200) }))
     .filter((r) => r.claim));
+  const out = await read();
+  // criteria.pages: also read result pages 2…n (the grid shows 15 a page).
+  for (let p = 1; p < (criteria.pages || 1); p++) {
+    const next = page.locator('[id^="ClaimSearch-ClaimSearchScreen-ClaimSearchResultsLV"][id$="_ListPaging-next"]').first();
+    if (!await next.isVisible().catch(() => false) || await next.isDisabled().catch(() => true)) break;
+    const first = out.length ? out[out.length - 1].claim : '';
+    await next.click().catch(() => {});
+    await W.settle(page, 3000);
+    const more = await read();
+    if (!more.length || more.some((r) => r.claim === first)) break;
+    out.push(...more);
+  }
+  return out;
 }
 
 // Opens a claim from Advanced Search › Claim # — the quick search did not find CLOSED claims (WC-PA-01-08-0053142,

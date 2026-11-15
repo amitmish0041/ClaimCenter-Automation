@@ -80,6 +80,28 @@ async function pick(page, status, n = 1, { exclude = [], prefix = null, log = ()
   return [...new Set([...firsts, ...rest])].slice(0, n);
 }
 
+// The NEWEST migrated open claims that still hold money: Advanced Search per group, loss date from `since` (default
+// 01/01/2023) and Remaining Reserves between minReserve and maxReserve — newest claim year first (2025 → 2024 → 2023).
+// Not cached: a claim a lifecycle case closes or drains drops out of the next search by itself. exclude: claims already
+// used this run.
+async function pickRecent(page, n = 1, { since = '01/01/2023', minReserve = 5, maxReserve = '', exclude = [], log = () => {} } = {}) {
+  await FS.openAdvancedSearch(page);
+  const g = (await readScreen(page)).fields.find((f) => f.label === 'Assigned To Group');
+  const groups = ((g && g.options) || []).filter((o) => o && !/^<none>$/i.test(o));
+  const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+  const found = new Map();
+  for (const group of groups) {
+    const rows = await FS.searchClaims(page, { group, status: 'Open', date: { type: 'Loss date', from: since, to: today }, money: { type: 'Remaining Reserves', from: String(minReserve), to: String(maxReserve) }, pages: 4 })
+      .catch((e) => { log(`recent migrated ${group}: ${e.message.split('\n')[0]}`); return []; });
+    for (const r of rows) if (isMigrated(r.claim) && !exclude.includes(r.claim) && !found.has(r.claim)) found.set(r.claim, { ...r, group });
+  }
+  const seq = (cn) => { const p = String(cn).split('-'); return Number(p[3]) * 1e8 + Number(p[4]); };
+  const list = [...found.values()].sort((a, b) => seq(b.claim) - seq(a.claim));
+  log(`recent migrated open claims with $${minReserve}${maxReserve ? '–$' + maxReserve : '+'} reserves since ${since}: ${list.length} (${list.slice(0, 8).map((x) => x.claim).join(', ')})`);
+  if (!list.length) throw new W.Blocked(`no migrated open claim since ${since} with remaining reserves $${minReserve}${maxReserve ? '–$' + maxReserve : '+'} on cloud ${TIER}`);
+  return list.slice(0, n).map((x) => x.claim);
+}
+
 // Opens a claim through Advanced Search (the quick search does not open CLOSED claims). Returns the header status.
 async function open(page, cn) {
   const st = await FS.openClaimViaSearch(page, cn);
@@ -214,4 +236,4 @@ function reconcile(fin, tx, { closed = false } = {}) {
   return out;
 }
 
-module.exports = { CACHE, CLAIM_RE, isMigrated, prefixOf, scout, pick, open, header, walk, table, money, financialSummary, transactions, reconcile, NOT_POSTED };
+module.exports = { CACHE, CLAIM_RE, isMigrated, prefixOf, scout, pick, pickRecent, open, header, walk, table, money, financialSummary, transactions, reconcile, NOT_POSTED };

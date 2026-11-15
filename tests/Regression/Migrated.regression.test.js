@@ -42,7 +42,7 @@ async function openWithStatus(page, candidates, re) {
 // are completed and Actions › Close Claim closes it back (e2eSteps' cloud close screen). A claim the close leaves open
 // is named in the case's notes.
 async function reopenThenClose(page, ti, cn, note) {
-  const openRows = async () => (await R.workplanRows(page)).filter((r) => /Open/.test(r));
+  const openRows = async () => (await R.workplanRows(page)).filter((r) => /\bOpen\b/.test(r));
   const before = await openRows();
   await S.action(page, /^Reopen Claim$/);
   await page.locator('textarea, input[name$="Note"]').filter({ visible: true }).first().fill(note).catch(() => {});
@@ -384,4 +384,284 @@ test('RG-RX039 [Claim Lifecycle - reopen]: a closed claim reopens and closes aga
   await B.openExistingClaim(page, cn);
   await R.check(page, ti, { description: 'Claim closed', expected: 'St: Closed', actual: (await M.header(page) || {}).status, ok: /closed/i.test((await M.header(page) || {}).status || '') });
   await reopenThenClose(page, ti, cn, 'Regression RX039 reopen (closed again by the same case)');
+}));
+
+// ── Money lifecycle on the NEWEST migrated open claims (2025 → 2024 → 2023, with open reserves) ─────────────────────
+// Each case writes, then re-reads Financials and checks the summary still reconciles to the ledger
+// (migratedClaims.reconcile) — new money must post on top of migrated money the way it does on a new claim.
+const used = [];
+async function recentClaim(page, opts = {}) {
+  const [cn] = await M.pickRecent(page, 1, { exclude: used, log, ...opts });
+  used.push(cn);
+  await M.open(page, cn);
+  return cn;
+}
+async function reconcileAfter(page, cn, items, what) {
+  await M.open(page, cn);
+  const st = (await M.header(page) || {}).status || '';
+  const fin = await M.financialSummary(page);
+  const tx = await M.transactions(page);
+  for (const r of M.reconcile(fin, tx, { closed: /closed/i.test(st) })) items.push({ description: `${cn} after ${what}: ${r.rule}`, expected: r.expected, actual: r.actual, ok: r.ok });
+  return { fin, tx };
+}
+const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const today = () => new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+
+test('RG-RX040 [Migrated Claims - lifecycle]: a reserve is raised on a migrated exposure and posts to Financials', async ({ page }, ti) => S.blockable(test, async () => {
+  await B.loginAsAdmin(page);
+  const cn = await recentClaim(page);
+  R.setClaim(ti, cn, process.env.CC_ADMIN_USER || 'admin');
+  const before = await M.financialSummary(page);
+  const line = before.lines.find((l) => (l.values['Remaining Reserves'] || 0) > 0);
+  if (!line) throw new W.Blocked(`${cn}: no exposure line with a remaining reserve`);
+  const expName = line.label.replace(/^\(\d+\)\s*/, '').split(' - ')[0];
+  const target = Math.round((line.values['Remaining Reserves'] + 100) * 100) / 100;
+  await B.openExistingClaim(page, cn);
+  const said = await S.F.createReserve(page, { reserveAmount: target, exposure: expName, strict: false });
+  await R.step(page, ti, `${cn}: ${line.label} remaining $${line.values['Remaining Reserves']} → set to $${target}${said ? ' — ' + said : ''}`);
+  const items = [];
+  const { fin, tx } = await reconcileAfter(page, cn, items, 'the reserve change');
+  const now = fin.lines.find((l) => l.label === line.label);
+  items.unshift({ description: `${cn}: remaining reserve on ${line.label.slice(0, 70)} up by $100`, expected: `$${target}`, actual: now ? `$${now.values['Remaining Reserves']}` : 'line not found', ok: !!now && Math.abs(now.values['Remaining Reserves'] - target) < 0.01 });
+  const added = tx.filter((t) => t.Type === 'Reserve' && t.Date === today());
+  items.unshift({ description: `${cn}: today's $100.00 reserve transaction on the ledger`, expected: 'Reserve $100.00', actual: added.map((t) => `${t.Date} $${t.Amount} ${t.Status}`).join(' | ') || 'none today', ok: added.some((t) => Math.abs(t.Amount - 100) < 0.01) });
+  await checkAll(page, ti, items);
+}));
+
+test('RG-RX041 [Migrated Claims - lifecycle]: a new exposure is added to a migrated claim', async ({ page }, ti) => S.blockable(test, async () => {
+  await login(page);
+  const cn = await recentClaim(page);
+  R.setClaim(ti, cn, process.env.CC_USER);
+  const exposures = async () => { await M.open(page, cn); return W.navigate(page, 'exposures').then(() => R.gridRows(page)).then((r) => r.filter((x) => /^\d+\s/.test(x))).catch(() => null); };
+  const before = await exposures();
+  if (!before) throw new W.Blocked(`${cn} has no Exposures screen (WC-style claim)`);
+  // fnolHelper's post-FNOL exposure walk (oneInc/claimCheck.addExposures). [''] = the first coverage the policy offers
+  // under Choose by Coverage — migrated policies carry their own coverage lists.
+  let err = '';
+  await require('../../helpers/oneInc/claimCheck').addExposures(page, cn, [{ coverageLabel: [''] }]).catch((e) => { err = e.message.split('\n')[0]; });
+  const after = await exposures();
+  await R.check(page, ti, { description: `${cn}: one more exposure`, expected: `${before.length + 1} exposures`, actual: `${(after || []).length}: ${(after || []).slice(-1)[0] || ''}${err ? ' — ' + err : ''}`, ok: !!after && after.length === before.length + 1 });
+}));
+
+// A migrated payee usually has no Payment Contact Details, and cloud refuses a non-vendor payment without them ("Payees
+// other than vendor should have the payment contact details set up on the parties involved" — CPP-DE-01-25-0746263,
+// 2026-11-15). Set them up the way an adjuster would before paying: the QA mailbox and the 555 test mobile (feedback:
+// every test contact e-mail is amitmishra@donegalgroup.com). Returns what was done per name.
+const PC = require('../../helpers/oneInc/paymentContact');
+async function ensurePaymentContacts(page, cn, names) {
+  const out = [];
+  for (const name of [...new Set(names.filter(Boolean))]) {
+    await M.open(page, cn);
+    const r = await PC.setPaymentContact(page, { first: name }, { email: 'amitmishra@donegalgroup.com', mobile: '717-555-0142' }, `Payment Contact Details for ${name}`)
+      .catch((e) => `not set: ${e.message.split('\n')[0].slice(0, 160)}`);
+    out.push(`${name}: ${typeof r === 'string' ? r : JSON.stringify(r)}`.slice(0, 240));
+  }
+  await M.open(page, cn);
+  return out;
+}
+async function payeeHasZip(page, cn, name) {
+  await M.open(page, cn);
+  await W.navigate(page, 'parties');
+  await W.settle(page, 2500);
+  const row = await page.evaluate((n) => [...document.querySelectorAll('tr')].filter((r) => r.offsetParent && !r.querySelector('tr') && r.querySelector('[id$="-Name"]'))
+    .map((r) => (r.innerText || '').replace(/\s+/g, ' ').trim()).find((t) => t.toLowerCase().includes(String(n).toLowerCase())) || '', name);
+  await M.open(page, cn);
+  return { ok: !row || /\b\d{5}(-\d{4})?\s*$/.test(row), row: row.replace(/\s+/g, ' ').slice(0, 120) };
+}
+// Migrated adjuster (user) records can be incomplete on cloud, and CC then refuses every payment on the exposures they
+// own ("Exposure owner Bill Folmar must have a valid examiner number", "Exposure owner Cody Wilson is missing … First
+// Name, Last Name, Email Address, and/or Phone Number" — 2026-11-15; RX046 reports these). The lifecycle cases test the
+// function, so they take the exposures over first (setupA.assignExposuresTo — the adjuster's own workaround) and note
+// who owned them.
+async function takeOver(page, ti, cn) {
+  await M.open(page, cn);
+  const owners = await W.navigate(page, 'exposures').then(() => page.evaluate(() => [...new Set([...document.querySelectorAll('[id*="ExposuresLV-"][id$="-Assignee"]')].map((e) => e.innerText.trim()).filter(Boolean))])).catch(() => []);
+  const done = await A.assignExposuresTo(page, 'Benjamin Smith').catch((e) => `not reassigned: ${e.message.split('\n')[0].slice(0, 160)}`);
+  await R.step(page, ti, `${cn}: exposure owners ${owners.join(', ') || '?'} → ${done}`);
+  await M.open(page, cn);
+}
+const lineClaimant = (l) => (l.label.replace(/^\(\d+\)\s*/, '').split(' - ')[1] || '').trim();
+
+test('RG-RX042 [Migrated Claims - lifecycle]: a payment on a migrated line goes to OneInc and its check is voided', async ({ page }, ti) => S.blockable(test, async () => {
+  process.env.ONEINC_ALLOW_FINISH = process.env.ONEINC_ALLOW_FINISH || '1';
+  const CO = require('../../helpers/oneInc/checkOps');
+  ti.setTimeout(3_600_000); // up to 3 claims + the Financials Escalation batch + up to 10 minutes for OneInc's answer
+  await login(page);
+  // Up to 3 claims: a migrated payee whose address has no ZIP Code is refused at the payee step — recorded, next claim.
+  const refusals = [];
+  let skipped = 0;
+  let done = null;
+  for (let k = 0; k < 15 && !done && refusals.length - skipped < 4; k++) {
+    const cn = await recentClaim(page);
+    const fin = await M.financialSummary(page);
+    const line = fin.lines.find((l) => (l.values['Remaining Reserves'] || 0) >= 5);
+    if (!line) { refusals.push(`${cn}: no line with $5+ remaining reserve`); continue; }
+    const name = line.label.replace(/^\(\d+\)\s*/, '').split(' - ')[0];
+    const claimant = lineClaimant(line);
+    // OneInc pays people, not companies: a check to a company payee comes back Voided by the integration within a
+    // minute (THE DEHAYES GROUP on DFS-VA-02-23-0742468, 2026-11-15) — the void flow needs a person.
+    if (/\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|CO|GROUP|AGENCY|LTD|LP|BANK|INSURANCE|SERVICES?)\b\.?\s*$/i.test(claimant) || /\b(LLC|INC|GROUP|AGENCY|CORP)\b/i.test(claimant)) { refusals.push(`${cn} (${claimant}): company payee — OneInc pays people`); skipped++; continue; }
+    // A payee whose Parties Involved address has no ZIP is refused at the payee step (RX045) — note it, next claim.
+    const zip = await payeeHasZip(page, cn, claimant);
+    if (!zip.ok) { refusals.push(`${cn} (${claimant}): address without ZIP — ${zip.row}`); skipped++; continue; }
+    const pcd = await ensurePaymentContacts(page, cn, [claimant]);
+    await R.step(page, ti, `${cn}: Payment Contact Details — ${pcd.join(' | ')}`);
+    if (pcd.some((x) => /not set|refused/i.test(x))) { refusals.push(`${cn} (${claimant}): Payment Contact Details could not be set — ${pcd.join(' | ').slice(0, 160)}`); skipped++; continue; }
+    await takeOver(page, ti, cn);
+    try {
+      const pay = await P.makePayment(page, { reserveLine: `match:${esc(name)}`, payee: claimant || 'claimant', amount: P.uniqueAmount(1) });
+      done = { cn, pay, line };
+    } catch (e) {
+      if (e.name !== 'Blocked') throw e;
+      refusals.push(`${cn} (${claimant}): ${e.message.split('\n')[0].slice(0, 200)}`);
+    }
+  }
+  if (refusals.length) ti.annotations.push({ type: 'manual', description: `Migrated claims that could not be paid as they came across: ${refusals.join(' || ')}` });
+  if (!done) throw new W.Blocked(`no recent migrated claim took a payment — ${refusals.join(' || ').slice(0, 700)}`);
+  const { cn, pay, line } = done;
+  R.setClaim(ti, cn, process.env.CC_USER);
+  await R.step(page, ti, `${cn}: $${pay.amount} to ${pay.payee} on ${line.label} — ${pay.messages.join(' | ') || 'finished'}`);
+  await B.openExistingClaim(page, cn);
+  await CO.escalateChecks(page, pay.amount).catch((e) => R.step(page, ti, `escalation: ${e.message.split('\n')[0]}`));
+  // OneInc acknowledges TEST checks within minutes (Requested / Issued) — then Void is enabled.
+  // A check that turns Voided / Stopped on its own was refused downstream (CA-VA-02-24-0742829's $1.47, whose payee had
+  // no Payment Contact Details, came back Voided — 2026-11-15) — reported as that, not as a timeout.
+  let opened = '';
+  let last = '';
+  for (let t = 0; t < 15 && !opened; t++) {
+    await B.openExistingClaim(page, cn);
+    last = ((await CO.checkRows(page).catch(() => [])).filter((r) => String(r.amount).replace(/[^0-9.]/g, '') === String(pay.amount)).pop() || {}).status || '';
+    if (/void|stop/i.test(last)) break;
+    if (/^(Requested|Issued)$/.test(last)) opened = await CO.openCheck(page, { status: '^(Requested|Issued)$', amount: `$${pay.amount}` }).catch(() => '');
+    if (!opened) await page.waitForTimeout(60000);
+  }
+  await R.check(page, ti, { description: `${cn}: check $${pay.amount} sent to OneInc`, expected: 'Requested / Issued', actual: opened || (/void|stop/i.test(last) ? `came back ${last} without a user void — refused downstream` : `still "${last}" after 15 minutes`), ok: !!opened });
+  // openCheck leaves the check's details (with Void) showing — void from there.
+  await CO.openVoid(page);
+  await CO.submitVoid(page);
+  await B.openExistingClaim(page, cn);
+  const after = (await CO.checkRows(page)).filter((r) => String(r.amount).replace(/[^0-9.]/g, '') === String(pay.amount));
+  const items = [{ description: `${cn}: check voided`, expected: 'Pending void / Voided', actual: after.map((r) => `${r.number} ${r.status}`).join(' | '), ok: after.some((r) => /void/i.test(r.status)) }];
+  await reconcileAfter(page, cn, items, 'payment + void');
+  await checkAll(page, ti, items);
+}));
+
+test('RG-RX043 [Migrated Claims - lifecycle]: a recovery reserve and receipt post on a migrated claim', async ({ page }, ti) => S.blockable(test, async () => {
+  await B.loginAsAdmin(page);
+  const cn = await recentClaim(page);
+  R.setClaim(ti, cn, process.env.CC_ADMIN_USER || 'admin');
+  const before = await M.financialSummary(page);
+  const was = before.total ? before.total.Recoveries || 0 : 0;
+  await B.openExistingClaim(page, cn);
+  const amt = 150;
+  await E.recovery(page, 'PA', amt, { skipSubro: false });
+  const items = [];
+  const { fin, tx } = await reconcileAfter(page, cn, items, 'the recovery');
+  const now = fin.total ? fin.total.Recoveries || 0 : 0;
+  const rows = tx.filter((t) => t.Type === 'Recovery' && t.Date === today() && Math.abs(t.Amount - amt) < 0.01);
+  // A receipt can need approval (HO-DE-01-24-0744155: "Pending approval", 2026-11-15) — then Recoveries stays put
+  // until it is approved; posted, it rises by the amount.
+  const pending = rows.some((t) => M.NOT_POSTED.test(String(t.Status).trim()));
+  items.unshift({ description: `${cn}: $${amt} recovery on the ledger`, expected: `Recovery $${amt}.00 today`, actual: rows.map((t) => `${t.Type} $${t.Amount} ${t.Status}`).join(' | ') || 'none today', ok: rows.length > 0 });
+  items.unshift({ description: `${cn}: Recoveries total`, expected: pending ? `$${was} (receipt pending approval)` : `$${was + amt}`, actual: `$${now}`, ok: Math.abs(now - (pending ? was : was + amt)) < 0.01 });
+  await checkAll(page, ti, items);
+}));
+
+test('RG-RX044 [Migrated Claims - lifecycle]: an open migrated claim is drained, its exposures closed and the claim closed', async ({ page }, ti) => S.blockable(test, async () => {
+  process.env.ONEINC_ALLOW_FINISH = process.env.ONEINC_ALLOW_FINISH || '1';
+  await B.loginAsAdmin(page);
+  ti.setTimeout(3_600_000); // drain payments, up to 9 activity sweeps, exposure + claim close
+  // Small open reserves only: the drain pays them out with Final Payments (OneInc staging, TEST only).
+  // A migrated payment still "Pending approval" holds the whole reserve (CPP-DE-01-25-0746263: $500 since 07/16/2025),
+  // so the claim cannot be drained until someone approves or rejects it — noted, next claim (up to 4).
+  let cn = null;
+  let before = null;
+  const held = [];
+  for (let k = 0; k < 4 && !cn; k++) {
+    const c = await recentClaim(page, { maxReserve: 1500 });
+    const pend = (await M.transactions(page)).filter((t) => t.Type === 'Payment' && /Pending approval/i.test(t.Status));
+    if (pend.length) { held.push(`${c}: ${pend.map((t) => `$${t.Amount} payment Pending approval since ${t.Date}`).join(', ')}`); continue; }
+    cn = c;
+    await M.open(page, cn);
+    before = await M.financialSummary(page);
+  }
+  if (held.length) ti.annotations.push({ type: 'manual', description: `Migrated claims passed over — payments pending approval: ${held.join(' || ')}` });
+  if (!cn) throw new W.Blocked(`every recent migrated claim tried holds a pending-approval payment — ${held.join(' || ')}`);
+  R.setClaim(ti, cn, process.env.CC_ADMIN_USER || 'admin');
+  await R.step(page, ti, `${cn} before close: ${JSON.stringify(before.total)}`);
+  await R.step(page, ti, `Payment Contact Details: ${(await ensurePaymentContacts(page, cn, before.lines.filter((l) => (l.values['Remaining Reserves'] || 0) > 0).map(lineClaimant))).join(' | ') || 'no line to pay'}`);
+  // Migrated claims carry overdue activities; completing one spawns "… has been escalated for this claim" notices, so
+  // one sweep is not enough (PA-DE-01-25-0745522 took three passes, 2026-11-15). Sweep until nothing more completes,
+  // then close; one more sweep + close if the close is refused for open activities.
+  const sweep = async () => {
+    for (let pass = 0; pass < 3; pass++) {
+      await M.open(page, cn);
+      await R.clickMenu(page, /^Workplan$/);
+      await page.locator('select[name$="WorkplanFilter"]').first().selectOption({ label: 'All open activities' }).catch(() => {});
+      await W.settle(page, 2500);
+      await E.completeActivitiesCloud(page);
+    }
+  };
+  await takeOver(page, ti, cn);
+  await sweep();
+  let err = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    err = '';
+    await B.openExistingClaim(page, cn);
+    await E.close(page, cn).catch((e) => { err = e.message.split('\n')[0]; });
+    if (!err || !/open activities/i.test(err)) break;
+    await R.step(page, ti, `Close refused for open activities — sweeping again: ${err.slice(0, 200)}`);
+    await sweep();
+  }
+  await M.open(page, cn);
+  const st = (await M.header(page) || {}).status || '';
+  const items = [{ description: `${cn}: claim closed`, expected: 'St: Closed', actual: `${st}${err ? ' — ' + err : ''}`, ok: /closed/i.test(st) }];
+  await reconcileAfter(page, cn, items, 'the close');
+  await checkAll(page, ti, items);
+}));
+
+test('RG-RX045 [Migrated Claims - lifecycle]: payees on recent migrated claims carry a complete address (street, city, state, ZIP)', async ({ page }, ti) => S.blockable(test, async () => {
+  await login(page);
+  const claims = await M.pickRecent(page, 5, { log });
+  R.setClaim(ti, claims.join(', '), process.env.CC_USER);
+  const items = [];
+  for (const cn of claims) {
+    await M.open(page, cn);
+    await W.navigate(page, 'parties');
+    await W.settle(page, 2500);
+    // Parties Involved rows: Name | Roles | … | Address (ends "<State> <ZIP>"). Payees = Claimant / Check Payee / Insured.
+    const rows = await page.evaluate(() => [...document.querySelectorAll('tr')].filter((r) => r.offsetParent && !r.querySelector('tr') && r.querySelector('[id$="-Name"]'))
+      .map((r) => (r.innerText || '').replace(/\s+/g, ' ').trim()));
+    const payees = rows.filter((t) => /\b(Claimant|Check Payee|Insured)\b/.test(t));
+    const bad = payees.filter((t) => !/\b\d{5}(-\d{4})?\s*$/.test(t));
+    items.push({ description: `${cn}: every claimant / payee / insured has an address ending in a ZIP`, expected: `${payees.length} of ${payees.length}`, actual: bad.length ? `missing on: ${bad.map((t) => t.slice(0, 90)).join(' || ')}` : `${payees.length} of ${payees.length}`, ok: !bad.length });
+  }
+  await checkAll(page, ti, items);
+}));
+
+test('RG-RX046 [Migrated Claims - lifecycle]: recent migrated claims can be paid as they came across', async ({ page }, ti) => S.blockable(test, async () => {
+  process.env.ONEINC_ALLOW_FINISH = process.env.ONEINC_ALLOW_FINISH || '1';
+  ti.setTimeout(3_600_000);
+  await login(page);
+  // A $1.xx partial payment to each claim's line claimant, with nothing changed but the Payment Contact Details cloud
+  // newly requires (set the way an adjuster would). Every refusal is migrated data cloud cannot pay on: payee address
+  // (no ZIP / street / city), exposure owner's user record (examiner number, name, e-mail, phone), pending approvals.
+  const claims = await M.pickRecent(page, 5, { log });
+  R.setClaim(ti, claims.join(', '), process.env.CC_USER);
+  const items = [];
+  for (const cn of claims) {
+    await M.open(page, cn);
+    const fin = await M.financialSummary(page);
+    const line = fin.lines.find((l) => (l.values['Remaining Reserves'] || 0) >= 5);
+    if (!line) { await R.step(page, ti, `${cn}: no line with $5+ remaining reserve — skipped`); continue; }
+    const name = line.label.replace(/^\(\d+\)\s*/, '').split(' - ')[0];
+    const claimant = lineClaimant(line);
+    await ensurePaymentContacts(page, cn, [claimant]);
+    let r;
+    try { r = await P.makePayment(page, { reserveLine: `match:${esc(name)}`, payee: claimant || 'claimant', amount: P.uniqueAmount(1) }); } catch (e) { r = { finished: false, messages: [e.message.split('\n')[0].slice(0, 300)] }; }
+    const errs = (r.messages || []).filter((m) => !/^Validation Results|Warnings?:|Loss payee\/additional insured/i.test(m));
+    items.push({ description: `${cn}: $${r.amount || '1.xx'} to ${claimant || 'claimant'} on ${line.label.slice(0, 60)}`, expected: 'payment accepted', actual: r.finished ? `accepted${errs.length ? ' — ' + errs.join(' | ') : ''}` : `refused — ${errs.join(' | ') || (r.messages || []).join(' | ') || 'no message'}`, ok: !!r.finished });
+  }
+  if (!items.length) throw new W.Blocked(`none of ${claims.join(', ')} has a line with $5+ remaining reserve`);
+  await checkAll(page, ti, items);
 }));
