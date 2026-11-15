@@ -558,7 +558,8 @@ function evaluateOne(req, haystack, context) {
       // DIG221A 2026-11-10, reported as "missing entirely"): still a FAIL, but say what printed.
       const want = Date.parse(String(req.expectedValue).trim());
       if (dateVariants(req.expectedValue).length && !Number.isNaN(want)) {
-        const printed = (haystack.match(/\b[A-Z][a-z]{2,8}\.? \d{1,2}, \d{4}(?:, \d{1,2}:\d{2}(?::\d{2})? ?[AP]M)?|\b\d{1,2}\/\d{1,2}\/\d{4}\b/g) || [])
+        const printed = (haystack.match(/\b[A-Z][a-z]{2,8}\.? \d{1,2}, \d{4}(?:, \d{1,2}:\d{2}(?::\d{2})? ?[AP]M)?|(?<![\d/])\d{1,2}\/\d{1,2}\/\d{4}(?!\d)|(?<=x\d{3,5})\d{2}\/\d{2}\/\d{4}(?!\d)/g) || [])
+          // ...also glued onto a phone extension ("x741315/11/2026" — DIG218, 2026-11-15).
           .find((d) => { const t = printedDate(d); return !Number.isNaN(t) && Math.abs(t - want) <= 864e5; });
         if (printed) {
           const sameDay = printedDate(printed) === want;
