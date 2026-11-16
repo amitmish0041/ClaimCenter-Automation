@@ -56,7 +56,13 @@ async function saveDiagnostic(page, label) {
     fs.mkdirSync(DIAG_DIR, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const base = path.join(DIAG_DIR, `${label}_${stamp}`);
+    // An error banner sits at the top of the bottom panel and was scrolled out of the screenshot (DIG179 2026-11-16, user):
+    // scroll it into view first, and save the banner on its own too.
+    const errGroup = page.getByRole('group', { name: /^Errors/i }).first();
+    const hasErr = await errGroup.isVisible().catch(() => false);
+    if (hasErr) await errGroup.scrollIntoViewIfNeeded().catch(() => {});
     await page.screenshot({ path: `${base}.png`, fullPage: true }).catch(() => {});
+    if (hasErr) await errGroup.screenshot({ path: `${base}_error.png` }).catch(() => {});
     const dump = await page.evaluate(() => {
       const vis = (e) => e.offsetParent !== null;
       const buttons = Array.from(document.querySelectorAll('button, [role="button"]')).filter(vis)
