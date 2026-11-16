@@ -875,9 +875,30 @@ async function completeDocument(page, { log = console.log, scenarioId = 'scenari
         } catch (e) { log(`[Approval] approve as ${user} failed: ${e.message.split('\n')[0]}`); } finally { await ctx2.close().catch(() => {}); }
       }
       await page.getByRole('menuitem', { name: 'Documents', exact: true }).click().catch(() => {});
-      await page.waitForTimeout(6000);
+      await page.waitForTimeout(5000);
+      // The approved document: filter by its name, newest upload, open its properties — the normal flow then reads the
+      // Identifier there (readDocumentPropertiesIdentifier) and fetches the PDF as for any completed document.
+      const nameBox = page.locator('xpath=//*[normalize-space(text())="Name or Identifier"]/following::input[1]').first();
+      await nameBox.fill(req.description.split(' ')[0]).catch(() => {});
+      await page.getByRole('button', { name: 'Search', exact: true }).first().click().catch(() => page.getByText('Search', { exact: true }).last().click().catch(() => {}));
+      await page.waitForTimeout(5000);
       const d4 = await saveDiagnostic(page, `${scenarioId}_documentsAfterApproval`).catch(() => null);
-      log(`[Approval] documents: ${d4 ? d4 + '.png' : ''} | ${((await page.locator('body').innerText().catch(() => '')) || '').replace(/\s+/g, ' ').slice(0, 2500)}`);
+      const rowsInfo = await page.evaluate((desc) => [...document.querySelectorAll('tr')].filter((r) => r.offsetParent && r.innerText.includes(desc))
+        .map((r) => r.innerText.replace(/\s+/g, ' ').trim()), req.description).catch(() => []);
+      log(`[Approval] documents: ${d4 ? d4 + '.png' : ''} | rows: ${rowsInfo.join(' || ').slice(0, 1500)}`);
+      const stamp = (t) => { const m = t.match(/(\d{1,2}\/\d{1,2}\/\d{4})(?:\s+(\d{1,2}:\d{2})\s*([AP]M))?/); return m ? Date.parse(`${m[1]} ${m[2] || '00:00'} ${m[3] || ''}`) || 0 : 0; };
+      const newest = rowsInfo.reduce((best, t, i) => (stamp(t) >= stamp(rowsInfo[best] || '') ? i : best), 0);
+      const docRows = page.locator('tr').filter({ hasText: req.description });
+      if (rowsInfo.length && /\bApproved\b/.test(rowsInfo[newest])) {
+        await docRows.nth(newest).locator('.gw-icon, [class*="info"], img, i').first().click().catch(() => {});
+        await page.waitForTimeout(4000);
+        const d5 = await saveDiagnostic(page, `${scenarioId}_approvedProperties`).catch(() => null);
+        if (/Identifier/.test(await page.locator('body').innerText().catch(() => ''))) {
+          log(`[Approval] approved document opened: ${rowsInfo[newest].slice(0, 160)} ${d5 ? d5 + '.png' : ''}`);
+          return;
+        }
+        log(`[Approval] document properties did not open ${d5 ? d5 + '.png' : ''}`);
+      }
     } else if (process.env.SMARTCOMM_APPROVAL_DISCOVERY === '3') {
       const approval = require('./documentApprovalService');
       const req = await approval.requestApproval(page, { assignToRe: /Bill Folmar \(System Admin Group\)/, log, scenarioId });

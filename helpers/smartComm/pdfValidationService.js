@@ -370,6 +370,11 @@ function evaluateOne(req, haystack, context) {
       }
       if (isShortValue(req.expectedValue)) {
         const wordValues = [req.expectedValue, ...(req.alsoAccept || []).filter(isShortValue)].map((w) => normalizeWs(w));
+        // A state field holding the code ("OK") prints the state's name ("Oklahoma" — DIG151/DIG151WC Jurisdiction, 2026-11-16).
+        if (/\b(state|jurisdiction)\b/i.test(`${req.fieldName || ''} ${req.description || ''}`)) {
+          const name = Object.keys(fraudLanguageService.STATE_NAME_TO_CODE).find((n) => fraudLanguageService.STATE_NAME_TO_CODE[n] === String(req.expectedValue).trim().toUpperCase());
+          if (name) wordValues.push(name);
+        }
         const res = evaluateOne({ ...req, wordValues }, haystack, context);
         if (res.result === 'PASS' && normalizeWs(res.actual).toLowerCase() !== normalizeWs(req.expectedValue).toLowerCase() && !res.reason) {
           res.reason = req.alsoAcceptNote || `Accepted alternative value "${res.actual}".`;

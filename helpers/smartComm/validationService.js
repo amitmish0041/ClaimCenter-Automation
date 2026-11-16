@@ -111,6 +111,9 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
   // running the full matrix — for a broad sweep across many templates where one real, correctly-matched
   // scenario per template is enough signal and running all 3 would roughly triple total runtime.
   if ((singleScenario || printPlan) && !claimNumberOverride) scenarios = scenarios.slice(0, 1);
+  // SMARTCOMM_MAX_SCENARIOS=N caps the matrix at N scenarios per template (sweep of 2026-11-16: 2 each).
+  const maxScenarios = Number(process.env.SMARTCOMM_MAX_SCENARIOS) || 0;
+  if (maxScenarios > 0 && !singleScenario && !printPlan && !claimNumberOverride) scenarios = scenarios.slice(0, maxScenarios);
 
   if (!scenarios.length) {
     return blockedTemplateResult(
@@ -2893,6 +2896,8 @@ function annotateInteractiveEditFailures(validations, interactiveChecks) {
     const beforeOk = beforeValues.some((b) => {
       const bn = normForKnownValueMatch(b);
       if (sameDate(b)) return true;
+      // A state code shown as the state's name ("OK" / "[Oklahoma]" — DIG151 Jurisdiction, 2026-11-16).
+      if (bn && stateName(bn) && stateName(bn) === stateName(expectedNorm)) return true;
       // A short value equal to what the field showed ("GMC" / "[GMC]" — DIG128 2026-10-29) is a match too.
       if (bn && bn === expectedNorm) return true;
       return expectedNorm.length >= minLen && bn.length >= minLen && (expectedNorm.includes(bn) || bn.includes(expectedNorm));

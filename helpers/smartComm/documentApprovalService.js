@@ -71,6 +71,15 @@ async function approveFromWorkplan(page, { description, log = console.log, scena
     const inner = page.getByRole('button', { name: /^Approve$/ }).first();
     const d = await saveDiagnostic(page, `${scenarioId}_activityOpened`).catch(() => null);
     log(`[Approval] activity opened: ${d ? d + '.png' : ''} | ${((await page.locator('body').innerText().catch(() => '')) || '').replace(/\s+/g, ' ').slice(0, 1200)}`);
+    // Approving = pressing Complete on the opened activity (user, 2026-11-15).
+    const done = page.locator('.gw-ListDetailPanel, [id*="ActivityDetail"], body').getByRole('button', { name: /^Complete$/ }).last();
+    if (await done.isEnabled().catch(() => false)) {
+      await done.click();
+      await wait(page, 5000);
+      await saveDiagnostic(page, `${scenarioId}_activityCompleted`).catch(() => null);
+      log(`[Approval] Complete pressed on the activity: ${rowText}`);
+      return rowText;
+    }
     if (await inner.isEnabled().catch(() => false)) {
       await inner.click();
       await wait(page, 5000);
