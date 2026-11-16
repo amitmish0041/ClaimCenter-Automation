@@ -150,6 +150,83 @@ function dateVariants(value) {
   return [...new Set([`${p(m)}/${p(d)}/${y}`, `${m}/${d}/${y}`, `${p(m)}-${p(d)}-${y}`, `${MONTHS[m - 1]} ${p(d)}, ${y}`, `${MONTHS[m - 1]} ${d}, ${y}`])].filter((v) => v !== s);
 }
 
+// Every object in the SmartCOMM payload (context.raw), and the scalar fields whose key matches keyRe.
+function payloadFields(context, keyRe) {
+  const objects = [];
+  const values = [];
+  const walk = (v, depth) => {
+    if (v == null || typeof v !== 'object' || depth > 14 || objects.length > 20000) return;
+    if (Array.isArray(v)) { v.forEach((x) => walk(x, depth + 1)); return; }
+    objects.push(v);
+    for (const [k, x] of Object.entries(v)) {
+      if (x != null && typeof x !== 'object' && keyRe && keyRe.test(k) && String(x).trim()) values.push(String(x).trim());
+      walk(x, depth + 1);
+    }
+  };
+  walk(context && context.raw, 0);
+  return { objects, values };
+}
+
+// The payload's addresses: { line1, zip } from every object carrying an address line and a postal code.
+function payloadAddresses(context) {
+  const pick = (o, re) => { const k = Object.keys(o).find((key) => re.test(key) && o[key] != null && typeof o[key] !== 'object'); return k ? String(o[k]).trim() : ''; };
+  return payloadFields(context).objects
+    .map((o) => ({ line1: pick(o, /^addressLine1$|^street$|^address1$/i), line2: pick(o, /^addressLine2$|^address2$/i), zip: pick(o, /^postalCode$|^zip(code)?$/i), city: pick(o, /^city$/i) }))
+    .filter((a) => a.line1 && a.zip);
+}
+
+const ADDRESS_SAMPLE_RE = /\bP\.?\s*O\.?\s*Box\s+\d+|\b\d+\s+[A-Za-z]+(?:\s+[A-Za-z]+)?\s+(?:Road|Rd|Street|St|Lane|Ln|Avenue|Ave|Drive|Dr|Pike|Blvd)\b|\b[A-Z]{2}\s+\d{5}\b/i;
+// A mapping-doc sample value written into the mock-up for reference (user direction 2026-11-16 — DIG36's letterhead
+// "1195 River Road, P.O Box 302, Marietta, PA 17547", DIG225's ", P.O. Box 192, Marietta, PA 17547.", DIG211's masked SSN
+// "XXX-XX-", DIG174's sample initial "D"): compared with the claim's own value in the payload / ClaimCenter instead.
+// Returns a result, or null when the text isn't a sample value.
+function sampleValueResult(req, haystack, context) {
+  if (req.expectedSource || !req.expectedValue) return null;
+  const want = String(req.expectedValue).trim();
+  const flat = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const hay = ` ${flat(haystack)} `;
+  // An initial / one-or-two-letter sample (a signature initial): nothing in the claim data to compare it with.
+  if (/^[A-Za-z]\.?$/.test(want)) {
+    return { expected: want, actual: 'N/A', result: 'SKIPPED', reason: `"${want}" is a sample initial in the mapping doc's mock-up, not fixed wording — nothing to compare.` };
+  }
+  // A masked SSN: the PDF must print a masked SSN, or the claimant's last four digits from the payload.
+  if (/^X{3}-X{2}-?(?:X{4})?$/i.test(want)) {
+    const masked = (haystack.match(/\b[X*]{3}-[X*]{2}-\d{4}\b/i) || [])[0];
+    if (masked) return { expected: want, actual: masked, result: 'PASS', reason: 'Masked SSN printed (the mapping doc shows the mask as a sample).' };
+    const last4 = [...new Set(payloadFields(context, /ssn|social|taxid/i).values.map((s) => (s.replace(/\D/g, '').match(/(\d{4})$/) || [])[1]).filter(Boolean))];
+    const hit = last4.find((d) => hay.includes(` ${d} `));
+    if (hit) return { expected: want, actual: hit, result: 'PASS', reason: `The mapping doc shows the SSN mask "${want}" as a sample; the PDF prints the claimant's last four SSN digits from the payload ("${hit}").` };
+    // The form's own "last four digits" field (DIG211: "Social Security Number (last four digits only)" → "4002").
+    // (the PDF text can glue the next field on: "400207/15/1977" = SSN 4002 + date of birth)
+    const four = (haystack.match(/last\s*f\s*our\s+digits\s+only\)?[\s\S]{0,80}?(?<![\d/])(\d{4})(?=\d{1,2}\/\d{1,2}\/\d{4}|[^\d/]|$)/i) || [])[1];
+    if (four) return { expected: want, actual: four, result: 'PASS', reason: `The mapping doc shows the SSN mask "${want}" as a sample; the form prints the last four SSN digits in its own field ("${four}").` };
+    return { expected: want, actual: 'Not Found', result: 'FAIL', reason: `The mapping doc shows the SSN mask "${want}" as a sample; no masked SSN or last-four digits are printed.` };
+  }
+  // A sample address: passes when the PDF prints an address from the payload / ClaimCenter (street or PO box + ZIP).
+  if (ADDRESS_SAMPLE_RE.test(want) && !/_{3,}/.test(want)) {
+    // Only an address of the same kind as the sample counts — same ZIP or same city (the letterhead sample "…Marietta, PA
+    // 17547" against the payload's company address), so a recipient address printed elsewhere can't pass it; and the
+    // payload address must be printed whole enough: its street line and its ZIP.
+    const sampleZip = (want.match(/\b(\d{5})\b/) || [])[1];
+    const sampleCity = flat((want.match(/([A-Za-z][A-Za-z .]+),\s*[A-Z]{2}\s+\d{5}/) || [])[1] || '').split(' ').pop();
+    const addrs = payloadAddresses(context);
+    const sameKind = (a) => (sampleZip && a.zip.startsWith(sampleZip)) || (sampleCity && sampleCity.length > 3 && flat(a.city) === sampleCity);
+    // Street line or second line (a letterhead prints just "P.O. BOX 302" — DIG36), plus the ZIP. "PO Box" = "P.O. Box".
+    const box = (t) => flat(t).replace(/\bp o box\b/g, 'po box');
+    const hayBox = ` ${box(haystack)} `;
+    const lineShown = (l) => l && hayBox.includes(` ${box(l)} `);
+    const printed = addrs.filter((a) => sameKind(a) && (lineShown(a.line1) || lineShown(a.line2)) && hay.includes(` ${flat(a.zip.slice(0, 5))}`));
+    const show = (a) => [a.line1, a.line2, `${a.city} ${a.zip}`].filter(Boolean).join(', ').replace(/\s+/g, ' ');
+    if (printed.length) {
+      return { expected: want, actual: show(printed[0]), result: 'PASS', reason: `The mapping doc shows "${want}" as a sample address; the PDF prints the address from the payload / ClaimCenter ("${show(printed[0])}").` };
+    }
+    const kin = addrs.filter(sameKind);
+    if (!addrs.length) return null; // no payload to compare with: leave it to the wording check
+    return { expected: kin.length ? show(kin[0]) : want, actual: 'Not Found', result: 'FAIL', reason: `The mapping doc shows "${want}" as a sample address; ${kin.length ? `the payload / ClaimCenter address "${show(kin[0])}" is not printed in its place` : 'no address from the payload / ClaimCenter is printed in its place'}.` };
+  }
+  return null;
+}
+
 // The time a printed date stands for; day-first ("15/11/2026" — DIG218 Date of Letter, 2026-11-15) is read too.
 function printedDate(d) {
   const s = String(d).replace(/, \d{1,2}:\d{2}.*$/, '');
@@ -380,6 +457,8 @@ function evaluateOne(req, haystack, context) {
           res.reason = req.alsoAcceptNote || `Accepted alternative value "${res.actual}".`;
         }
         if (res.result === 'PASS' || req.wasEditedByTest) return res;
+        // A lone letter in the mock-up (DIG174's sample initial "D") that isn't printed: a sample, not wording.
+        if (!req.expectedSource && /^[A-Za-z]\.?$/.test(String(req.expectedValue).trim())) return sampleValueResult(req, haystack, context);
         // Not printed as a whole word — still a match when it's the same words with punctuation inside a word ("V.I.N."
         // vs "VIN" — itself a whole-word match), or the same label worded differently ("D/L:" printed as "Date of
         // Loss:", DIG52 — fieldLabelSynonyms). Both were skipped for short values at first (re-score of 2026-10-18).
@@ -538,6 +617,10 @@ function evaluateOne(req, haystack, context) {
       if (captionFree !== haystack && /_{3,}/.test(req.expectedValue) && tight(captionFree).includes(tight(req.expectedValue))) {
         return { expected: req.expectedValue, actual: req.expectedValue, result: 'PASS', reason: 'Printed intact; a form caption from the line above sits inside it in the PDF text.' };
       }
+      // A sample VALUE the mapping doc's mock-up shows for reference (an address, a masked SSN, an initial) — not fixed
+      // wording: it is judged on the claim's own value from the payload / ClaimCenter (user direction 2026-11-16).
+      const sample = sampleValueResult(req, haystack, context);
+      if (sample) return sample;
       const near = findNearWording(haystack, req.expectedValue);
       // The "near" line swaps a real word for another ("Name of Purchaser(s)" vs the printed "Name of the Seller(s)" —
       // DIG128MI 2026-10-30, where Purchaser/Lessee/Lessor all "matched" the one Seller line): that's a DIFFERENT line,
