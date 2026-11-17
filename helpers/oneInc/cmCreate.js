@@ -26,9 +26,14 @@ const sel = (suffix, tag = 'input') => `${tag}[name$="${suffix}"]`;
 const pad = (n) => String(n).padStart(2, '0');
 
 async function typeKeys(cm, s, value) {
-  const el = cm.locator(s).first();
-  await el.click(); await el.fill(''); await el.pressSequentially(value, { delay: 40 }); await el.press('Tab');
-  await cm.waitForTimeout(1000);
+  // Re-typed until it sticks: a postback from the field before (State, Levy) can redraw the form mid-typing and drop keys (11/17: ZIP '509').
+  for (let i = 0; i < 3; i++) {
+    await cm.waitForTimeout(800);
+    const el = cm.locator(s).first();
+    await el.click(); await el.fill(''); await el.pressSequentially(value, { delay: 40 }); await el.press('Tab');
+    await cm.waitForTimeout(1200);
+    if ((await cm.locator(s).first().inputValue().catch(() => '')).replace(/[^\w]/g, '').startsWith(value.replace(/[^\w]/g, ''))) return;
+  }
 }
 async function pickOption(cm, s, re) {
   const el = cm.locator(s).first();
@@ -42,7 +47,7 @@ async function openMenu(cm, items) {
   await cm.waitForTimeout(1200);
   for (const t of items.slice(0, -1)) { await cm.getByText(t, { exact: true }).first().hover(); await cm.waitForTimeout(1200); }
   await cm.getByText(items.at(-1), { exact: true }).first().click();
-  await cm.locator(sel('ContactBasicsDV-OrganizationName')).first().waitFor({ timeout: 20000 });
+  await cm.locator(`${sel('ContactBasicsDV-OrganizationName')}, ${sel('GlobalContactNameInputSet-Name')}`).first().waitFor({ timeout: 45000 });
 }
 
 // Test step: creates the company in ContactManager and remembers it (page.__cmNew) for addToClaim / onOneInc.
@@ -54,11 +59,12 @@ async function createCompany(page, { vendor = true, address = true, tag = 'VENDO
   const saved = await withCM(page, async (cm) => {
     await openMenu(cm, vendor ? ['New 1099 Record', 'Vendor (Company)'] : ['New Company', 'Company']);
     const tags = (await cm.locator('body').innerText()).match(/Tags\s+([\s\S]{0,60}?)\s+Name/);
-    await cm.locator(sel('ContactBasicsDV-OrganizationName')).first().fill(name);
     // Not masked: CM wants the EIN typed with its hyphen ("a nine-digit employer identification number with a hyphen after
     // the second digit", 2026-11-13).
     await typeKeys(cm, sel('ABCompanyVendorFormInputSet-V_EIN'), taxId);
     await pickOption(cm, sel('ABCompanyVendorFormInputSet-ExtLevy', 'select'), /^Not Applicable$/i);
+    // Name after Tax ID / Levy: their postbacks redraw the form and blanked a name typed first (11/17).
+    await typeKeys(cm, `${sel('ContactBasicsDV-OrganizationName')}, ${sel('GlobalContactNameInputSet-Name')}`, name);
     if (address) {
       await cm.locator(sel('GlobalAddressInputSet-AddressLine1')).first().fill(ADDRESS.line1);
       await cm.locator(sel('GlobalAddressInputSet-City')).first().fill(ADDRESS.city);

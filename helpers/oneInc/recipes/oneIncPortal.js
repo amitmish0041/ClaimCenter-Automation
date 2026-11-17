@@ -147,7 +147,7 @@ module.exports = (api) => {
     pc('oneIncVendor', { tin: '020725566', until: { field: 'BillingStreet', re: '1195 RIVER' }, waitMin: 20 })],
   [V('OneInc Vendor BillingStreet', { value: /1195 RIVER RD/i }), V('OneInc Vendor City', { value: /MARIETTA/i }), cmv('restoreVendors')],
   VENDOR_NOTE2 + 'Its primary address is changed in ContactManager (1195 River Rd, Marietta); the update must reach OneInc (CreateVendor) with the new address. Restored afterwards.' +
-  ' Known defect (11/14): ContactManager → OneInc stopped after 11/12 (OneInc last modified BAIKOW 11/12 10:58 PST; it worked 11/06) — nothing created or changed in ContactManager since reaches OneInc; ContactManager has no OneInc message destination.');
+  ' Sync confirmed working 11/17 (GCCM-795 TC-001..004 PASS).');
   add('GCCM-1013/INT/TC-127', 'ONEINC_ISSUED', [cmv('restoreVendors'), cmv('setCompanyAddress', BAIKOW, BAIKOW_TAX, '1195 "River" Rd & <B>||Marietta|Lancaster|PA|17547'),
     pc('oneIncVendor', { tin: '020725566', until: { field: 'BillingStreet', re: '1195' }, waitMin: 20 })],
   [V('OneInc Vendor BillingStreet', { value: /^(?!.*["&<>]).*1195s+RIVERs+RD/i }), cmv('restoreVendors')],

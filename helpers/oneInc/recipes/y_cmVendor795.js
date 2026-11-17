@@ -14,7 +14,7 @@ module.exports = (api) => {
 
   // 2026-11-14: ContactManager → OneInc vendor sync is not working on TEST (see cmCreate.SYNC_DEFECT) — TC-002 fails on it;
   // the negatives first check the route (syncWorking) and fail with the defect while it is down.
-  const DEFECT = ' Known defect (11/14): nothing created or changed in ContactManager since 11/12 reaches OneInc; ContactManager has no OneInc message destination.';
+  const DEFECT = ''; // 11/14 sync defect fixed — all four cases PASS 11/17
   add('GCCM-795/INT/TC-002', 'ONEINC_ISSUED', [cm('createCompany', { vendor: true, address: true, tag: 'VENDOR' }), cm('addToClaim'), cm('onOneInc', { expect: 'present', waitMin: 20 })],
     [V('OneInc Vendor', { value: /^on the report/i }), V('OneInc Vendor BillingStreet', { value: /1103 RICHMONT/i }), V('OneInc Vendor City', { value: /SCRANTON/i })],
     NOTE + 'Vendor (Company) with a primary address (1103 Richmont St, Scranton PA 18509): CreateVendor must bring it to OneInc with that name and address (waits up to 20 min).' + DEFECT);
