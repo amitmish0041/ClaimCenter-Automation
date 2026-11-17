@@ -95,7 +95,7 @@ async function download() {
 
 async function sortCache() {
   for (const d of fs.readdirSync(OUT_ROOT)) if (/^(\d\d - |_Un)/.test(d)) fs.rmSync(path.join(OUT_ROOT, d), { recursive: true, force: true });
-  const rows = [['file', 'template', 're_line']];
+  const rows = [['file', 'template', 'downloaded', 're_line']];
   const counts = {};
   for (const f of fs.readdirSync(CACHE).filter((x) => /\.pdf$/i.test(x))) {
     let res;
@@ -105,7 +105,7 @@ async function sortCache() {
     fs.mkdirSync(dir, { recursive: true });
     fs.copyFileSync(path.join(CACHE, f), path.join(dir, f));
     counts[res.name] = (counts[res.name] || 0) + 1;
-    rows.push([f, res.name, `"${res.re.replace(/"/g, "'")}"`]);
+    rows.push([f, res.name, new Date(fs.statSync(path.join(CACHE, f)).mtimeMs).toISOString(), `"${res.re.replace(/"/g, "'")}"`]);
   }
   fs.writeFileSync(path.join(OUT_ROOT, 'index.csv'), rows.map((r) => r.join(',')).join('\n'));
   console.log(JSON.stringify(counts, null, 1));
