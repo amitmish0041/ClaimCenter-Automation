@@ -31,7 +31,7 @@ module.exports = (api) => {
   // (sent to OneInc); Issued never happens on TEST.
   const PAYEE = 'BAIKOW LEGAL LLC';
   const TAX = '02-0725566';
-  const OLD = /111 NORTH CEDAR CREST/i;
+  const OLD = /1190 RIVER RD|111 NORTH CEDAR CREST/i; // BAIKOW's CM baseline became 1190 River Rd, Marietta by 11/17
   const NEW = /1195 RIVER RD/i;
   const PAY = (quick, amount) => [cm('restoreVendors'), // settle a ledger left by an interrupted run first
     ...(quick ? [{ open: 'quick', needOpenReserve: true }, vendorByTaxId('BAIKOW LEGAL', TAX)] : [{ open: 'full' }, vendorByTaxId('BAIKOW LEGAL', TAX), { next: true }, { reserve: 'open' }]),
