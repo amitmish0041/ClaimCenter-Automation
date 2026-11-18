@@ -60,8 +60,6 @@ const REASONS = {
   'GCCM-1013/UIF/TC-016': M(`Needs a direct-deposit (or recurring debit) check with an account number returned by OneInc — ${NO_ONEINC}`),
   'GCCM-1013/UIF/TC-018': M(`Needs ClaimsPay comments returned by OneInc — ${NO_ONEINC}`),
   'GCCM-1013/UIF/TC-023': M(`Needs a check print date from OneInc (mailed check printed) — ${NO_ONEINC}`),
-  'GCCM-1013/VBR/TC-040': D('Needs a policy carrying one of the listed deductible endorsements (WC Marietta / Lemars, GC forms) with Deductible Status not Paid, and an approved supplemental payment'),
-  'GCCM-1013/VBR/TC-041': D('Needs a policy carrying one of the listed deductible endorsements and an approved check WITHOUT a supplemental payment'),
   'GCCM-1013/VBR/TC-076': M('Needs an Issued mailed check older than 180 days (BA note on the case: dates cannot be manipulated in Cloud)'),
   'GCCM-1013/VBR/TC-082': D('Needs a claim with no assigned user — the test claims are assigned and unassigning one is not built'),
   'GCCM-1013/VBR/TC-093': M('The claimant\'s "Partial or Full Name Unknown" flag is on no cloud screen — Parties Involved › claimant › Edit and New Contact › Person have no such field (CONFIRMED 2026-11-03), so the precondition cannot be set'),

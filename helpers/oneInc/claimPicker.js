@@ -153,11 +153,11 @@ function policyCandidates(profile, { exclude = [] } = {}) {
   // policies were all exhausted — claimant numbers used up). They come FIRST: no claims → no claimant-number clashes.
   // Loss date: 7 days ago, kept inside the term. Not for aged profiles (minAgeYears).
   let extra = [];
-  if (!p.minAgeYears && !p.policies) {
+  if (!p.minAgeYears) { // pinned profiles (p.policies) take extras too, limited to their own policies (2026-11-18)
     try {
       const file = path.join(STATE_DIR, `extra-policies-${TIER}.json`);
       extra = (JSON.parse(fs.readFileSync(file, 'utf8'))[`${p.lob}:${p.state}`] || [])
-        .filter((e) => e.policyNumber && !used.has(e.policyNumber))
+        .filter((e) => e.policyNumber && !used.has(e.policyNumber) && (!p.policies || p.policies.includes(e.policyNumber)))
         .map((e) => {
           const eff = new Date(e.effective); const exp = new Date(e.expiration || '2999-01-01');
           const d = new Date(today); d.setDate(d.getDate() - 7);

@@ -65,7 +65,8 @@ const keysShown = async (page) => (await page.locator('table tbody tr').allInner
   // upload REPLACES the object (APPLIED_AUTO_324250.xml was overwritten that way on 11/17).
   const SUFFIX = process.env.UPLOAD_SUFFIX || 'T1117';
   const names = files.map((f) => {
-    const n = path.basename(f).replace(/^[^_]+__/, '').replace(/\.xml$/i, `_${SUFFIX}.xml`);
+    // UPLOAD_SUFFIX=none keeps the file's own name (it must END IN A NUMBER - the intake reads it; "_T1117" failed).
+    const n = path.basename(f).replace(/^[^_]+__/, '').replace(/\.xml$/i, SUFFIX === 'none' ? '.xml' : `_${SUFFIX}.xml`);
     fs.copyFileSync(f, path.join(staged, n));
     return path.join(staged, n);
   }).filter((f) => {

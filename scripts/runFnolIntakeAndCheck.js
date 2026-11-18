@@ -17,7 +17,7 @@ const { chromium } = require('playwright');
 const B = require('../helpers/claimCenterBase');
 const S = require('../helpers/regression/regressionSteps');
 
-const DIR = 'V:\\Amit Int\\FNOLIntake-Test\\20261117';
+const DIR = (process.argv.find((a) => a.startsWith('--dir=')) || '').slice(6) || 'V:\\Amit Int\\FNOLIntake-Test\\20261118';
 const noBatch = process.argv.includes('--no-batch');
 const skip = ((process.argv.find((a) => a.startsWith('--skip=')) || '').slice(7)).split(',').filter(Boolean);
 const OUT = path.join(__dirname, '..', 'results', 'fnol-intake');
@@ -26,11 +26,13 @@ const iso = (s) => { const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})|(\d{4})-(\d{2})-(\
 const zipOf = (xml) => { const blk = (xml.match(/<(Accident|Damage|Injury|Loss|Incident|Invoice)>[\s\S]*?<\/\1>/) || [''])[0]; return ((blk.match(/<Zip>(\d{5})/) || xml.match(/<Zip>(\d{5})/) || [])[1]) || ''; };
 
 const log = JSON.parse(fs.readFileSync(path.join(DIR, 'changes.json'), 'utf8'));
+// changes.json of either pass: the second pass (fixFnolIntakeFiles) carries policy / lossDate / the uploaded file name.
 const files = log.map((l) => {
   const pol = l.changes.find((c) => c.field === 'PolicyNumber') || {};
-  const loss = l.changes.find((c) => c.note === 'loss date') || {};
+  const loss = l.changes.find((c) => /^loss date/.test(c.note || '')) || {};
   const xml = fs.readFileSync(path.join(DIR, 'test-ready', l.source.replace(/[^A-Za-z0-9_ ()-]/g, ''), l.file), 'utf8');
-  return { source: l.source, file: l.file.replace(/^[^_]+__/, '').replace(/\.xml$/i, '_T1117.xml'), insured: l.insured, kind: l.kind, policy: pol.to, lossDate: iso(loss.to), zip: zipOf(xml) };
+  const file = l.lossDate ? l.file : l.file.replace(/^[^_]+__/, '').replace(/\.xml$/i, '_T1117.xml');
+  return { source: l.source, file, insured: l.insured, kind: l.kind, policy: l.policy || pol.to, lossDate: l.lossDate || iso(loss.to), zip: zipOf(xml) };
 }).filter((f) => f.policy && !skip.some((s) => f.file.includes(s)));
 const policies = [...new Set(files.map((f) => f.policy))];
 
@@ -40,9 +42,21 @@ async function withPage(browser, fn) {
   page.setDefaultTimeout(30000);
   try { await B.loginToClaimCenter(page, { username: process.env.CC_ADMIN_USER, password: process.env.CC_ADMIN_PASS }); return await fn(page); } finally { await ctx.close().catch(() => {}); }
 }
+// The results page lists the oldest claims first and pages the rest ("Displaying 1 - n"), so recent claims weren't on it
+// (1002241712 showed July claims only): sort by Loss Date, newest first, and read that page.
 const claimsOn = (browser, policy) => withPage(browser, async (page) => {
-  const found = await S.searchClaims(page, { policy }).catch(() => ({ rows: [] }));
-  return (found.rows || []).map((r) => ({ claim: (r.match(CLAIM_RE) || [])[0], row: r.replace(/\s+/g, ' ').trim() })).filter((x) => x.claim && x.row.includes(policy));
+  await S.searchClaims(page, { policy }).catch(() => null);
+  const firstDate = async () => { const r = await page.evaluate(() => [...document.querySelectorAll('tr[role="row"]')].map((x) => x.innerText).find((t) => /\d\d\/\d\d\/\d{4}/.test(t)) || ''); return iso(r); };
+  for (let i = 0; i < 2; i++) {
+    const before = await firstDate();
+    await page.getByText('Loss Date', { exact: true }).first().click().catch(() => {});
+    await page.waitForTimeout(3000);
+    const rows = await page.evaluate(() => [...document.querySelectorAll('tr[role="row"]')].map((x) => x.innerText).filter((t) => /\d\d\/\d\d\/\d{4}/.test(t)));
+    const ds = rows.map(iso).filter(Boolean);
+    if (ds.length && ds[0] >= ds[ds.length - 1] && (await firstDate()) >= before) break;
+  }
+  const rows = await page.evaluate(() => [...document.querySelectorAll('tr[role="row"]')].filter((r) => r.offsetParent).map((r) => (r.innerText || '').replace(/\s+/g, ' ').trim()));
+  return rows.map((r) => ({ claim: (r.match(CLAIM_RE) || [])[0], row: r })).filter((x) => x.claim && x.row.includes(policy));
 });
 
 (async () => {
