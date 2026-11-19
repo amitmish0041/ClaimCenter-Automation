@@ -84,7 +84,7 @@ module.exports = (api) => {
 
   // UIF.080 — joint payee: Adverse Carrier (claim-only business) + an Address Book vendor; field on Step 3.
   const SUBRO = require('../portalChecks').COMPANIES.subroCarrier.name;
-  add('GCCM-1013/UIF/TC-009', 'E_PA', [{ call: ['setupE.addRoleContact', 'attorney'] }, { open: 'full' }, { payee: SUBRO }, { select: ['Type', 'Adverse Carrier/Other Insurance Company'] }, { joint: [{ who: 'BAIKOW LEGAL LLC-Edited' }] },
+  add('GCCM-1013/UIF/TC-009', 'E_PA', [{ call: ['setupE.addRoleContact', 'attorney'] }, { open: 'full' }, { payee: SUBRO }, { select: ['Type', 'Adverse Carrier/Other Insurance Company'] }, { joint: [{ who: 'BAIKOW LEGAL LLC' }] },
     { next: true }, { reserve: 'open' }, { step2: {} }, { call: ['setupA.fillRequired'] }, { next: true }, { expectStep: 3 }],
   [V('Is this a Claim Payment to a Business?', { required: true, editable: true })],
   `New PA auto claim; payee "${SUBRO}" (business, type Adverse Carrier/Other Insurance Company) with an Address Book vendor as joint payee; Step 3 of 3.` + QA);
