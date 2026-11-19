@@ -535,7 +535,7 @@ async function validate(page, v, res, ctx, capture, record, dirty) {
     // The payment WAS refused, but by a different business rule (PMS…, "not allowed", "must…", amount mismatch) — a
     // verdict on the scenario, not a missing prerequisite: FAIL, showing the rule that fired, for the BA to confirm.
     // Only "Missing required field" alone means the setup is incomplete (BLOCKED).
-    if (/PMS [A-Z]{2}\d+|not allowed|must |does not match|exceeds/i.test(text)) {
+    if (/PMS [A-Z]{2}\d+|not allowed|allowed only|must |does not match|exceeds/i.test(text)) {
       return rowFor(`payment refused, but by a different rule than expected: ${text.slice(0, 300)}`, 'FAIL',
         { note: 'Confirm with BA whether this rule satisfies the requirement' });
     }
