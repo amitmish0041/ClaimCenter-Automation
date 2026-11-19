@@ -164,14 +164,29 @@ function loadInventory({ dir = ONEINC_DIR } = {}) {
   const workbooks = [];
   const cases = [];
   for (const file of listWorkbooks(dir)) {
-    const wb = XLSX.readFile(file);
+    const wb = XLSX.readFile(file, { cellStyles: true });
     const rowsOf = (n) => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, blankrows: false, defval: '' });
+    // QA marks deletions in red (2026-11-18): a red Id/Name cell deletes that row, red step cells delete the step.
+    const casesRowsOf = (n) => {
+      const ws = wb.Sheets[n];
+      if (!ws || !ws['!ref']) return [];
+      const r0 = XLSX.utils.decode_range(ws['!ref']).s.r;
+      const red = (r, c) => { const cell = ws[XLSX.utils.encode_cell({ r, c })]; return !!(cell && cell.s && cell.s.fgColor && /^(FF)?FF0000$/i.test(cell.s.fgColor.rgb || '')); };
+      return XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: true, defval: '' })
+        .map((row, i) => {
+          const r = r0 + i;
+          if (i > 0 && (red(r, 0) || red(r, 1))) return null;
+          if (i > 0 && (red(r, 4) || red(r, 5))) { row = row.slice(); row[4] = ''; row[5] = ''; row[6] = ''; }
+          return row;
+        })
+        .filter((row) => row && row.some((v) => String(v).trim() !== ''));
+    };
     const overviewRows = rowsOf(wb.SheetNames[0]);
     const story = storyKeyOf(path.basename(file), overviewRows);
     const wbInfo = { file, fileName: path.basename(file), story, meta: overviewFields(overviewRows), sheets: [], referenceSheets: [] };
     const usedCodes = new Set();
     for (const sheet of wb.SheetNames) {
-      const rows = rowsOf(sheet);
+      const rows = casesRowsOf(sheet);
       if (!rows.length || !isTcHeader(rows[0])) { wbInfo.referenceSheets.push(sheet); continue; }
       // Two sheets of one workbook can share a code (GCCM-799 has "UIF.026 - UIF.075" and "UIF.001-UIF.004"):
       // the later one gets its first requirement number appended ("UIF-001") so ids stay unique.
