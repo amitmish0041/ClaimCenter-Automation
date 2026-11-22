@@ -62,4 +62,25 @@ function ocrContains(ocrText, expected, { exact = false } = {}) {
   return found / words.length >= 0.85;
 }
 
-module.exports = { ocrPdfText, ocrContains };
+// EVERY word of the passage is on the page, in order, each within one OCR slip of the printed word, with at most two
+// stray tokens between words (a checkbox, a line break artefact). DIG192 11/19: all-caps form questions drawn as graphics
+// ("WERE YOU THE DRIVER OF OUR POLICYHOLDER'S CAR?") read with one wrong letter, so the exact test failed although the
+// wording is printed. A passage with a word missing or overprinted (DIG122A) still fails this.
+function ocrContainsInOrder(ocrText, expected) {
+  const want = (String(expected || '').toLowerCase().match(/[a-z0-9]+/g) || []).map(fold).filter((w) => w.length >= 2);
+  if (want.length < 2) return false;
+  const toks = (String(ocrText || '').toLowerCase().match(/[a-z0-9]+/g) || []).map(fold).filter(Boolean);
+  const same = (o, w) => o === w || (w.length >= 4 && Math.abs(o.length - w.length) <= 1 && editDistance(o, w) <= (w.length >= 7 ? 2 : 1));
+  for (let s = 0; s < toks.length; s++) {
+    if (!same(toks[s], want[0])) continue;
+    let i = s; let ok = true;
+    for (let k = 1; k < want.length && ok; k++) {
+      ok = false;
+      for (let j = i + 1; j <= Math.min(i + 3, toks.length - 1); j++) if (same(toks[j], want[k])) { i = j; ok = true; break; }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
+module.exports = { ocrPdfText, ocrContains, ocrContainsInOrder };

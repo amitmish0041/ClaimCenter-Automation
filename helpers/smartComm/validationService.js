@@ -1197,10 +1197,31 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
             v.result = 'PASS';
             v.actual = `${v.expected} (read by OCR)`;
             v.reason = 'Confirmed by OCR: this wording is printed on the page but drawn as graphics, so the PDF\'s text layer doesn\'t contain it.';
+          } else if (require('./pdfOcrService').ocrContainsInOrder(ocrText, v.expected)) {
+            v.result = 'PASS';
+            v.actual = `${v.expected} (read by OCR)`;
+            v.reason = 'Confirmed by OCR: every word of this wording is printed, in order (drawn as graphics, so the PDF\'s text layer doesn\'t contain it; OCR misread at most a letter per word).';
           } else if (v.actual === 'Not Found' && ocrContains(ocrText, v.expected)) {
             // Most of the words are on the page — not "missing entirely". DIG122A: the claimant's name prints over the end
             // of the HIPAA paragraph, so that line can't be read. Still a FAIL, with a reason that sends someone to look.
-            v.reason = 'Most of this wording is printed (read by OCR) but not all of it can be read word-for-word — part of it is drawn as graphics or has something printed over it. Check this passage visually.';
+            // Show what IS printed: the OCR line(s) sharing most words with the expected text. DIG192 11/19: "WERE YOU THE
+            // DRIVER OF OUR POLICYHOLDER'S CAR?" prints "...DRIVER OF POLICYHOLDER'S CAR" — a real wording difference that
+            // the old "can't be read, check visually" reason hid.
+            const words = (s) => (String(s).toLowerCase().match(/[a-z0-9']+/g) || []);
+            const want = new Set(words(v.expected));
+            const lines = String(ocrText).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+            let best = ''; let bestScore = 0;
+            for (let i = 0; i < lines.length; i++) for (const span of [lines[i], `${lines[i]} ${lines[i + 1] || ''}`.trim()]) {
+              const ws = words(span); const hit = ws.filter((w) => want.has(w)).length;
+              const score = hit / Math.max(want.size, ws.length);
+              if (score > bestScore) { bestScore = score; best = span; }
+            }
+            if (best && bestScore >= 0.6) { // 0.5 matched "Our Claimant:" to "Our Insured:"
+              v.actual = `${best} (read by OCR)`;
+              v.reason = `The page prints "${best}" (read by OCR; drawn as graphics, so not in the PDF's text layer) — the wording differs from the mapping doc's "${v.expected}".`;
+            } else {
+              v.reason = 'Most of this wording is printed (read by OCR) but not all of it can be read word-for-word — part of it is drawn as graphics or has something printed over it. Check this passage visually.';
+            }
           }
         }
       }
