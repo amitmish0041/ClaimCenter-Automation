@@ -136,6 +136,21 @@ function loadTemplateCatalog({ refresh = false } = {}) {
       sourceFile: file,
     };
   });
+  // One row per DIG. The 2026-11-16 index numbers "SOL Worksheet" DIG187 (taken by Request for Additional Claim
+  // Information Letter) while its Word doc is DIG178_SOL_Worksheet.docx: a repeated number whose mapping doc names
+  // another, unused DIG takes that DIG. Any other repeat (DIG53914 listed twice) keeps the first row.
+  const seen = new Set();
+  cachedCatalog = cachedCatalog.filter((t) => {
+    if (seen.has(t.digNumber)) {
+      const docDig = (path.basename(String(t.templateMappingDoc || '')).match(/^DIG\s*-?\s*\d+[A-Z]*/i) || [])[0];
+      const alt = docDig && normalizeDig(docDig);
+      if (!alt || seen.has(alt) || alt === t.digNumber) return false;
+      t.digNumber = alt;
+      t.searchName = `${alt} ${t.documentName}`.trim();
+    }
+    seen.add(t.digNumber);
+    return true;
+  });
   cachedCatalog = cachedCatalog.concat(templatesMissingFromIndex(cachedCatalog, file))
     .sort((a, b) => compareDigNumbers(a.digNumber, b.digNumber));
   return cachedCatalog;
