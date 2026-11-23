@@ -38,7 +38,7 @@ module.exports = (api) => {
     const checks = [V('Claim Underwriting Company', { value: claimUw }), V('OneInc Additional Text Field 13', { value: new RegExp(esc(company)) }),
       V('OneInc Additional Text Field 14', { value: new RegExp(`^${esc(disclaimer)}$`) })];
     for (const [id, amount] of [[`GCCM-1003/INT/TC-${t1003}`, '1.51'], [`GCCM-803/TC/TC-${t803}`, '1.52']]) {
-      const lemars = ['UW_LEMARS', 'UW_PIC', 'UW_MSI'].includes(profile); // PIC / MSI: their seed payments are no longer on the portal search (2026-11-23), so they make their own too
+      const lemars = profile === 'UW_LEMARS';
       const steps = lemars
         ? [...VAL([...FULL_PAYMENTS('claimant', 'open'), { step2: { transactionType: 'Partial Payment', amount } }], null),
           op('escalateChecks', amount), pc('underwritingCompany'), pc('oneIncPayment', { fields: AT, amount, waitMin: 20 })]

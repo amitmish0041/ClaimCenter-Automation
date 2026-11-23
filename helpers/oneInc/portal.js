@@ -78,8 +78,16 @@ async function payments({ claim = '', crTracking = '', checkNumber = '', since }
   }, { from });
   // SEARCH reloads the results page — wait for that load, or the previous search's grid is read (CONFIRMED 2026-11-11).
   await Promise.all([p.waitForEvent('load', { timeout: 60000 }).catch(() => {}), p.locator('button.widget-search-button:visible').first().click()]);
-  await p.waitForFunction(() => window.jQuery && jQuery('.k-grid').data('kendoGrid') && !document.querySelector('.k-loading-mask'), null, { timeout: 60000 }).catch(() => {});
+  await p.waitForFunction(() => window.jQuery && jQuery('.k-grid').data('kendoGrid') && !document.querySelector('.k-loading-mask'), null, { timeout: 240000 }).catch(() => {});
+  // A search still spinning is NOT "no payments" — the portal hung on "Loading…" for every search (2026-11-23) and the
+  // empty grid was read as a missing payment (787 TC-022, 1003 INT TC-204/206 BLOCKED for the wrong reason).
+  if (await p.locator('.k-loading-mask').first().isVisible().catch(() => false)) {
+    throw new Error('OneInc portal search did not finish loading in 4 min (portal slow/hung) — no verdict, retry later');
+  }
   await p.waitForTimeout(2500);
+  // The portal answers a failed search with a red "Error! Internal Server Error" toast and an empty page (2026-11-23).
+  const err = await p.evaluate(() => (/Error!\s*([^\n]*Error[^\n]*)/.exec(document.body.innerText || '') || [])[1] || '');
+  if (err) throw new Error(`OneInc portal search failed on OneInc's side ("${err.trim()}") — no verdict, retry later`);
   return p.evaluate(() => {
     const g = jQuery('.k-grid').data('kendoGrid');
     if (!g) return [];
