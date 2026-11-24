@@ -275,6 +275,7 @@ async function execute(page, items, res, ctx, capture) {
     }
     const label = describeItem(item);
     res.stepsExecuted.push(label);
+    process.env.ONEINC_CURRENT_CASE = res.scenarioId;
     ctx.log(`[OneInc] ${res.scenarioId}: step — ${label}`);
     screen = null;
     const k = Object.keys(item)[0];

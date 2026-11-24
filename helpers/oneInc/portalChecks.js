@@ -209,4 +209,20 @@ async function payeeRowType(page, i, type) {
   return `row ${i} Type = ${type}`;
 }
 
-module.exports = { underwritingCompany, oneIncPayment, oneIncVendor, addDirtyContacts, addDirtyCompanies, DIRTY, COMPANIES, oneIncCheck, reopenCheck, noteField, showNotes, sendTaxIdRow, payeeRowType };
+// ONEINC_DEFER_PORTAL=1 (user direction 2026-11-24, OneInc not receiving payments): make the ClaimCenter payment, record
+// claim / amount / check in results/oneInc/deferred-portal-checks.json for a later portal pass, and skip the portal read.
+function deferrable(name, fn) {
+  return async (page, opts = {}) => {
+    if (!/^(1|true|yes)$/i.test(process.env.ONEINC_DEFER_PORTAL || '')) return fn(page, opts);
+    const fs = require('fs'); const path = require('path');
+    const file = path.join(__dirname, '..', '..', 'results', 'oneInc', 'deferred-portal-checks.json');
+    const claim = await claimNo(page).catch(() => '');
+    const chk = page.__check || {};
+    let list = []; try { list = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) {}
+    list.push({ at: new Date().toISOString(), case: page.__caseId || process.env.ONEINC_CURRENT_CASE || '', claim, check: name, opts, ccCheck: chk.number || '', ccStatus: chk.status || '' });
+    fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(list, null, 2));
+    throw new W.Blocked(`OneInc portal check deferred (payment made${claim ? ` on ${claim}` : ''}${opts.amount ? `, $${opts.amount}` : ''}) — validate on the portal later`);
+  };
+}
+
+module.exports = { underwritingCompany, oneIncPayment: deferrable('oneIncPayment', oneIncPayment), oneIncVendor: deferrable('oneIncVendor', oneIncVendor), addDirtyContacts, addDirtyCompanies, DIRTY, COMPANIES, oneIncCheck: deferrable("oneIncCheck", oneIncCheck), reopenCheck, noteField, showNotes, sendTaxIdRow, payeeRowType };
