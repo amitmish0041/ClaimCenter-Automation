@@ -268,7 +268,15 @@ async function loginToClaimCenter(page, { username, password } = {}) {
     // placeholder, so waitForSelector never resolved. The "Search" nav menu
     // item is part of the persistent top nav and confirmed present in the
     // actual post-login snapshot.
-    const searchMenu = page.getByRole('menuitem', { name: 'Search' });
+    const searchMenuItem = page.getByRole('menuitem', { name: 'Search' });
+    // CONFIRMED 2026-11-24 (cloud TEST): the new ProNavigator AI panel opens on the right at login and squeezes the top
+    // bar, so the Search menu item is folded away although sign-in worked — every SmartCOMM scenario then ERRORed with
+    // "Search menu didn't appear". Signed in = Search visible, OR the "Go to" box / ProNavigator panel is on screen.
+    // The login form must be gone too (the panel's element can already be on the login page).
+    const searchMenu = { isVisible: async () => (await searchMenuItem.isVisible().catch(() => false))
+      || (!(await page.getByRole('textbox', { name: 'Username' }).isVisible().catch(() => false))
+        && ((await page.getByRole('menuitem', { name: /^Desktop/ }).first().isVisible().catch(() => false))
+          || (await page.getByPlaceholder(/^Go to/).first().isVisible().catch(() => false)))) };
     // CONFIRMED 2026-10-17 (trace of a SmartCOMM run's 2nd scenario): a re-login right after an interactive
     // scenario was filled 0.0s after the page loaded, Log In was clicked, and ClaimCenter came back to an EMPTY
     // login form — the credentials were dropped — so the old single 30s wait for Search always failed. The 3rd
