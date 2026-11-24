@@ -325,6 +325,16 @@ async function loginToClaimCenter(page, { username, password } = {}) {
   }
 
   console.log('CC Login successful [' + ENV + '] | URL: ' + page.url());
+  await collapseRightPanel(page);
+}
+
+// ProNavigator (new on cloud TEST 2026-11-24) opens a 500px right panel (#gw-right-panel); the squeezed tab bar then
+// hides the Claim tab (width 0) and New Claim / FNOL fails. Its min/max button collapses it. No-op when not there.
+async function collapseRightPanel(page) {
+  try {
+    const w = await page.evaluate(() => { const e = document.getElementById('gw-right-panel'); return e ? e.getBoundingClientRect().width : 0; });
+    if (w > 100) { await page.locator('#gw-right-panel--minmax').first().click({ timeout: 5000 }); await page.waitForTimeout(1500); console.log('CC: ProNavigator right panel collapsed'); }
+  } catch (_) { /* best effort */ }
 }
 
 // ── Admin (su) re-login ───────────────────────────────────────────────────────
@@ -1387,7 +1397,7 @@ module.exports = {
   BASE_URL, MAX_POLL_MS, POLL_INT,
   ENV, TIER, IS_ON_PREM, L,
   waitForAllMasksGone,
-  loginToClaimCenter, loginAsAdmin, loginAsUser, openExistingClaim, navigateTo,
+  loginToClaimCenter, collapseRightPanel, loginAsAdmin, loginAsUser, openExistingClaim, navigateTo,
   openTabMenu, clickTabMenuItem, selectTab,
   selectDropdown, selectComboboxOnPrem, selectComboboxByIdOnPrem, fillTextField, fillIntegerCommaField, fillDateField,
   waitForEnabled, clickSave, clickNext, dismissNotification,

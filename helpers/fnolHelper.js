@@ -232,6 +232,7 @@ function randomText(length = 25) {
 
 // ── clickNewClaimCloud ────────────────────────────────────────────────────────
 async function clickNewClaimCloud(page) {
+  await require('./claimCenterBase').collapseRightPanel(page);
   await clickTabMenuItem(page, 'ClaimTab', 'ClaimTab-ClaimTab_FNOLWizard');
   console.log('New Claim clicked');
 

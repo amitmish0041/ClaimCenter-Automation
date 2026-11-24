@@ -71,6 +71,19 @@ function allRecords() {
   // OneInc runs unless the environment already says where it is.
   if (!process.env.SMARTCOMM_DATA_DIR) process.env.SMARTCOMM_DATA_DIR = path.join('V:', 'Amit Int', 'SmartComm', 'data');
   try { records = require('../smartComm/testDataService').getAllRecords(); } catch (_) { records = []; }
+  // The shared TEST claim list vanished from V: (folder emptied 2026-11-23 23:36, no backup) and every new-claim case was
+  // BLOCKED with "no unused policy left". Fall back to the claims this suite filed itself (claim pool: claim, policy,
+  // loss date per profile) so FNOL can still pick a known-good policy.
+  if (!records.length) {
+    try {
+      const pool = readPool();
+      for (const [prof, list] of Object.entries(pool)) {
+        const p = PROFILES[prof];
+        if (!p || !Array.isArray(list) || p.lob === 'ANY') continue;
+        for (const e of list) if (e && e.claim && e.policy && e.lossDate) records.push({ claimNumber: e.claim, policyNumber: e.policy, lossDate: e.lossDate, lob: p.lob, state: p.state, fromPool: true });
+      }
+    } catch (_) { /* no pool either */ }
+  }
   return records;
 }
 
