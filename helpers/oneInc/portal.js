@@ -23,15 +23,48 @@ const HOME = 'https://processonestg.processonepayments.com/UI/Reports';
 class PortalUnavailable extends Error {}
 
 let cached = null;
+
+// No portal window on THIS PC yet: open one here (whoever runs the cases, a teammate's own Runner included) and wait up
+// to 15 min for that person to sign in. Detached, so it stays open for later cases and runs (user direction 2026-11-24).
+async function launchLocalWindow(chromium, firstErr) {
+  const path = require('path');
+  const { spawn } = require('child_process');
+  const script = path.join(__dirname, '..', '..', 'scripts', 'oneIncPortalSession.js');
+  console.log('[Portal] no OneInc portal window on this PC: opening one here, sign in in that window (waiting up to 15 min)');
+  try {
+    const fs = require('fs');
+    const dir = path.join(require('os').homedir(), '.claimcenter-runner'); fs.mkdirSync(dir, { recursive: true });
+    const log = fs.openSync(path.join(dir, 'oneinc-portal-window.log'), 'w');
+    spawn(process.execPath, [...process.execArgv.filter((a) => /^--(?!eval|print)/.test(a)), script], { detached: true, stdio: ['ignore', log, log], env: { ...process.env, ONEINC_PORTAL_CDP_PORT: String(PORT) } }).unref();
+  } catch (e) { throw new PortalUnavailable(`could not open the OneInc portal window (${e.message})`); }
+  const ready = (u) => /processone(stg)?\.processonepayments\.com\/UI\//i.test(u)
+    || (/stgportalone\.processonepayments\.com/i.test(u) && !/auth\/login|IdentityProvider|\/error\//i.test(u));
+  const t0 = Date.now();
+  while (Date.now() - t0 < 15 * 60e3) {
+    await new Promise((r) => setTimeout(r, 5000));
+    let b; try { b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`, { timeout: 5000 }); } catch (_) { continue; }
+    const ctx = b.contexts()[0];
+    if (ctx && ctx.pages().some((pg) => ready(pg.url()))) { console.log('[Portal] signed in, continuing'); return b; }
+    await b.close().catch(() => {}); // only detaches from the window
+  }
+  throw new PortalUnavailable(`OneInc portal not signed in within 15 min on this PC (${firstErr.message.split('\n')[0]})`);
+}
 async function page() {
   if (cached && !cached.isClosed()) return cached;
   const { chromium } = require('playwright');
   let browser;
   try { browser = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`, { timeout: 10000 }); } catch (e) {
-    throw new PortalUnavailable(`OneInc portal window not running — start it (node scripts/oneIncPortalSession.js) and sign in once (${e.message.split('\n')[0]})`);
+    browser = await launchLocalWindow(chromium, e);
   }
   const ctx = browser.contexts()[0];
-  const pg = ctx && ctx.pages().find((p) => /processone(stg)?\.processonepayments\.com\/UI\//i.test(p.url()));
+  // A window open on the sign-in page (signed out / session expired): wait up to 15 min for the person to sign in there.
+  const atLogin = () => ctx && ctx.pages().length && ctx.pages().every((q) => /auth\/login|IdentityProvider|login\.microsoftonline|cloudflareaccess/i.test(q.url()));
+  if (atLogin()) {
+    console.log('[Portal] the OneInc portal window on this PC is not signed in: sign in there (waiting up to 15 min)');
+    const t0 = Date.now();
+    while (atLogin() && Date.now() - t0 < 15 * 60e3) await new Promise((r) => setTimeout(r, 5000));
+  }
+  const pg =ctx && ctx.pages().find((p) => /processone(stg)?\.processonepayments\.com\/UI\//i.test(p.url()));
   if (!pg) {
     const any = ctx && ctx.pages()[0];
     if (any) { await any.goto(HOME, { waitUntil: 'domcontentloaded' }).catch(() => {}); await any.waitForTimeout(3000); }

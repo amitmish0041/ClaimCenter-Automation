@@ -21,7 +21,8 @@ const { chromium } = require('playwright');
 // link alone answers 404, so start at the root and let the redirects run.
 const URL = process.env.ONEINC_PORTAL_URL || 'https://stgportalone.processonepayments.com/';
 const PORT = Number(process.env.ONEINC_PORTAL_CDP_PORT || 9333);
-const PROFILE = path.join(__dirname, '..', 'results', 'oneInc', 'portal-profile');
+// Per-user, per-PC profile (the packaged app folder can be read-only): whoever runs the cases signs in on THEIR machine.
+const PROFILE = process.env.ONEINC_PORTAL_PROFILE || path.join(require('os').homedir(), '.claimcenter-runner', 'oneinc-portal-profile');
 
 const signedIn = (u) => /stgportalone\.processonepayments\.com/i.test(u) && !/\/auth\/login|IdentityProvider\/auth|\/error\//i.test(u);
 
