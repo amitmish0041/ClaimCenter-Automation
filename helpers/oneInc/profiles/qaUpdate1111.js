@@ -43,6 +43,11 @@ module.exports = {
   QA_PA_TORT: { label: 'PA personal auto, Bodily Injury Liability exposure with Tort Option Full Tort', lob: 'AUTO', state: 'PA', prefix: /^PA-PA-/, poolOnly: true, shareFresh: true,
     fnol: { policyType: 'Personal Auto', state: 'PA', lossCauseCode: 'LC15', lossDescription: 'OneInc automation — PA auto collision with a bodily injury liability exposure (Full Tort)', incidents: ['Add Vehicle'],
       exposures: [{ coverageLabel: 'Collision' }] } },
+  // VBR.049 (1013 TC-061) — its own fresh claim every run: the aged MD stock claim kept the ICD code from an earlier run
+  // ("ICD Code … cannot be added more than once for Medicare Beneficiary", 2026-11-25). Same build as QA_PA_TORT, not shared.
+  QA_PA_BI_MEDICARE: { label: 'PA personal auto, Bodily Injury Liability exposure with a reserve (fresh, Medicare ICD case)', lob: 'AUTO', state: 'PA', prefix: /^PA-PA-/, poolOnly: true,
+    fnol: { policyType: 'Personal Auto', state: 'PA', lossCauseCode: 'LC15', lossDescription: 'OneInc automation — PA auto collision with a bodily injury liability exposure (Medicare ICD)', incidents: ['Add Vehicle'],
+      exposures: [{ coverageLabel: 'Collision' }] } },
   QA_PA_NORES: NORES('rules that stop the payment'),
   QA_PA_NORES2: NORES('763 TC-041 First and Final'),
   QA_PA_NORES3: NORES('803 TC-016 First and Final'),
@@ -60,7 +65,7 @@ Object.defineProperty(module.exports.QA_MD_MEDPAY, 'data', data((D) => [
   D.vehicleExposure({ coverage: 'Medical Payments', cause: '.', match: /Med(ical)? ?(Pay|Expense)/i }),
   D.reserve({ exposure: /Medical Expense/i, amount: 500 }),
 ]));
-Object.defineProperty(module.exports.QA_PA_TORT, 'data', data((D) => [
+for (const p of ['QA_PA_TORT', 'QA_PA_BI_MEDICARE']) Object.defineProperty(module.exports[p], 'data', data((D) => [
   D.vehicleExposure({ coverage: 'Bodily Injury Liability', cause: 'Bodily Injury', match: /Bodily Injury/i, tort: /^Full Tort$/ }),
   D.reserve({ exposure: /Bodily Injury/i, amount: 500 }),
 ]));

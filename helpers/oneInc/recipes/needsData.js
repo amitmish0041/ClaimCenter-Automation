@@ -73,8 +73,8 @@ module.exports = (api) => {
   const MED_NOTE = 'MD personal auto claim (existing, AUTO_MD_AGED): exposure "(1) 3rd Party Bodily Injury Liability" (Loss Party third-party, Primary Coverage Liability - Auto bodily injury). Setup on its Medicare tab, put back to <none> / no ICD codes afterwards; Claim Cost payment on that line.';
   add('GCCM-1013/VBR/TC-060', 'AUTO_MD_AGED', VAL([MEDICARE(null), ...BI_PAY], /Please enter at least one included ICD diagnostic code/i), [MEDICARE_RESET],
     MED_NOTE + ' "Is Claimant a Medicare Beneficiary?" = Yes, no included ICD code.');
-  add('GCCM-1013/VBR/TC-061', 'AUTO_MD_AGED', VAL([MEDICARE(ICD), ...BI_PAY], null), [msg(/included ICD diagnostic code/i, false), MEDICARE_RESET],
-    MED_NOTE + ` "Is Claimant a Medicare Beneficiary?" = Yes, included ICD code ${ICD}. Submits $1.37.`);
+  add('GCCM-1013/VBR/TC-061', 'QA_PA_BI_MEDICARE', VAL([MEDICARE(ICD), ...BI_PAY], null), [msg(/included ICD diagnostic code/i, false), MEDICARE_RESET],
+    MED_NOTE.replace('MD personal auto claim (existing, AUTO_MD_AGED)', 'Fresh PA personal auto claim (QA_PA_BI_MEDICARE)').replace('(1) 3rd Party ', '') + ` "Is Claimant a Medicare Beneficiary?" = Yes, included ICD code ${ICD}. Submits $1.37.`);
 
   // ── VBR.089 — "Please review Aggregate Limits" (policy aggregate limit + claim cost on a third-party exposure) ──
   add('GCCM-1013/VBR/TC-090', 'AUTO_MD_AGED', [sa('setAggregateLimit', 100000), ...BI_PAY, sa('finishOnce')],

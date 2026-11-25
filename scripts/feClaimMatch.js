@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * scripts/feClaimMatch.js — OFFLINE: matches scouted claim profiles (results/fe-scout/profiles.json, from
- * scripts/feClaimScout.js) to the CC Cloud FE test cases — Commercial Auto, PA + MD (scope set 2026-11-25).
+ * scripts/feClaimScout.js) to the CC Cloud FE test cases — Commercial Auto, all 20 KMS-tagged states (scope set 2026-11-25).
  *
  *   node scripts/feClaimMatch.js [--workbook "<CC_Cloud_FE_Test_Cases_CommercialAuto_PA_MD.xlsx>"] [--per 3]
  *
@@ -15,7 +15,7 @@ const path = require('path');
 const ExcelJS = require('exceljs');
 
 const arg = (n, d) => { const i = process.argv.indexOf(`--${n}`); if (i < 0) return d; const v = process.argv[i + 1]; return v && !v.startsWith('--') ? v : true; };
-const WB = arg('workbook', 'C:\\Users\\amitmish\\Desktop\\CC Cloud - FE\\Test Plan\\CC_Cloud_FE_Test_Cases_CommercialAuto_PA_MD.xlsx');
+const WB = arg('workbook', 'C:\\Users\\amitmish\\Desktop\\CC Cloud - FE\\Test Plan\\CC_Cloud_FE_Test_Cases_CommercialAuto_AllStates.xlsx');
 const PER = Number(arg('per', 3));
 const all = Object.values(JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'results', 'fe-scout', 'profiles.json'), 'utf8')));
 
@@ -89,6 +89,9 @@ const R = {
   'FE-RC-007': T((c) => c.damage || c.vehicleExps, (c) => c.damage * 5 + c.vehicleExps, () => 'physical damage claim'),
   'FE-RC-008': T((c) => c.um, (c) => c.um * 10 + rich(c), (c) => `${c.um} UM/UIM/first-party exposure(s)`),
   'FE-RC-009': any, 'FE-RC-010': any, 'FE-RC-011': any,
+  'FE-RC-015': any, 'FE-RC-016': any, 'FE-RC-017': any, 'FE-RC-018': any, 'FE-RC-020': any, 'FE-RC-021': any, 'FE-RC-022': any,
+  'FE-RC-019': T((c) => c.um || c.exposuresN, (c) => c.um * 10 + rich(c), () => 'NC claim (UM/UIM selection)'),
+  'FE-CV-028': T((c) => c.endorsements, rich, () => 'check the policy has Silver Series Plus'),
   'FE-RG-002': T((c) => /^(CAA|CAS)-/.test(c.claim) || +c.claim.split('-')[3] < 20, rich, () => 'migrated CA claim'),
 };
 for (let i = 5; i <= 21; i++) R[`FE-CV-${String(i).padStart(3, '0')}`] = forms;
@@ -111,11 +114,13 @@ const ANY_STATE = new Set(['FE-RC-002', 'FE-RG-002', 'FE-SS-017']);
   const used = new Map(); const gaps = [];
   tcs.eachRow((row, i) => {
     if (i === 1) return;
-    const id = String(row.getCell(1).value); const base = id.replace(/-(PA|MD)$/, ''); const st = String(row.getCell(6).value || '');
+    const id = String(row.getCell(1).value); const base = id.replace(/-[A-Z]{2}$/, ''); const st = String(row.getCell(6).value || ''); const rot = /rotating/.test(st); const code = st.slice(0, 2);
     const r = R[base];
     if (!r) { row.getCell(col).value = NOTE[base] || ''; if (NOTE[base]) ex.addRow([id, st, '', '', '', NOTE[base]]); return; }
-    const states = ANY_STATE.has(base) ? null : st === 'PA/MD' ? ['PA', 'MD'] : [st];
-    const list = P.filter((c) => (!states || states.includes(c.state)) && r.f(c)).sort((a, b) => r.s(b) - r.s(a)).slice(0, PER);
+    const states = ANY_STATE.has(base) ? null : [code];
+    let list = P.filter((c) => (!states || states.includes(c.state)) && r.f(c)).sort((a, b) => r.s(b) - r.s(a)).slice(0, PER);
+    // Rotating rows (state-neutral cases) fall back to any state when the rotated state has no fit.
+    if (!list.length && rot) list = P.filter((c) => r.f(c)).sort((a, b) => r.s(b) - r.s(a)).slice(0, PER);
     if (!list.length) { gaps.push(id); row.getCell(col).value = 'none found: create / upload'; ex.addRow([id, st, '', '', '', 'NO EXISTING CLAIM FOUND: create one or upload documents']); return; }
     row.getCell(col).value = list.map((c) => c.claim).join('\n');
     for (const c of list) { ex.addRow([id, c.state, c.claim, c.status, c.lossDate, r.why(c)]); used.set(c.claim, (used.get(c.claim) || 0) + 1); }

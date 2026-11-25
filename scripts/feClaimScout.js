@@ -156,6 +156,33 @@ async function profile(page, cn) {
     fs.writeFileSync(path.join(OUT, 'policy-claims.json'), JSON.stringify(map, null, 1));
     console.log(`[FE scout] policies: ${Object.keys(map).length}, with claims: ${Object.values(map).filter((x) => x.length).length}, claims: ${Object.values(map).flat().length}`);
   }
+  // --claim-prefixes CA-AZ,CA-TX,…: Advanced Search › Claim # with a partial number (CONFIRMED 2026-11-25: "CA-AZ"
+  // lists every CA-AZ-… claim; "*" / "%" wildcards return nothing). Reads up to --pages result pages per prefix.
+  const cps = arg('claim-prefixes');
+  if (cps && cps !== true) {
+    const { openAdvancedSearch } = require('../helpers/financialClaimSearch');
+    const found = {};
+    for (const pre of String(cps).split(',')) {
+      try {
+        await openAdvancedSearch(page);
+        await page.locator('.gw-InputWidget').filter({ hasText: /^\s*Claim #/ }).locator('input').first().fill(pre);
+        await page.getByRole('button', { name: 'Search', exact: true }).last().click();
+        await W.settle(page, 5000);
+        const seen = new Set();
+        for (let p = 0; p < Number(arg('pages', 10)); p++) {
+          const t = await page.locator('body').innerText();
+          const before = seen.size;
+          for (const m of t.match(new RegExp(`\\b${pre}-\\d{2}-\\d{2}-\\d{7}\\b`, 'g')) || []) seen.add(m);
+          const next = page.locator('[id^="ClaimSearch-ClaimSearchScreen-ClaimSearchResultsLV"][id$="_ListPaging-next"]').first();
+          if (seen.size === before || !await next.isVisible().catch(() => false) || await next.isDisabled().catch(() => true)) break;
+          await next.click().catch(() => {}); await W.settle(page, 3000);
+        }
+        found[pre] = [...seen]; seen.forEach((c) => cands.add(c));
+      } catch (e) { found[pre] = []; console.log(`[FE scout] prefix ${pre}: ${e.message.split('\n')[0]}`); }
+    }
+    fs.writeFileSync(path.join(OUT, 'prefix-claims.json'), JSON.stringify(found, null, 1));
+    console.log(`[FE scout] claim prefixes: ${Object.entries(found).map(([k, v]) => `${k} ${v.length}`).join(', ')}`);
+  }
   if (arg('only-prefix')) { const keep = new RegExp(`^(${String(arg('prefix', 'CA,CAA,CAS')).split(',').join('|')})-`); for (const c of [...cands]) if (!keep.test(c)) cands.delete(c); }
 
   if (!arg('no-search', false)) {
