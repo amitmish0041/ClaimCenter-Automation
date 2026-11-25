@@ -30,6 +30,24 @@
  *       always also emailed (EMAIL_* env vars, same as reportService.js).
  */
 'use strict';
+// A long run's progress is also mirrored to V:/…/run-history/in-progress/<user>_<start>.json after every template (2026-11-25:
+// Ranjith's 253-template run was only visible on his own PC until it ended), so anyone can see how far it got and mail
+// a report of what has finished so far: node scripts/emailBulkProgress.js [file]. Removed when the run ends normally.
+let progressFile = null;
+function shareProgress(results, done, total) {
+  try {
+    const base = process.env.SMARTCOMM_SHARED_RUNS_DIR || 'V:/Amit Int/SmartComm/run-history';
+    if (/^(0|false|no|off)$/i.test(process.env.SMARTCOMM_SHARE_RUNS || '') || !require('fs').existsSync(require('path').parse(require('path').resolve(base)).root)) return;
+    if (!results) { if (progressFile) require('fs').rmSync(progressFile, { force: true }); return; }
+    if (!progressFile) {
+      const os = require('os'); let user = 'unknown'; try { user = os.userInfo().username; } catch (_) { /* keep */ }
+      const dir = require('path').join(base, 'in-progress'); require('fs').mkdirSync(dir, { recursive: true });
+      progressFile = require('path').join(dir, `${user.replace(/[^\w.-]/g, '')}_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.json`);
+    }
+    const rec = { format: 1, user: require('os').userInfo().username, machine: require('os').hostname(), updatedAt: new Date().toISOString(), done, total, templates: results };
+    require('fs').writeFileSync(`${progressFile}.tmp`, JSON.stringify(rec)); require('fs').renameSync(`${progressFile}.tmp`, progressFile);
+  } catch (_) { /* best effort — never fails the run */ }
+}
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
@@ -119,6 +137,7 @@ async function main() {
     // an Azure session finally expiring with no one there to re-auth) would silently lose every result
     // gathered so far. The file at outPath always reflects "everything completed up to this point".
     fs.writeFileSync(outPath, JSON.stringify(templateResults, null, 2));
+    shareProgress(templateResults, i + 1, digList.length);
     const elapsedMin = ((Date.now() - startedAt) / 60000).toFixed(1);
     console.log(`[Bulk] Elapsed: ${elapsedMin} min — progress saved to ${outPath}`);
   }
@@ -136,6 +155,7 @@ async function main() {
   }
   console.log(`\n[Bulk] Raw results written to ${outPath}`);
   // Team run history on V: (resultsStore.shareRun) — one shared folder for reviewing everyone's runs.
+  shareProgress(null);
   const sharedCopy = require('../helpers/smartComm/resultsStore').shareRun(templateResults, { kind: 'bulk', localFile: path.basename(outPath), recipient: recipientEmail || null });
   if (sharedCopy) console.log(`[Bulk] Run copied to the team run history: ${sharedCopy}`);
 
