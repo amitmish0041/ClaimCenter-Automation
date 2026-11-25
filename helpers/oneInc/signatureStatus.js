@@ -20,7 +20,7 @@ const BTN = 'Get Payment Signature Status';
 // A new joint check (insured + `second`: 'sni' = the policy's Secondary Named Insured), opened on Additional Payment
 // Details. ClaimsPay Type comes out Contact(s) for person payees.
 async function createJointCheckAPD(page, { second = 'sni', amount } = {}) {
-  const made = await C.createFullCheck(page, { payee: 'insured', type: 'Insured', joint: [{ who: second }], amount });
+  const made = await C.createFullCheck(page, { payee: 'insured', type: 'Insured', joint: [typeof second === 'string' ? { who: second } : second], amount });
   await C.openCheck(page, { amount: page.__createdCheck.amount });
   const info = await page.evaluate(() => {
     const t = (document.body.innerText || '').replace(/\s+/g, ' ');

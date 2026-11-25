@@ -19,8 +19,8 @@ module.exports = (api) => {
   const CALL_OK = V('Signature status call', { value: /^answered$/ });
 
   add('GCCM-1455/TC/TC-001', 'HO_SNI', JOINT(), [CONTACTS, BUTTON], SNI);
-  add('GCCM-1455/TC/TC-002', 'HO_SNI', JOINT('ai'), [CONTACTS, BUTTON],
-    `${N}policy's Additional Insured as joint payee (ClaimsPay Type Contact(s)); Additional Payment Details of that check.`);
+  add('GCCM-1455/TC/TC-002', 'CA_WI_ANI', JOINT({ who: 'Scott Adams', type: 'Additional Insured' }), [CONTACTS, BUTTON],
+    `WI commercial auto claim (policy 1002057877, which has Additional Named Insureds — the workbook's "Additional Insured" means Additional Named Insured, confirmed by the user 2026-11-25); new Full Check to the insured (type Insured) with the policy's Additional Named Insured Scott Adams as joint payee, payee type "Additional Insured" (CC's joint-payee Type list has no "Additional Named Insured" option) (ClaimsPay Type Contact(s)); Additional Payment Details of that check.`);
   add('GCCM-1455/TC/TC-003', 'HO_SNI', JOINT(), [CONTACTS, SECTION], SNI + ' Section must sit between Workflow History and Payment Feedback Received and have no input fields.');
   add('GCCM-1455/TC/TC-004', 'HO_SNI', JOINT(), [SECTION, V('Multi-Party Signature Status columns', { value: /^Date\b/ })], SNI + ' Date must be the first (left-most) column; read-only list.');
   add('GCCM-1455/TC/TC-005', 'HO_SNI', JOINT(), [SECTION, V('Multi-Party Signature Status columns', { value: /^Date \| Primary Contact\b/ })], SNI + ' Primary Contact must be right of Date; read-only list.');

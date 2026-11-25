@@ -890,7 +890,7 @@ async function addJointPayees(page, list) {
     const names = opts.map((o) => o.t).filter((t) => t && !/^<none>$/i.test(t) && !already.some((a) => norm(a) === norm(t)));
     let pick;
     if (list[k].who === 'sni' || list[k].who === 'ai') {
-      const typeRe = list[k].who === 'ai' ? /additional insured/i : /secondary named insured/i; const typeName = list[k].who === 'ai' ? 'Additional Insured' : 'Secondary Named Insured';
+      const typeRe = list[k].who === 'ai' ? /additional (named )?insured/i : /secondary named insured/i; const typeName = list[k].who === 'ai' ? 'Additional Insured' : 'Secondary Named Insured';
       // The contact CC itself types "Secondary Named Insured" (from the policy) — try candidates until one comes back so.
       const lienNames = ['ACNB BANK', ...lienholders().map((l) => l.name)];
       for (const cand of names.filter((t) => !/donegal|insurance|agency/i.test(t) && !lienNames.some((l) => norm(l) === norm(t)))) {

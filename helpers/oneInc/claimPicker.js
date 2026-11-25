@@ -184,7 +184,7 @@ function policyCandidates(profile, { exclude = [] } = {}) {
   return [...extra, ...allRecords()
     .filter((r) => r.lob === p.lob && r.state === p.state && p.prefix.test(r.claimNumber || '') && r.policyNumber && r.lossDate
       && (!p.policies || p.policies.includes(r.policyNumber))
-      && (p.minAgeYears ? ageYears(r) >= p.minAgeYears : new Date(r.lossDate) >= yearAgo))
+      && (p.minAgeYears ? ageYears(r) >= p.minAgeYears : p.allowOldTerm || new Date(r.lossDate) >= yearAgo))
     .sort((a, b) => ((poolUse[a.policyNumber] || 0) - (poolUse[b.policyNumber] || 0)) || (taken(a.policyNumber) - taken(b.policyNumber)) || (claimsPerPolicy[a.policyNumber] - claimsPerPolicy[b.policyNumber]) || String(b.claimNumber).localeCompare(String(a.claimNumber)))
     .filter((r) => { if (seen.has(r.policyNumber) || used.has(r.policyNumber)) return false; seen.add(r.policyNumber); return true; })
     .map((r) => {
