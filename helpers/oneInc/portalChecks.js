@@ -33,6 +33,7 @@ async function oneIncPayment(page, { fields = [], amount = '', waitMin = 0, as =
   const claim = await claimNo(page);
   if (!claim) throw new W.Blocked('no claim number on the screen');
   const want = String(amount || '').replace(/[^0-9.]/g, '');
+  waitMin = Math.min(waitMin, Number(process.env.ONEINC_PORTAL_WAIT_MAX || 10)); // OneInc shows payments in real time; 10 min is plenty (user 2026-11-25)
   const deadline = Date.now() + waitMin * 60e3;
   let rows = [];
   for (;;) {
@@ -164,6 +165,7 @@ async function showNotes(page) {
 // `waitMin` minutes until that field matches (a ContactManager change reaches OneInc through CreateVendor). Each of
 // `fields` becomes an observed field "OneInc Vendor <field>".
 async function oneIncVendor(page, { tin = '', name = '', fields = ['BusinessName', 'Tin', 'BillingStreet', 'City', 'DateModified'], until = null, waitMin = 0 } = {}) {
+  waitMin = Math.min(waitMin, Number(process.env.ONEINC_PORTAL_WAIT_MAX || 10)); // OneInc shows payments in real time; 10 min is plenty (user 2026-11-25)
   const deadline = Date.now() + waitMin * 60e3;
   let v = null;
   for (;;) {

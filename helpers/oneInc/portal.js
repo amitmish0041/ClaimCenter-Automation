@@ -59,6 +59,8 @@ async function page() {
   const ctx = browser.contexts()[0];
   // A window open on the sign-in page (signed out / session expired): wait up to 15 min for the person to sign in there.
   const atLogin = () => ctx && ctx.pages().length && ctx.pages().every((q) => /auth\/login|IdentityProvider|login\.microsoftonline|cloudflareaccess/i.test(q.url()));
+  // .env creds + Outlook 2FA link; one retry (the first 2FA link once landed on /logout, 2026-11-25)
+  for (let i = 0; i < 2 && atLogin(); i++) if (await require('./portalLogin').signIn(ctx.pages()[0])) cached = null;
   if (atLogin()) {
     console.log('[Portal] the OneInc portal window on this PC is not signed in: sign in there (waiting up to 15 min)');
     const t0 = Date.now();
