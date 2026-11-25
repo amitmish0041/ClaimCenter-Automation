@@ -889,15 +889,16 @@ async function addJointPayees(page, list) {
     const already = added.concat([await sel(0, 'PayeeName').evaluate((x) => (x.options[x.selectedIndex] || {}).text).catch(() => '')]);
     const names = opts.map((o) => o.t).filter((t) => t && !/^<none>$/i.test(t) && !already.some((a) => norm(a) === norm(t)));
     let pick;
-    if (list[k].who === 'sni') {
+    if (list[k].who === 'sni' || list[k].who === 'ai') {
+      const typeRe = list[k].who === 'ai' ? /additional insured/i : /secondary named insured/i; const typeName = list[k].who === 'ai' ? 'Additional Insured' : 'Secondary Named Insured';
       // The contact CC itself types "Secondary Named Insured" (from the policy) — try candidates until one comes back so.
       const lienNames = ['ACNB BANK', ...lienholders().map((l) => l.name)];
       for (const cand of names.filter((t) => !/donegal|insurance|agency/i.test(t) && !lienNames.some((l) => norm(l) === norm(t)))) {
         await sel(i, 'PayeeName').selectOption(opts.find((o) => o.t === cand).v);
         await settle(page, 1800);
-        if (/secondary named insured/i.test(await sel(i, 'PayeeType').evaluate((x) => (x.options[x.selectedIndex] || {}).text || '').catch(() => ''))) { pick = cand; break; }
+        if (typeRe.test(await sel(i, 'PayeeType').evaluate((x) => (x.options[x.selectedIndex] || {}).text || '').catch(() => ''))) { pick = cand; break; }
       }
-      if (!pick) throw new Blocked(`no contact on this claim is typed "Secondary Named Insured" (${names.join(', ')})`);
+      if (!pick) throw new Blocked(`no contact on this claim is typed "${typeName}" (${names.join(', ')})`);
     } else {
       pick = resolvePayee(page, list[k].who, names);
       await sel(i, 'PayeeName').selectOption(opts.find((o) => o.t === pick).v);
