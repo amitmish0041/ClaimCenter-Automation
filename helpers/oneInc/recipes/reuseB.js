@@ -72,8 +72,8 @@ module.exports = (api) => {
   add('GCCM-1003/UIF/TC-043', 'AUTO_PA', QX, [H('Payment for a total loss?')], QEXP_NOTE);
   // The amount is entered as in the Full Check mirror (799 TC-008 fills the total before reading the field).
   add('GCCM-1003/UIF/TC-026', 'AUTO_PA', [...QX, { payee: 'vendor' }, { select: ['Adjuster Number', 0] }, { step2: { amount: '1.41' } }],
-    [V('1099 Box Number', { required: true, editable: true, value: /^07/, includes: ['06-Medical Payments to Providers', '07-All Other Taxable Payments', '14-Gross Proceeds Paid to an Attorney'] })],
-    QEXP_NOTE + ' Mirrors GCCM-799 TC-008 (expects the Box 7 default).');
+    [V('1099 Box Number', { required: true, editable: true, includes: ['06-Medical Payments to Providers', '07-All Other Taxable Payments', '14-Gross Proceeds Paid to an Attorney'] })],
+    QEXP_NOTE + ' The workbook asks visible / editable / required with the typelist only — no default value (QA manual pass 2026-11-25; the Box 7 default check was dropped).');
   const LEGAL = 'needs a Legal Expense reserve row to open Quick Payment from — the test claims have none (Quick Payment cannot change the row\'s cost type)';
   add('GCCM-1003/UIF/TC-014', 'AUTO_PA', [X('openQuickOnRow', 'legal expense', 'any'), { select: ['Adjuster Number', /^800/] }],
     [V('Is the legal expense for a legal opinion on coverage or to litigate a coverage issue?', { required: true, radios: ['Yes', 'No'] })], LEGAL);

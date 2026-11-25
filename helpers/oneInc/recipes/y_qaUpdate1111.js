@@ -82,7 +82,7 @@ module.exports = (api) => {
   // ════ GCCM-799 CPD.025 — mortgagee-only payee that is NOT linked to an Address Book contact ════════════════════════
   const CLAIM_MORT = require('../portalChecks').COMPANIES.claimMortgagee.name;
   add('GCCM-799/CPD-Mortgagee/TC-78', 'PROP_MORT', MORT_FULL({ who: CLAIM_MORT, type: 'Mortgagee' }, []),
-    [V('ClaimsPay Type', { value: /^vendor$/i }), V('ClaimsPay Method', { value: /^mailed check$/i })],
+    [V('ClaimsPay Type', { value: /^other ?\/ ?mailed check$/i }) /* QA updated plan 2026-11-25: was Vendor */, V('ClaimsPay Method', { value: /^mailed check$/i })],
     `HO claim; mortgagee-only check. Payee = "${CLAIM_MORT}", a claim-only company with the Lienholder/Mortgagee role (NOT linked to the Address Book), payee Type Mortgagee.` + QA);
 
   // ════ GCCM-799 CPD.026 — 3 or more payees; the insured has payment contact details ═════════════════════════════════

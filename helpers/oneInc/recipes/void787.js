@@ -21,7 +21,8 @@ module.exports = (api) => {
   // CC renders both instructional sentences as one read-only label under the question (CONFIRMED 2026-10-27).
   const LABEL_YES = /Answer "Yes" if you are moving the orig(i)?nal check \(same check number\) to a different exposure, claim, payment type, etc\./i;
   const LABEL_NO = /Answer "No" if you are issuing a check with a new check number, i\.e\. lost check, incorrect payee, etc\./i;
-  const REPOST_ERR = /A Repost cannot be completed at this time\. A Payment must be in cleared status to repost/i;
+  // CC words it "...at this time; a payment must be in cleared status to complete a repost." (QA manual pass 2026-11-25)
+  const REPOST_ERR = /A Repost cannot be completed at this time[.;,]?\s*A Payment must be in cleared status to (complete a )?repost/i;
 
   // UIF.001 — Reason for Void
   add('GCCM-787/TC/TC-001', 'VOID_PA', VOIDABLE, [V('Reason for Void', { required: true, editable: true }),

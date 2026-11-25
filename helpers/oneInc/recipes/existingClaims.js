@@ -27,7 +27,8 @@ module.exports = (api) => {
     OLD + ' Quick Payment; the exposures are first assigned to Benjamin Smith (the legacy owner has no e-mail/phone).');
 
   // ── 787 VBR.001 — void with repost = Yes on a Cleared check ─────────────────────────────────────────────────────
-  const REPOST_ERR = /A Repost cannot be completed at this time\. A Payment must be in cleared status to repost/i;
+  // CC words it "...at this time; a payment must be in cleared status to complete a repost." (QA manual pass 2026-11-25)
+  const REPOST_ERR = /A Repost cannot be completed at this time[.;,]?\s*A Payment must be in cleared status to (complete a )?repost/i;
   // A WC claim's void needs Loss Details › Employment Status ("Employment Status must be selected", 2026-11-06) — set if empty.
   add('GCCM-787/TC/TC-009', 'EX_CLEARED', [sa('setLossDetailAnswers', { 'Employment Status': /./ }), op('openCheck', { status: '^Cleared$' }), op('openVoid'), op('submitVoid', 'Automation test - repost of a cleared check', 'Yes')],
     [V('Void outcome', { value: /^void submitted/i }), { message: { re: REPOST_ERR, present: false } }],

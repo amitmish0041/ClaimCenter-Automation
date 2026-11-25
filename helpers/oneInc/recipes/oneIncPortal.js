@@ -29,13 +29,13 @@ module.exports = (api) => {
     ['200', '056', 'UW_LEMARS', 'Le Mars Insurance Company', /^Le Mars Insurance Company$/, true],
     ['201', '057', 'UW_SMIC', 'Southern Mutual Insurance Company', /^Southern Mutual Insurance Company$/, true],
     ['203', '059', 'UW_MICH', 'Michigan Insurance Company', /^Michigan Insurance Company$/, true],
-    ['204', '060', 'UW_PIC', 'The Peninsula Indemnity Company', /Peninsula Indemnity/, false],
+    ['204', '060', 'UW_PIC', 'The Peninsula Indemnity Company', /Peninsula Indemnity/, false, 'Peninsula Indemnity Company'], // AT13 per QA's updated 1003 plan 2026-11-25
     ['205', '061', 'UW_TPIC', 'The Peninsula Insurance Company', /^The Peninsula Insurance Company$/, false],
     ['206', '062', 'UW_MSI', 'Mountain States Indemnity Company', /^Mountain States Indemnity/, true],
   ];
-  for (const [t1003, t803, profile, company, claimUw, mark] of COMPANIES) {
+  for (const [t1003, t803, profile, company, claimUw, mark, at13 = company] of COMPANIES) {
     const disclaimer = `${company} and affiliated insurance companies conduct business together as the Donegal Insurance Group${mark ? '®' : ''}.`;
-    const checks = [V('Claim Underwriting Company', { value: claimUw }), V('OneInc Additional Text Field 13', { value: new RegExp(esc(company)) }),
+    const checks = [V('Claim Underwriting Company', { value: claimUw }), V('OneInc Additional Text Field 13', { value: new RegExp(esc(at13)) }),
       V('OneInc Additional Text Field 14', { value: new RegExp(`^${esc(disclaimer)}$`) })];
     for (const [id, amount] of [[`GCCM-1003/INT/TC-${t1003}`, '1.51'], [`GCCM-803/TC/TC-${t803}`, '1.52']]) {
       const lemars = profile === 'UW_LEMARS';

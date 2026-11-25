@@ -73,7 +73,7 @@ module.exports = (api) => {
   // CPD.025 — mortgagee payee NOT linked to an Address Book contact.
   const CLAIM_MORT = require('../portalChecks').COMPANIES.claimMortgagee.name;
   add('GCCM-1003/CPD-Mortgagee/TC-249', 'PROP_MORT', [QOPEN_LIEN, ...PRIMARY({ who: CLAIM_MORT, type: 'Mortgagee' }), { step2: {} }, { next: true }, { expectStep: 2 }],
-    [V('ClaimsPay Type', { value: /^vendor$/i }), V('ClaimsPay Method', { value: /^mailed check$/i })],
+    [V('ClaimsPay Type', { value: /^other ?\/ ?mailed check$/i }) /* QA updated plan 2026-11-25: was Vendor */, V('ClaimsPay Method', { value: /^mailed check$/i })],
     `HO claim; Quick Payment to "${CLAIM_MORT}", a claim-only company with the Mortgagee role (not linked to the Address Book).` + QA);
   // ════ GCCM-1013 ════
   // UIF.078/079 — Cell Phone / Email of a joint payee whose Payment Contact Details are set, checked on Enter Payee Information.
