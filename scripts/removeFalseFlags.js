@@ -24,12 +24,19 @@ const why = {
   columns: 'Column-joined line: the mapping doc joins side-by-side columns with tabs, the PDF prints each column separately. Tool now checks each column on its own.',
   claimNo: 'The mapping doc\'s sample claim number is glued to the label; the real claim number replaces it.',
   footer: 'The mapping doc\'s form-ID footer names another template (a page copied from that form); the document prints its own ID.',
+  select: 'The field is a drop-down; the tool cannot type into drop-downs yet, so its editability is not verified (BLOCKED).',
+  sharedField: 'Two rows share one field; the test\'s later edit of the other row replaced this one, so it cannot be confirmed (BLOCKED).',
+  salutation: 'The flagged "label" is the letter\'s salutation ("Dear"), not a field label the mapping doc lists.',
   certified: 'ClaimCenter requires Certified Mail for this recipient on Print; the test variant had Certified Mail = No. Tool now reruns with Certified Mail = Yes.',
 };
 
 function ruleFor(t, v) {
   if (v.result !== 'FAIL') return null;
   const id = String(v.id || ''); const exp = String(v.expected || '');
+  const why = String(v.reason || '');
+  if (/<SELECT>/i.test(why)) return 'select';
+  if (/another row's edit of the same field|The same field elsewhere \(another row\) printed/.test(why)) return 'sharedField';
+  if (/^EDIT\d/.test(id) && /^its label "Dear,?" isn't in the mapping doc\.$/i.test(why.trim())) return 'salutation';
   if (!t.sourceFile && /^XP\d/.test(id) && /^Not Found$/i.test(String(v.actual || ''))) return 'noDoc';
   if (/^R\d/.test(id) && /^Static content must appear/.test(v.description || '')) {
     if (/\t/.test(exp)) return 'columns';
@@ -47,7 +54,7 @@ for (const t of templates) {
         const r = ruleFor(t, v);
         if (!r) continue;
         removed.push({ digNumber: t.digNumber, templateName: t.templateName, scenarioId: s.scenarioId, claimNumber: s.claimNumber, id: v.id, description: v.description, expected: v.expected, actual: v.actual, rule: r, why: why[r] });
-        if (r === 'noDoc') { v.result = 'BLOCKED'; v.reason = why.noDoc; } else { v.result = 'PASS'; v.reason = `False flag removed: ${why[r]}`; v.falseFlagRemoved = r; }
+        if (r === 'noDoc' || r === 'select' || r === 'sharedField') { v.result = 'BLOCKED'; v.reason = why[r]; } else { v.result = 'PASS'; v.reason = `False flag removed: ${why[r]}`; v.falseFlagRemoved = r; }
       }
     }
     if (s.status === 'ERROR' && /Certified Mail is required/i.test(s.reason || '')) {

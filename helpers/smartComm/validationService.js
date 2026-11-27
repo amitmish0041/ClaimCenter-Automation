@@ -367,7 +367,8 @@ function buildEditedFieldChecks(interactiveChecks, { rawPayloadRoot, payload, re
     const label = labelOf(c);
     // A "label" of 8+ words is the tail of the paragraph before the field, not a label (DIG12 2026-10-29: "…provides
     // coverage in accordance with the Ohio law." before a state-specific paragraph) — the static-text checks cover it.
-    const labelOk = !label || label.trim().split(/\s+/).length >= 8 || docCompact.includes(compact(label)) || docCompact.includes(compact(label.replace(/^(?:re:\s*)?our\s+/i, '')));
+    // A letter's salutation ("Dear" before the To Name — DIG3/DIG176/DIG223, 2026-11-27) is not a label the mapping doc lists.
+    const labelOk = !label || /^\s*dear\s*,?\s*$/i.test(label) || label.trim().split(/\s+/).length >= 8 || docCompact.includes(compact(label)) || docCompact.includes(compact(label.replace(/^(?:re:\s*)?our\s+/i, '')));
     // A field that holds ONE part of a date ("Date of Loss Day" → "6", DIG28/DIG30 "which occurred on or about the [6]
     // day of [August]") is compared with that part of the source date, not the whole "August 06, 2026" (false FAIL
     // 2026-10-23) — the same narrowing the PDF checks already do (pdfValidationService.dateLossPart).
@@ -2095,6 +2096,11 @@ async function runInteractiveGeneration(page, { template, scenario, effectiveTes
         log(`field #${n2}: retry pass #${retryRound} succeeded`);
       } else if (outcome.note) {
         existing.reason = `Still failing after retry pass #${retryRound}: ${outcome.note}`;
+        // A drop-down inline editor (<SELECT>, DIG236 2026-11-25) can't be typed into by this tool: not verified, not a defect.
+        if (/<SELECT>/i.test(outcome.note)) {
+          existing.result = 'BLOCKED';
+          existing.reason += ' — this tool can\'t edit a drop-down field yet, so its editability isn\'t verified (not counted as a template defect).';
+        }
         if (outcome.vanished) {
           // A typed-field that silently drops even a correctly-shaped value (DIG84 policy effectiveDate took
           // "04/13/2026" and showed nothing, 2026-10-30) can't be edited by this tool — that's unverified, not a
@@ -2829,6 +2835,14 @@ function verifyInteractiveEditsInPdf(interactiveChecks, pdfText, log) {
       // A repeated row whose own edit is missing while another row's edit of the same field is printed (DIG26).
       const otherShown = c.technicalName ? interactiveChecks.find((o) => o !== c && o.technicalName === c.technicalName && o.observedChanged === true && foundInPdf(o.committedMarker || o.after)) : null;
       if (otherShown) c.replacedBy = otherShown.committedMarker || otherShown.after;
+      // The rows share ONE field, so the later test edit replaced this one (DIG184/DIG194 2026-11-25): the test's own
+      // overwrite, not a template defect — same as an edit typed over in the editor (BLOCKED, EDIT row follows lostInEditor).
+      if (otherShown) {
+        c.lostInEditor = true;
+        c.result = 'BLOCKED';
+        c.reason = `${c.reason ? `${c.reason} ` : ''}(Another row shares this field; its later test edit "${c.replacedBy}" replaced this one, so this row's edit can't be confirmed. Not a template defect.)`;
+        continue;
+      }
       const note = `Edit was accepted in the interactive editor (showed "${c.after}") but this text was NOT found anywhere in the downloaded, completed PDF — the edit did not survive into the final document.` +
         (c.replacedBy ? ` The same field elsewhere (another row) printed "${c.replacedBy}" instead — this row's edit was replaced by that one (the rows share one field).` : '') +
         (looksLikeDate ? ` This field's original value ("${c.before}") looks date-shaped — a synthetic non-date marker may get silently reformatted/rejected downstream even though the editor accepted it; worth checking with a real date-shaped test value instead.` : '');
