@@ -14,8 +14,12 @@ if (-not (Test-Path $sRoot)) { Log 'S: not reachable - skipped'; exit 1 }
 robocopy "$sRoot\Data Mapping" "$vData\Requirement" 'Claims_Attributes_Data_Dictionary*.xlsb' /XF '~$*' /R:2 /W:5 /NP /NJH /NJS | Out-Null
 $dict = $LASTEXITCODE
 # Mapping docs
-robocopy "$sRoot\HPExstream Document Mapping\ClaimCenter" "$vData\Templates\ClaimCenter" /E /XF '~$*' /R:2 /W:5 /NP /NJH /NJS | Out-Null
+# Logs the names of files it had to copy as NEW: mapping docs kept vanishing from V: after each sync (2026-11-27,
+# ~60 docs incl. DIG14/16/105/143/150PA re-copied daily), so the log shows what went missing since the last run.
+$out = robocopy "$sRoot\HPExstream Document Mapping\ClaimCenter" "$vData\Templates\ClaimCenter" /E /XF '~$*' /R:2 /W:5 /NP /NJH /NJS /NDL
 $docs = $LASTEXITCODE
+$new = @($out | Where-Object { $_ -match 'New File' } | ForEach-Object { ($_ -split "`t")[-1].Trim() })
+if ($new.Count) { Log ("re-copied {0} mapping doc(s) missing on V: {1}" -f $new.Count, ($new -join '; ')) }
 
 # robocopy: 0-7 = success (1 = files copied), 8+ = failure
 Log ("dictionary exit {0}, mapping docs exit {1}" -f $dict, $docs)

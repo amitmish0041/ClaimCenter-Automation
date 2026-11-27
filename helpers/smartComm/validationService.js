@@ -186,6 +186,15 @@ async function validateTemplate(page, { digNumber, recipientEmail, claimNumberOv
           const again = await run();
           scenarioResults[i] = again.status === 'ERROR' ? again : { ...again, retriedAfter: scenarioResults[i].reason };
         }
+        // ClaimCenter's rule "Certified Mail is required for recipient … when the delivery channel is Print" (Ranjith's run
+        // 2026-11-25: 11 DE WC templates, agent recipient, variant 3 has Certified Mail = No) - a ClaimCenter requirement for
+        // that recipient, not a template finding: run the scenario again with Certified Mail = Yes.
+        if (scenarioResults[i].status === 'ERROR' && /Certified Mail is required/i.test(scenarioResults[i].reason || '') && !variant.certifiedMail) {
+          console.log(`[SmartComm] ${scenarios[i].scenarioId}: ClaimCenter requires Certified Mail for this recipient — running again with Certified Mail = Yes.`);
+          const firstErr = scenarioResults[i].reason;
+          const again = await runScenario(workerPage, { template, scenario: scenarios[i], requirements, recipientEmail, variant: { ...variant, certifiedMail: true }, mentionsFraudLanguage, freeFormFields, interactive, s3Session, sourceFile, printPlan });
+          scenarioResults[i] = again.status === 'ERROR' ? again : { ...again, retriedAfter: firstErr };
+        }
         // "Data required to create document not found" is about the claim, not the template (PA-PA-01-26-0748059 and
         // -0748058 gave it on DIG12, DIG38, DIG51, DIG129 and DIG194, 2026-11-12/13, while other PA auto claims
         // generated) - run the scenario on its backup claims of the same LOB/State instead.
@@ -1088,7 +1097,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
     const reportableRequirements = linkTextFieldsToDictionary(template, scenarioRequirements, xpathRequirements, rawPayloadRoot)
       .filter((r) => !(CHOICE_SELECTED_YES_RE.test(r.fieldName || '') && r.enabled === false));
     const evaluated = [...reportableRequirements, ...fraudRequirements, ...xpathRequirements];
-    const validations = pdfValidationService.evaluateRequirements(evaluated, text, context);
+    const validations = pdfValidationService.evaluateRequirements(evaluated, text, { ...context, digNumber: template.digNumber });
     // Opt-in: save this scenario as an offline regression case (see regressionCaseService) — never fails the run.
     if (/^(1|true|yes)$/i.test(process.env.SMARTCOMM_SAVE_REGRESSION_CASE || '')) {
       try {
@@ -1150,7 +1159,7 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
         const { ocrContains } = require('./pdfOcrService');
         let ocrConfirmed = 0;
         for (const v of fixedFailed) {
-          if (ocrText && ocrContains(ocrText, v.expected)) {
+          if (ocrText && (ocrContains(ocrText, v.expected) || require('./pdfOcrService').ocrContainsSegments(ocrText, v.expected, text))) {
             ocrConfirmed++;
             v.result = 'PASS';
             v.actual = `${v.expected} (read by OCR)`;
@@ -1197,6 +1206,10 @@ async function runScenario(page, { template, scenario, requirements, recipientEm
             v.result = 'PASS';
             v.actual = `${v.expected} (read by OCR)`;
             v.reason = 'Confirmed by OCR: this wording is printed on the page but drawn as graphics, so the PDF\'s text layer doesn\'t contain it.';
+          } else if (require('./pdfOcrService').ocrContainsSegments(ocrText, v.expected, text)) {
+            v.result = 'PASS';
+            v.actual = `${v.expected} (read by OCR)`;
+            v.reason = 'Confirmed by OCR: the mapping doc joins side-by-side columns into one line with tabs; each column\'s wording is printed on the page.';
           } else if (require('./pdfOcrService').ocrContainsInOrder(ocrText, v.expected)) {
             v.result = 'PASS';
             v.actual = `${v.expected} (read by OCR)`;
@@ -3142,6 +3155,7 @@ function buildXpathRequirements(template, rawPayloadRoot, baseRequirements, inte
       ...(gatedOff ? { enabled: false, disabledReason: refs[0].disabledReason || 'Conditional field, not printed in this scenario.' } : {}),
       id: `XP${n}`,
       dictionaryAttribute: row.attributeName,
+      ...(!referencedByTemplate(row) ? { unscopedDictionaryField: true } : {}),
       description: `Value for "${row.attributeName}" must match the SmartCOMM payload (via Data Dictionary Xpath)`,
       type: matchedCheck ? 'fieldValueMatch' : 'requiredText',
       expectedValue: datePart ? datePart.value : String(result.value),

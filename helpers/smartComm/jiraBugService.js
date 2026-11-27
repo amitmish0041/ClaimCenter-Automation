@@ -98,6 +98,11 @@ async function loadKnownBugs({ log = () => {} } = {}) {
   log(`[Jira] using the Jira login from ${cfg.from}`);
   try {
     const bugs = await searchJql(cfg, 'project = SMART AND issuetype = Bug ORDER BY key DESC', ['summary', 'status', 'description']);
+    // GCCM bugs about SmartCOMM templates too (user direction 2026-11-27: map SMART and GCCM defects). Only those that
+    // name a DIG are kept below; matching needs the template.
+    const gccm = await searchJql(cfg, 'project = GCCM AND issuetype = Bug AND (text ~ "DIG" OR text ~ "SmartCOMM") ORDER BY key DESC', ['summary', 'status', 'description'])
+      .catch((e) => { log(`[Jira] GCCM bugs not loaded (${e.message})`); return []; });
+    bugs.push(...gccm.filter((b) => digsIn(`${b.fields.summary || ''} ${adfToText(b.fields.description).slice(0, 400)}`).length));
     const stories = await searchJql(cfg, 'project = SMART AND issuetype = Story AND summary ~ "Test_Execution"', ['summary', 'issuelinks']);
     const linkedDigs = new Map(); // bug key -> Set of DIGs whose Test_Execution story links to it
     for (const s of stories) {
@@ -116,7 +121,7 @@ async function loadKnownBugs({ log = () => {} } = {}) {
       return { key: b.key, status, open: OPEN(status), summary: b.fields.summary || '', text, digs };
     });
     cache = { available: true, bugs: list };
-    log(`[Jira] loaded ${list.length} SMART bug(s) (${list.filter((b) => b.open).length} open) for finding-to-bug mapping`);
+    log(`[Jira] loaded ${list.length} SMART/GCCM bug(s) (${list.filter((b) => b.open).length} open) for finding-to-bug mapping`);
   } catch (err) {
     cache = { available: false, reason: err.message, bugs: [] };
     log(`[Jira] couldn't load SMART bugs (${err.message}) — findings won't be mapped to existing bugs this run`);

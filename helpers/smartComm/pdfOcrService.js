@@ -83,4 +83,15 @@ function ocrContainsInOrder(ocrText, expected) {
   return false;
 }
 
-module.exports = { ocrPdfText, ocrContains, ocrContainsInOrder };
+// A mapping-doc line that joins side-by-side columns with tabs ("Do you have any othertheft insurance?\t\tYes\t\tNo",
+// the Spanish DIG150MIS two-column page): OCR reads each column as its own line, so the joined phrase is never found.
+// Passes when every column segment is printed on its own (OCR or text layer; letters/digits in order, look-alikes
+// folded, spaces ignored). A real wording difference inside a segment still fails. Ranjith's 2026-11-25 run.
+function ocrContainsSegments(ocrText, expected, textLayer = '') {
+  const segs = String(expected || '').split(/\t+/).map((s) => s.replace(/_{2,}/g, ' ').trim()).filter((s) => fold(s).length >= 2);
+  if (segs.length < 2) return false;
+  const hay = fold(ocrText) + '|' + fold(textLayer);
+  return segs.every((s) => hay.includes(fold(s)));
+}
+
+module.exports = { ocrPdfText, ocrContains, ocrContainsInOrder, ocrContainsSegments };

@@ -88,6 +88,7 @@ const tbl = (head, rows) => new D.Table({ width: { size: 100, type: D.WidthType.
   kids.push(H('Open items'),
     P('• Claims/Legal SME to confirm the expected answers and the suggested verdicts.'),
     P('• States run with a manually set filter had no open Commercial Auto claim in the scout. Re-run them on a real claim once the claim scout finds or creates one, so the claim-context check (FE-RC-001) is covered.'),
+    P('• Claim context defect: on CA-OH-04-08-0053508 ProNav set the state to North Carolina, and on CA-IN-04-15-0520105 it left Region blank. In both cases ProNav would not answer ("Select an option from each filter"). OH and IN were re-run on the PA claim with a manual state filter. Check the loss location and policy state on those claims, then raise a defect if they are Ohio and Indiana.'),
     P('• Business decision: should ProNav answer questions about another state while the claim is in a different state?'),
     P('• KMS hygiene for Donegal: duplicate entries, the "ME Example" chart tagged Maryland, and underwriting guides tagged Commercial Automobile.'),
     H('Evidence'),

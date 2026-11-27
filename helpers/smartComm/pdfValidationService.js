@@ -948,6 +948,28 @@ function evaluateRequirements(requirements, text, context) {
     if (code && new RegExp(`(^|[^A-Za-z])${code}(?![A-Za-z])`).test(haystack)) {
       res = { expected: req.expectedValue, actual: code, result: 'PASS', reason: `Printed as the state's code "${code}".` };
     }
+    // Fixed wording that carries the mapping doc's SAMPLE claim number glued to its label ("Claim NumberCA-PA-01-18-0733193",
+    // DIG102 2026-11-25): the label is the fixed part; the number is the sample claim, which the real claim replaces.
+    const CLAIM_NO = /[A-Z]{2}-[A-Z]{2}-\d{2}-\d{2}-\d{7}/;
+    if (res.result === 'FAIL' && /^R\d/.test(req.id || '') && CLAIM_NO.test(String(req.expectedValue || ''))) {
+      const label = normalizeWs(String(req.expectedValue).replace(CLAIM_NO, ' ')).trim();
+      if (label.length >= 4 && normalizeWs(haystack).toLowerCase().includes(label.toLowerCase())) {
+        res = { expected: req.expectedValue, actual: label, result: 'PASS', reason: `The label "${label}" prints; the claim number next to it in the mapping doc is its sample claim, replaced by this claim's own number.` };
+      }
+    }
+    // A form-ID footer that names ANOTHER template ("DIG 49DE" / "DIG 15" in DIG193's mapping doc, which reuses pages of
+    // those forms; Ranjith's 2026-11-25 run): the document correctly prints its own ID. Still a FAIL when its own ID is missing.
+    const own = String((context && context.digNumber) || '').replace(/^DIG/i, '');
+    if (res.result === 'FAIL' && own && /^R\d/.test(req.id || '') && /^DIG\s*\d+[A-Z]*$/i.test(normalizeWs(req.expectedValue || '').trim())
+      && new RegExp(`DIG\\s*${own}(?![0-9A-Z])`, 'i').test(haystack)) {
+      res = { expected: req.expectedValue, actual: `DIG ${own}`, result: 'PASS', reason: `The mapping doc's footer "${req.expectedValue}" is another template's ID (a page copied from that form); this document prints its own ID "DIG ${own}".` };
+    }
+    // A Data Dictionary value checked on a form with no field list of its own (no mapping doc, or a scanned one): the
+    // dictionary lists every field for the DIG, not which ones the form prints, so "not found" can't be called a defect
+    // (Ranjith's 2026-11-25 run: DIG105/143/150MI/150PA failed From Name, From Email, Policy Number… on blank forms).
+    if (res.result === 'FAIL' && req.unscopedDictionaryField && /^Not Found$/i.test(String(res.actual || ''))) {
+      res = { ...res, result: 'BLOCKED', reason: `Not printed on this form. This template has no mapping-doc field list, so the check can't tell whether "${req.dictionaryAttribute || 'this field'}" belongs on it: the Data Dictionary lists every field for the DIG. Confirm against the template, or add its mapping doc.` };
+    }
     return { id: req.id, description: req.description, docOrder: req.docOrder, ...res };
   });
 }

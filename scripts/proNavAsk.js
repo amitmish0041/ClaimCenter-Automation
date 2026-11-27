@@ -112,20 +112,27 @@ async function runSet(page, setName, opts) {
   const retried = new Set();
   const res = { claim, set: setName, state: set.stateName, at: new Date().toISOString(), contextFilters: await filters(fr), answers: [] };
   res.mode = own ? 'claim context' : `manual filter (no open ${st} Commercial Auto claim found; PA claim used)`;
-  if (!own && set.stateName) res.filtersAfterSwitch = await setStateFilter(page, fr, set.stateName);
+  // 2026-11-25: OH/IN claims gave the wrong/blank state chip ("North..." / "Region*") so ProNav refused to answer.
+  let manual = !own;
+  if (own && set.stateName && !res.contextFilters.some((t) => t.toLowerCase().startsWith(set.stateName.slice(0, 5).toLowerCase()))) {
+    res.contextMismatch = `claim context set ${res.contextFilters.join(' | ')}, not ${set.stateName}`;
+    res.mode = `manual filter (claim context did not set ${set.stateName}: ${res.contextFilters.join(' | ')})`;
+    manual = true;
+  }
+  if (manual && set.stateName) res.filtersAfterSwitch = await setStateFilter(page, fr, set.stateName);
   console.log(`[ProNav] ${setName} on ${claim}: ${res.mode}; filters ${res.contextFilters.join(' | ')}${res.filtersAfterSwitch ? ` -> ${res.filtersAfterSwitch.join(' | ')}` : ''}`);
   for (let i = 0; i < set.questions.length; i++) {
     const q = set.questions[i];
     if (opts.only && !opts.only.includes(i + 1)) continue;
     try {
-      const a = await ask(page, fr, q.q, own ? null : set.stateName);
+      const a = await ask(page, fr, q.q, manual ? set.stateName : null);
       const idx = a.text.lastIndexOf(q.q.slice(0, 40));
       const answer = (idx >= 0 ? a.text.slice(idx + q.q.length) : a.text).trim();
       // Filter tags shown above the question in the thread (e.g. "Automobile", "Pennsylvania").
       const tags = idx >= 0 ? a.text.slice(0, idx).trim().split('\n').map((x) => x.trim()).filter(Boolean).slice(-2) : [];
       await page.screenshot({ path: path.join(out, `q${i + 1}.png`) });
       res.answers.push({ n: i + 1, ...q, cite: String(q.cite || ''), must: (q.must || []).map(String), mustNot: (q.mustNot || []).map(String), appliedTags: tags, answer, links: a.links });
-      if (!own && set.stateName && !tags.some((t) => t === set.stateName)) res.answers[res.answers.length - 1].filterWarning = `answer tagged ${tags.join('/')} not ${set.stateName}`;
+      if (manual && set.stateName && !tags.some((t) => t === set.stateName)) res.answers[res.answers.length - 1].filterWarning = `answer tagged ${tags.join('/')} not ${set.stateName}`;
       console.log(`[ProNav] ${setName} q${i + 1}: ${answer.length} chars, tags ${tags.join('/')}`);
     } catch (e) {
       // Stuck panel (click/fill timeouts, 2026-11-25): reopen the claim + panel and retry the question once.
