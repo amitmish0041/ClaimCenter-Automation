@@ -26,7 +26,9 @@ module.exports = (api) => {
     'Check whose payee rejected it on the OneInc payee portal — OneInc returns the reject reason as ClaimsPay Comments.' + RO);
 
   // 1013 UIF.084 — Account Number on a Direct Deposit check.
-  add('GCCM-1013/UIF/TC-016', 'PAYEE_DD', [OIC('1.71')], [V('Confirmed Payment Method', { value: /direct deposit/i }), V('Account Number', { value: /\S/ })],
+  // QA's updated plan 2026-11-27: QA's claim PA-PA-01-26-0749434, newest OneInc payment; Account Number is read on Additional
+  // Payment Details (visible when Check.ExtClaimsPayAcctNumLast4 != null).
+  add('GCCM-1013/UIF/TC-016', 'PAYEE_DD_QA', [pc('oneIncCheck', { method: 'direct|ach|bank' })], [V('Confirmed Payment Method', { value: /direct deposit/i }), op('openAPD'), V('Account Number', { value: /\S/ })],
     'Payee accepted the $1.71 payment as Direct Deposit (bank account) on the OneInc payee portal. OneInc HOLDS the account (portal 2026-11-12: Payment Method Last 4 3298, JPMORGAN CHASE BANK, Personal_Checking) — a blank Account Number in ClaimCenter is a ClaimCenter-side (feedback mapping) defect.' + RO);
 
   // 1013 UIF.089 / UIF.081 — print date / tracking number come back from OneInc once the mailed check is printed / shipped.

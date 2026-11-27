@@ -182,7 +182,8 @@ module.exports = (api) => {
   const SUPP_NOTE = 'The Financials Escalation batch is run (Server Tools, admin login) so the checks move to Requesting before the Workplan is read. On a first-party vehicle (non-medical) line: a $1.37 Final Payment closes the reserve, then a $1.38 Supplemental Payment is submitted on it (Finish both times); the Workplan is read afterwards. Needs a user whose payments are not held for approval (the activities are created when the check moves to Requesting).';
   add('GCCM-1013/VBR/TC-042', 'AUTO_PA', SUPP, [op('escalateChecks', '1.38'), op('workplan'), V('Workplan activities', { value: /^(?![\s\S]*(Collect Deductible|Deductible Collected\?))/i })],
     SUPP_NOTE + ' The policy carries none of the listed deductible endorsements, so no "Collect Deductible" / "Deductible Collected?" activity may appear.');
-  add('GCCM-1013/VBR/TC-043', 'AUTO_PA', SUPP, [op('escalateChecks', '1.38'), op('workplan'), V('Workplan activities', { value: /Supplemental Issued on Closed File/i })], SUPP_NOTE + ' Expects the sp_closed activity "Supplemental Issued on Closed File".');
+  // QA's updated plan (2026-11-27, Narmatha): on a non-medical, non-WC line the sp_closed activity must NOT be created.
+  add('GCCM-1013/VBR/TC-043', 'AUTO_PA', SUPP, [op('escalateChecks', '1.38'), op('workplan'), V('Workplan activities', { value: /^(?![sS]*Supplemental Issued on Closed File)/i })], SUPP_NOTE + ' The line is neither a medical coverage nor WC Medical Details, so the sp_closed activity "Supplemental Issued on Closed File" must NOT appear (QA updated plan 2026-11-27).');
 
   // ── WC lost wages (WCA_LW) ───────────────────────────────────────────────────────────────────────────────────
   const BASE_EXPO = { 'Average Weekly Wage': '800.00', 'Disability Weekly Rate': '500.00', 'Disability Type': 'TTD', 'Benefit Offset Code': 'None', 'Reason TTD or TPD Ended': '<none>' };
