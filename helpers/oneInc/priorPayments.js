@@ -95,18 +95,33 @@ async function pay(page, { via = 'quick', txn = 'Partial Payment', amount = odd(
   return { amount, status: row ? row.status : 'not listed' };
 }
 
-// Polls the claim's check of `amount` until its status matches `re` (runs the Financials Escalation batch once if it sits
-// "Awaiting submission"). Returns the last status; BLOCKED after `minutes`.
+// Polls the claim's check of `amount` until its status matches `re`. While it sits "Awaiting submission" the Financials
+// Escalation batch is run, up to 3 times 4 min apart (a batch run right after the check is made can miss it; a failed run
+// used to be swallowed — 2026-11-27). Between polls the claim is re-opened: a page reload on Cloud can land off the claim
+// ("left-nav item for checks is not on the claim", 1008 APD TC-011 2026-11-27). Returns the last status; BLOCKED after `minutes`.
 async function waitStatus(page, amount, re, minutes = 15, what = 'check') {
+  const claim = (/\b[A-Z]{2,4}-[A-Z]{2}-\d{2}-\d{2}-\d{7}\b/.exec(await page.locator('body').innerText().catch(() => '')) || [])[0];
+  const rows = async () => {
+    try { return await K.checkRows(page); } catch (e) {
+      if (!claim) throw e;
+      await W.openClaim(page, claim);
+      return K.checkRows(page);
+    }
+  };
   let row;
-  let escalated = false;
+  let escalations = 0;
+  let lastEscalation = 0;
   for (const end = Date.now() + minutes * 60000; ;) {
-    row = (await K.checkRows(page)).filter((r) => amt(r.amount) === amt(amount)).slice(-1)[0];
+    row = (await rows()).filter((r) => amt(r.amount) === amt(amount)).slice(-1)[0];
     if (row && re.test(row.status)) return row.status;
     if (Date.now() > end) break;
-    if (row && /Awaiting submission/i.test(row.status) && !escalated) { escalated = true; await K.escalateChecks(page, amount).catch(() => {}); continue; }
+    if (row && /Awaiting submission/i.test(row.status) && escalations < 3 && Date.now() - lastEscalation > 4 * 60000) {
+      escalations++; lastEscalation = Date.now();
+      console.log(`[OneInc] escalation ${escalations}: ${await K.escalateChecks(page, amount).catch((e) => `failed — ${e.message.split('\n')[0]}`)}`);
+      continue;
+    }
     await page.waitForTimeout(30000);
-    await page.reload().catch(() => {});
+    if (claim) await W.openClaim(page, claim).catch(() => {}); else await page.reload().catch(() => {});
   }
   throw new W.Blocked(`the $${amt(amount)} ${what} made as test data is "${row ? row.status : 'not listed'}" after ${minutes} min, not /${re.source}/ (OneInc has not answered yet)`);
 }
